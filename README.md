@@ -46,9 +46,8 @@ NevolutionXposed 是一个 Android Xposed 模块，旨在为微信等应用提�
    - 打开 LSPosed Manager
    - 启用 NevolutionXposed 模块
    - 设置作用域：
-     - `com.android.systemui` — 通知拦截
-     - `com.tencent.mm` — 微信通知增强
-     - `com.oasisfeng.nevo` — Nevolution 引擎
+     - `com.android.systemui` — 系统UI
+     - `com.tencent.mm` — 微信
 
 4. **重启微信**
    ```bash
