@@ -1,0 +1,86 @@
+buildscript {
+	ext.gradle_version = '8.7.3'
+	ext.kotlin_version = '1.9.24'
+
+	repositories {
+		google()
+		mavenCentral()
+		maven { url "https://api.xposed.info/" }
+	}
+
+	dependencies {
+		classpath "com.android.tools.build:gradle:$gradle_version"
+		classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+	}
+}
+
+repositories {
+	google()
+	mavenCentral()
+	maven { url "https://api.xposed.info/" }
+}
+
+if (! project.plugins.hasPlugin("com.android.feature")) apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+
+android {
+	namespace 'com.oasisfeng.nevo.xposed'
+	compileSdk 34
+
+	defaultConfig {
+		minSdk 26
+		targetSdk 34
+		versionCode 1
+		versionName "1.1"
+		testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+	}
+
+	compileOptions {
+		sourceCompatibility JavaVersion.VERSION_17
+		targetCompatibility JavaVersion.VERSION_17
+	}
+
+	kotlinOptions {
+		jvmTarget = '17'
+	}
+
+	buildFeatures {
+		buildConfig = true
+	}
+
+	signingConfigs {
+		release {
+			try {
+				storeFile file(RELEASE_STORE_FILE)
+				storePassword RELEASE_STORE_PASSWORD
+				keyAlias RELEASE_KEY_ALIAS
+				keyPassword RELEASE_KEY_PASSWORD
+			} catch (Exception e) {
+				logger.warn('Signing config not available: ' + e.getMessage())
+			}
+		}
+	}
+
+	buildTypes {
+		release {
+			signingConfig signingConfigs.release
+		}
+		debug {
+			debuggable true
+			minifyEnabled false
+		}
+	}
+
+	sourceSets {
+		main.java.srcDirs += 'src/main/kotlin'
+	}
+}
+
+dependencies {
+	compileOnly 'de.robv.android.xposed:api:82'
+	compileOnly 'de.robv.android.xposed:api:82:sources'
+	implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
+	implementation 'androidx.core:core:1.12.0'
+	implementation 'androidx.annotation:annotation:1.7.1'
+	implementation 'androidx.palette:palette:1.0.0'
+}

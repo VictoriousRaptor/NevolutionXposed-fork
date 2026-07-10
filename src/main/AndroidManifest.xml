@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+	>
+
+	<application
+		android:allowBackup="true"
+		android:icon="@mipmap/ic_launcher"
+		android:label="@string/app_name"
+		android:roundIcon="@mipmap/ic_launcher_round"
+		android:supportsRtl="true"
+		android:theme="@style/AppTheme">
+		<meta-data
+			android:name="xposedmodule"
+			android:value="true" />
+		<meta-data
+			android:name="xposeddescription"
+			android:value="通过xposed实现nevolution，希望可以解决持续性通知无法修改、微信通知替换有延迟和某些系统下服务不够稳定（被杀）的问题" />
+		<meta-data
+			android:name="xposedminversion"
+			android:value="54" />
+
+	</application>
+
+</manifest>
