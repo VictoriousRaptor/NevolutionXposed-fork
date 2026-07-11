@@ -145,4 +145,4 @@ Apache License 2.0
 - [NevolutionXposed](https://github.com/notxx/NevolutionXposed) — 原版模块
 - [galaxywatch-wechat](https://github.com/shentam/galaxywatch-wechat) — 灵感来源
 - [LSPosed](https://github.com/LSPosed/LSPosed) — Xposed 框架
-- [Claude AI](https://claude.ai) — AI 辅助开发
+- [Claude AI](https://claude.ai) （mimo-v2.5-pro）— AI 辅助开发
