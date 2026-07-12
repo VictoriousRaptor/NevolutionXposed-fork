@@ -25,6 +25,7 @@ import android.util.Log;
 import android.util.LongSparseArray;
 
 import com.oasisfeng.nevo.decorators.wechat.ConversationManager.Conversation;
+import com.oasisfeng.nevo.xposed.MainHook;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -583,12 +584,17 @@ class MessagingBuilder {
 		if (reply_text == null) return;
 		Log.d(TAG, "Synthetic reply: " + reply_text + " for id=" + notif_id);
 		try {
+			// 直接调用 MMAutoMessageReplyReceiver.onReceive，绕过广播系统
 			final Intent reply_intent = new Intent("com.tencent.mm.permission.MM_AUTO_REPLY_MESSAGE");
 			reply_intent.setPackage("com.tencent.mm");
 			reply_intent.putExtra("reply_content", reply_text);
 			reply_intent.putExtra("notification_id", notif_id);
-		Log.d(TAG, "Sending broadcast to WeChat: " + reply_intent);
-			context.sendBroadcast(reply_intent);
+			// 设置 RemoteInput 结果
+			final Bundle remoteInputResults = new Bundle();
+			remoteInputResults.putCharSequence("key_voice_reply_text", reply_text);
+			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder("key_voice_reply_text").build() }, reply_intent, remoteInputResults);
+			Log.d(TAG, "Directly invoking MMAutoMessageReplyReceiver with reply: " + reply_text);
+			MainHook.invokeMMAutoReply(context, reply_intent);
 		} catch (final Exception e) {
 			Log.w(TAG, "Auto-reply API failed: " + e.getMessage());
 		}

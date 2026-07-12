@@ -50,6 +50,13 @@ public class MainHook implements IXposedHookLoadPackage {
 	private final NevoDecoratorService miui = new com.oasisfeng.nevo.decorators.MIUIDecorator();
 	private final NevoDecoratorService media = new com.oasisfeng.nevo.decorators.media.MediaDecorator();
 
+	private static Class<?> sMMAutoMessageReplyReceiverClass = null;
+	private static String pendingReplyText = null;
+
+	public static void setPendingReplyText(String text) {
+		pendingReplyText = text;
+	}
+
 	private static void inspect(XC_LoadPackage.LoadPackageParam loadPackageParam, String className, String... methods) {
 		try {
 			final Class<?> clazz = XposedHelpers.findClass(className, loadPackageParam.classLoader);
@@ -406,6 +413,7 @@ public class MainHook implements IXposedHookLoadPackage {
 	private void hookAutoReplyReceiver(XC_LoadPackage.LoadPackageParam loadPackageParam) {
 		try {
 			final Class<?> receiverClass = XposedHelpers.findClass("com.tencent.mm.plugin.auto.service.MMAutoMessageReplyReceiver", loadPackageParam.classLoader);
+			sMMAutoMessageReplyReceiverClass = receiverClass;
 			XposedBridge.log("hookAutoReplyReceiver: found class " + receiverClass);
 			// Hook onReceive and trace ALL method calls from within
 			final ClassLoader finalCl = loadPackageParam.classLoader;
@@ -481,6 +489,40 @@ public class MainHook implements IXposedHookLoadPackage {
 		}
 	}
 
+	public static void invokeMMAutoReply(android.content.Context context, android.content.Intent intent) {
+		if (sMMAutoMessageReplyReceiverClass == null) {
+			Log.w(TAG, "MMAutoMessageReplyReceiver not hooked yet");
+			return;
+		}
+		try {
+			// 设置 pendingReplyText 供 RemoteInput.getResultsFromIntent hook 使用
+			String replyText = intent.getStringExtra("reply_content");
+			if (replyText != null) {
+				pendingReplyText = replyText;
+				Log.d(TAG, "Set pendingReplyText: " + replyText);
+
+				// 使用 RemoteInput.addResultsToIntent 设置回复文本
+				android.app.RemoteInput[] remoteInputs = new android.app.RemoteInput[]{
+					new android.app.RemoteInput.Builder("key_voice_reply_text")
+						.setAllowFreeFormInput(true)
+						.build()
+				};
+				android.os.Bundle remoteInputResults = new android.os.Bundle();
+				remoteInputResults.putCharSequence("key_voice_reply_text", replyText);
+				android.app.RemoteInput.addResultsToIntent(remoteInputs, intent, remoteInputResults);
+				Log.d(TAG, "Added RemoteInput results to intent");
+			}
+
+			// 直接调用 onReceive
+			Object instance = sMMAutoMessageReplyReceiverClass.newInstance();
+			java.lang.reflect.Method onReceive = sMMAutoMessageReplyReceiverClass.getMethod("onReceive", android.content.Context.class, android.content.Intent.class);
+			onReceive.invoke(instance, context, intent);
+			Log.d(TAG, "Directly invoked MMAutoMessageReplyReceiver.onReceive");
+		} catch (Exception e) {
+			Log.w(TAG, "Failed to invoke MMAutoMessageReplyReceiver: " + e.getMessage());
+		}
+	}
+
 	private void hookEngine(XC_LoadPackage.LoadPackageParam loadPackageParam) {
 		XposedBridge.log("hookEngine: hooking Nevolution engine");
 		try {
@@ -505,13 +547,7 @@ public class MainHook implements IXposedHookLoadPackage {
 		}
 	}
 
-	private static String pendingReplyText = null;
-
 	private boolean carModeBypassHooked = false;
-
-	public static void setPendingReplyText(String text) {
-		pendingReplyText = text;
-	}
 
 	private void hookCarModeBypass(ClassLoader cl) {
 		if (carModeBypassHooked) return;
