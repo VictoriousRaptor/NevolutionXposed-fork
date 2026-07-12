@@ -200,6 +200,10 @@ public abstract class NevoDecoratorService {
 			mNLS = nls;
 		}
 
+		public static NotificationListenerService getNLS() {
+			return mNLS;
+		}
+
 		private static final LruCache<String, LinkedList<StatusBarNotification>> cache = new LruCache<String, LinkedList<StatusBarNotification>>(100) {
 			protected int sizeOf(String key, LinkedList<StatusBarNotification> value) {
 				return value != null ? value.size() : 0;

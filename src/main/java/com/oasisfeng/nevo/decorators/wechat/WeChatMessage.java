@@ -138,7 +138,7 @@ class WeChatMessage {
 
 	static int guessConversationType(final Conversation conversation) {
 		final CharSequence content = conversation.summary;
-		final String ticker = conversation.ticker.toString().trim();	// Ticker text (may contain trailing spaces) always starts with sender (same as title for direct message, but not for group chat).
+		final String ticker = conversation.ticker != null ? conversation.ticker.toString().trim() : "";	// Ticker text (may contain trailing spaces) always starts with sender (same as title for direct message, but not for group chat).
 		final CharSequence title = conversation.title;
 		return guessConversationType(content, ticker, title);
 	}
