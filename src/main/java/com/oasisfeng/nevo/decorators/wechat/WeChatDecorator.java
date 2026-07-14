@@ -103,6 +103,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 
 	private static final @ColorInt int PRIMARY_COLOR = 0xFF33B332;
 	private static final @ColorInt int LIGHT_COLOR = 0xFF00FF00;
+
+	// 记录最近一次通话类型（从 id=41 通知获取）
+	private static volatile String sLastCallType = null;  // "语音通话" 或 "视频通话"
+	private static volatile long sLastCallTime = 0;
 	static final String ACTION_SETTINGS_CHANGED = "SETTINGS_CHANGED";
 	static final String ACTION_DEBUG_NOTIFICATION = "DEBUG";
 	private static final String KEY_SILENT_REVIVAL = "nevo.wechat.revival";
@@ -289,6 +293,32 @@ public class WeChatDecorator extends NevoDecoratorService {
 		@Override public Decorating apply(NotificationManager nm, String tag, int id, Notification n) {
 			mWeChatTargetingO = isWeChatTargeting26OrAbove();
 			if (BuildConfig.DEBUG) Log.d(TAG, "apply tag " + tag + " id " + id);
+
+			// 排除通话通知（语音通话、视频通话）- 只排除通话状态通知，不排除普通消息
+			if (id == 40 || id == 41) {
+				final CharSequence textCheck = n.extras.getCharSequence(Notification.EXTRA_TEXT);
+				if (textCheck != null) {
+					final String textStr = textCheck.toString();
+					// 记录通话类型（从 id=41 的邀请通知获取）
+					if (id == 41 && textStr.contains("邀请你")) {
+						if (textStr.contains("视频通话")) {
+							sLastCallType = "视频通话";
+							sLastCallTime = System.currentTimeMillis();
+							Log.d(TAG, "Detected video call invitation");
+						} else if (textStr.contains("语音通话")) {
+							sLastCallType = "语音通话";
+							sLastCallTime = System.currentTimeMillis();
+							Log.d(TAG, "Detected voice call invitation");
+						}
+					}
+					if (textStr.contains("邀请你") || textStr.contains("通话中") ||
+						textStr.contains("calling") || textStr.contains("Voice call") || textStr.contains("Video call")) {
+						Log.d(TAG, "Skipping voice/video call notification: " + textStr);
+						return Decorating.Unprocessed;
+					}
+				}
+			}
+
 			cache(id, n);
 
 			// Log.d(TAG, "deleteIntent " + n.deleteIntent);
@@ -322,6 +352,17 @@ public class WeChatDecorator extends NevoDecoratorService {
 					n.number = Integer.parseInt(content.substring(1, end - 1));
 					if (BuildConfig.DEBUG) Log.d(TAG, "n.number " + n.number);
 					content = content.substring(end + 1);
+				}
+			}
+			// 修正通话类型：微信 CarExtender 总是发送 [语音通话]，需要根据 id=41 通知修正为 [视频通话]
+			if (content != null && content.contains("[语音通话]") && sLastCallType != null) {
+				final long timeDiff = System.currentTimeMillis() - sLastCallTime;
+				if (timeDiff < 30000) {  // 30秒内的通话通知有效
+					if ("视频通话".equals(sLastCallType)) {
+						content = content.replace("[语音通话]", "[视频通话]");
+						extras.putCharSequence(Notification.EXTRA_TEXT, content);
+						Log.d(TAG, "Corrected call type to video: " + content);
+					}
 				}
 			}
 			// 撤回...

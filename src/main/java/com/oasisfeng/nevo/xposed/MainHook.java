@@ -494,6 +494,23 @@ public class MainHook implements IXposedHookLoadPackage {
 			Log.w(TAG, "MMAutoMessageReplyReceiver not hooked yet");
 			return;
 		}
+		// 在调用前先 hook car mode bypass（关键！）
+		try {
+			Class<?> autoLogicClass = XposedHelpers.findClass("rn1.a", context.getClassLoader());
+			XposedHelpers.findAndHookMethod(autoLogicClass, "f", new XC_MethodHook() {
+				@Override
+				protected void beforeHookedMethod(MethodHookParam param) { param.setResult(true); }
+			});
+			XposedHelpers.findAndHookMethod(autoLogicClass, "g", new XC_MethodHook() {
+				@Override
+				protected void beforeHookedMethod(MethodHookParam param) { param.setResult(true); }
+			});
+			XposedHelpers.findAndHookMethod(autoLogicClass, "c", new XC_MethodHook() {
+				@Override
+				protected void beforeHookedMethod(MethodHookParam param) { param.setResult(true); }
+			});
+			Log.d(TAG, "Car mode bypass hooks activated in invokeMMAutoReply");
+		} catch (Throwable th) { /* hooks may already be added */ }
 		try {
 			// 设置 pendingReplyText 供 RemoteInput.getResultsFromIntent hook 使用
 			String replyText = intent.getStringExtra("reply_content");
@@ -578,6 +595,28 @@ public class MainHook implements IXposedHookLoadPackage {
 					XposedBridge.log("Bypassed rn1.a.c() -> true");
 				}
 			});
+			// Hook z2.s1.b() - 微信内部 RemoteInput 结果处理辅助类（关键！）
+			try {
+				final Class<?> remoteInputHelper = XposedHelpers.findClass("z2.s1", cl);
+				XposedBridge.log("hookCarModeBypass: found z2.s1 class");
+				XposedHelpers.findAndHookMethod(remoteInputHelper, "b", android.content.Intent.class, new XC_MethodHook() {
+					@Override
+					protected void afterHookedMethod(MethodHookParam param) {
+						android.os.Bundle result = (android.os.Bundle) param.getResult();
+						XposedBridge.log("z2.s1.b() returned: " + result);
+						if (result == null && pendingReplyText != null) {
+							result = new android.os.Bundle();
+							result.putCharSequence("key_voice_reply_text", pendingReplyText);
+							param.setResult(result);
+							XposedBridge.log("Injected z2.s1.b() with key_voice_reply_text=" + pendingReplyText);
+							pendingReplyText = null;
+						}
+					}
+				});
+				XposedBridge.log("hookCarModeBypass: z2.s1.b() hook added");
+			} catch (Throwable e) {
+				XposedBridge.log("hookCarModeBypass: z2.s1 not found, trying alternative: " + e.getMessage());
+			}
 			// Hook RemoteInput.getResultsFromIntent to return synthetic results
 			try {
 				XposedHelpers.findAndHookMethod(android.app.RemoteInput.class, "getResultsFromIntent", android.content.Intent.class, new XC_MethodHook() {
