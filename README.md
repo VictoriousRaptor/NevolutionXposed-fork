@@ -10,6 +10,7 @@ NevolutionXposed 是一个 Android Xposed 模块，旨在为微信等应用提�
 
 - **[NevolutionXposed](https://github.com/notxx/NevolutionXposed)** — 原版 Nevolution Xposed 模块，提供微信通知增强功能
 - **[galaxywatch-wechat](https://github.com/shentam/galaxywatch-wechat)** — Galaxy Watch 微信回复实现，启发了通知栏回复的思路
+- **[女娲石Xposed](https://github.com/notxx/NevolutionXposed)** — 女娲石源码参考，提供了通知解析和消息显示的核心逻辑
 
 ### 核心功能
 
@@ -18,6 +19,9 @@ NevolutionXposed 是一个 Android Xposed 模块，旨在为微信等应用提�
 - ✅ **媒体通知美化** — Android O 样式媒体通知
 - ✅ **Car Mode 绕过** — 绕过微信车载模式检查
 - ✅ **RemoteInput 注入** — 注入回复文本到微信接收器
+- ✅ **通话通知排除** — 语音/视频通话通知不被修改
+- ✅ **通话类型识别** — 自动识别并修正语音/视频通话类型
+- ✅ **消息发送者验证** — 双层验证确保消息归属正确
 
 ## 🚀 使用教程
 
@@ -86,6 +90,9 @@ adb install build/outputs/apk/debug/NevolutionXposed-debug.apk
 2. **Car Mode 绕过** — Hook `rn1.a` 类的 `f()/g()/c()` 方法
 3. **RemoteInput 注入** — Hook `RemoteInput.getResultsFromIntent()` 注入回复文本
 4. **自动回复** — 通过 `MMAutoMessageReplyReceiver` 发送消息
+5. **z2.s1 Hook** — 微信内部 RemoteInput 结果处理辅助类
+6. **通话通知排除** — 自动识别并排除语音/视频通话通知
+7. **双层消息验证** — 确保消息发送者识别准确
 
 ### 关键代码
 
@@ -122,15 +129,38 @@ NevolutionXposed/
 └── build.gradle                  # 构建配置
 ```
 
+## 📋 版本更新
+
+### v2.0.1 (2026-07-14)
+
+- ✅ **修复消息发送** — 通过 z2.s1 hook 确保消息真正发送到微信
+- ✅ **修复通知显示** — 用户回复正确显示在通知栏
+- ✅ **修复发送者识别** — 双层验证确保朋友消息不被误认为自己发的
+- ✅ **通话通知排除** — 语音/视频通话通知不被模块修改
+- ✅ **通话类型识别** — 自动识别并修正语音/视频通话类型
+- ✅ **通话记录显示** — 语音/视频通话记录正常显示
+- ✅ **回复显示优化** — 自己发的消息显示为"我"
+
+### v2.0.0 (2026-07-14)
+
+- ✅ **微信通知栏直接回复** — 支持微信 8.0.76
+- ✅ **MIUI 推送图标修复** — 小米推送通知图标替换
+- ✅ **媒体通知美化** — Android O 样式媒体通知
+- ✅ **Car Mode 绕过** — 绕过微信车载模式检查
+- ✅ **RemoteInput 注入** — 注入回复文本到微信接收器
+
 ## 📋 已知问题
 
 | 问题 | 状态 | 说明 |
 |------|------|------|
 | 回复按钮不显示 | ✅ 已修复 | 注入 RemoteInput action |
-| 消息发送失败 | ✅ 已修复 | Hook RemoteInput 结果 |
+| 消息发送失败 | ✅ 已修复 | Hook RemoteInput 结果 + z2.s1 hook |
 | Car mode 检查失败 | ✅ 已修复 | 绕过 rn1.a 检查 |
 | Context 为 null | ✅ 已修复 | Application.onCreate hook |
 | 回复按钮显示 r/t/b.xml | ✅ 已修复 | 硬编码默认值 |
+| 通话通知被修改 | ✅ 已修复 | 排除 id 40/41 通话通知 |
+| 通话类型识别错误 | ✅ 已修复 | 从 id 41 通知获取通话类型 |
+| 朋友消息显示为"我" | ✅ 已修复 | 双层验证逻辑 |
 
 ## 🤝 贡献
 
