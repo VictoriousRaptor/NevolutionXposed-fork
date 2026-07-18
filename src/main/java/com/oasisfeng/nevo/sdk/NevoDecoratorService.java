@@ -89,10 +89,18 @@ public abstract class NevoDecoratorService {
 		public static void setNM(NotificationManager nm) {
 			mNM = nm;
 		}
-	
-		private static final LruCache<Integer, LinkedList<Notification>> cache = new LruCache<Integer, LinkedList<Notification>>(100) {
+
+		// M2: 限制缓存大小，每个 key 最多缓存 MAX_NUM_ARCHIVED 条通知
+		private static final int MAX_CACHE_ENTRIES = 50;
+		private static final LruCache<Integer, LinkedList<Notification>> cache = new LruCache<Integer, LinkedList<Notification>>(MAX_CACHE_ENTRIES) {
 			protected int sizeOf(Integer key, LinkedList<Notification> value) {
-				return value != null ? value.size() : 0;
+				return value != null ? 1 : 0;
+			}
+
+			protected void entryRemoved(boolean evicted, Integer key, LinkedList<Notification> oldValue, LinkedList<Notification> newValue) {
+				if (evicted && oldValue != null) {
+					oldValue.clear();
+				}
 			}
 		};
 	
@@ -157,7 +165,13 @@ public abstract class NevoDecoratorService {
 		}
 	
 		public static void setActions(Notification n, Action... actions) {
-			XposedHelpers.setObjectField(n, "actions", actions);
+			try {
+				java.lang.reflect.Field field = Notification.class.getDeclaredField("actions");
+				field.setAccessible(true);
+				field.set(n, actions);
+			} catch (Exception e) {
+				XposedHelpers.setObjectField(n, "actions", actions);
+			}
 		}
 	
 		protected final String prefKey;
@@ -204,9 +218,17 @@ public abstract class NevoDecoratorService {
 			return mNLS;
 		}
 
-		private static final LruCache<String, LinkedList<StatusBarNotification>> cache = new LruCache<String, LinkedList<StatusBarNotification>>(100) {
+		// M2: 限制缓存大小
+		private static final int MAX_SBN_CACHE_ENTRIES = 50;
+		private static final LruCache<String, LinkedList<StatusBarNotification>> cache = new LruCache<String, LinkedList<StatusBarNotification>>(MAX_SBN_CACHE_ENTRIES) {
 			protected int sizeOf(String key, LinkedList<StatusBarNotification> value) {
-				return value != null ? value.size() : 0;
+				return value != null ? 1 : 0;
+			}
+
+			protected void entryRemoved(boolean evicted, String key, LinkedList<StatusBarNotification> oldValue, LinkedList<StatusBarNotification> newValue) {
+				if (evicted && oldValue != null) {
+					oldValue.clear();
+				}
 			}
 		};
 	

@@ -22,11 +22,15 @@ import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
 import android.util.ArrayMap;
 import android.util.Log;
+import java.util.Map;
 import android.util.LongSparseArray;
 
 import com.oasisfeng.nevo.decorators.wechat.ConversationManager.Conversation;
+import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.xposed.MainHook;
 
+import java.io.File;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
@@ -195,24 +199,57 @@ class MessagingBuilder {
 		final Message[] messages = WeChatMessage.buildFromCarConversation(conversation, convs, archive);
 		for (final Message message : messages) messaging.addMessage(message);
 
+		// 从 EXTRA_MESSAGES 保留之前的用户回复（关键！）
+		final Bundle[] existingMessages = n.extras.getParcelableArray(EXTRA_MESSAGES) != null ?
+			(Bundle[]) n.extras.getParcelableArray(EXTRA_MESSAGES) : null;
+		boolean hasUserReplyInMessages = false;
+		if (existingMessages != null) {
+			for (final Bundle msgBundle : existingMessages) {
+				final CharSequence msgText = msgBundle.getCharSequence(KEY_TEXT);
+				final long msgTimestamp = msgBundle.getLong(KEY_TIMESTAMP, 0);
+				final CharSequence msgSender = msgBundle.getCharSequence(KEY_SENDER);
+				// 只保留用户自己的回复（sender 为空字符串或 null 且时间戳较新）
+				if (msgText != null && (msgSender == null || msgSender.length() == 0)) {
+					Log.d(TAG, "Preserving user reply from EXTRA_MESSAGES: " + msgText);
+					messaging.addMessage(new Message(msgText, msgTimestamp, (Person) null));
+					hasUserReplyInMessages = true;
+				}
+			}
+		}
+
 		final PendingIntent on_read = convs.getReadPendingIntent();
 		if (on_read != null) mMarkReadPendingIntents.put(id, on_read);	// Mapped by evolved key,
 
 		final List<Action> actions = new ArrayList<>();
-		// 回复
+		// 回复：使用 RemoteInput 内联回复（修改版 HyperIsland 已保留 RemoteInput）
 		final RemoteInput remote_input;
 		if (SDK_INT >= N && on_reply != null && (remote_input = convs.getRemoteInput()) != null) {
 			final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
 			final PendingIntent proxy = proxyDirectReply(id, n, on_reply, remote_input, input_history, null);
 			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(remote_input.getResultKey()).addExtras(remote_input.getExtras())
 					.setAllowFreeFormInput(true);
-			final String participant = convs.getParticipant();	// No need to getParticipants() due to actually only one participant at most, see CarExtender.Builder().
+			final String participant = convs.getParticipant();
 			if (participant != null) reply_remote_input.setLabel(participant);
 
 			final Action.Builder reply_action = new Action.Builder(null, actionReply, proxy)
 					.addRemoteInput(reply_remote_input.build()).setAllowGeneratedReplies(true);
 			if (SDK_INT >= P) reply_action.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
 			actions.add(reply_action.build());
+		} else if (SDK_INT >= N && on_reply != null) {
+			// CarExtender 没有 RemoteInput，创建合成回复 Action
+			Log.d(TAG, "buildFromExtender: CarExtender has no RemoteInput, creating synthetic reply action");
+			final Intent replyIntent = new Intent(ACTION_SYNTHETIC_REPLY)
+					.setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null))
+					.setPackage(mContext.getPackageName());
+			final PendingIntent replyPendingIntent = PendingIntent.getBroadcast(mContext, id, replyIntent, pendingIntentFlags());
+			final RemoteInput.Builder remoteInputBuilder = new RemoteInput.Builder("synthetic_reply_result_key")
+					.setAllowFreeFormInput(true);
+			remoteInputBuilder.setLabel(actionReply);
+			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, replyPendingIntent)
+					.addRemoteInput(remoteInputBuilder.build())
+					.setAllowGeneratedReplies(true);
+			if (SDK_INT >= P) reply_action_builder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
+			actions.add(reply_action_builder.build());
 		}
 		// 放大
 		if (n.extras.containsKey(WeChatDecorator.EXTRA_PICTURE_PATH)) {
@@ -220,14 +257,20 @@ class MessagingBuilder {
 			final Action.Builder zoom_action = new Action.Builder(null, actionZoom, PendingIntent.getBroadcast(mContext, 0, intent.setPackage(mContext.getPackageName()), pendingIntentFlags()));
 			actions.add(zoom_action.build());
 		}
-		// 从 EXTRA_REMOTE_INPUT_HISTORY 补充用户回复
-		final CharSequence[] carInputHistory = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
-		if (carInputHistory != null && carInputHistory.length > 0) {
-			for (final CharSequence reply : carInputHistory) {
-				if (reply != null && reply.length() > 0) {
-					messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));
+		// 从 EXTRA_REMOTE_INPUT_HISTORY 补充用户回复（仅当 EXTRA_MESSAGES 中没有时）
+		if (!hasUserReplyInMessages) {
+			final CharSequence[] carInputHistory = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
+			Log.d(TAG, "buildFromExtender: EXTRA_REMOTE_INPUT_HISTORY=" + (carInputHistory != null ? carInputHistory.length + " items" : "null"));
+			if (carInputHistory != null && carInputHistory.length > 0) {
+				for (final CharSequence reply : carInputHistory) {
+					Log.d(TAG, "buildFromExtender: adding user reply: " + reply);
+					if (reply != null && reply.length() > 0) {
+						messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));
+					}
 				}
 			}
+		} else {
+			Log.d(TAG, "buildFromExtender: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
 		}
 
 		setActions(n, actions.toArray(new Action[actions.size()]));
@@ -326,6 +369,7 @@ class MessagingBuilder {
 		// 检查通知是否已有 EXTRA_MESSAGES（用户回复后重建时）
 		final Bundle[] existingMessages = n.extras.getParcelableArray(EXTRA_MESSAGES) != null ?
 			(Bundle[]) n.extras.getParcelableArray(EXTRA_MESSAGES) : null;
+		boolean hasUserReplyInMessages = false;
 
 		if (existingMessages != null && existingMessages.length > 0) {
 			// 使用已有的消息（包括用户回复）
@@ -337,6 +381,7 @@ class MessagingBuilder {
 					final Person person;
 					if (sender != null && sender.length() == 0) {
 						person = null;  // 自己发的消息（KEY_SENDER 为空字符串）
+						hasUserReplyInMessages = true;
 					} else if (sender != null && sender.length() > 0) {
 						// 有明确的发送者名称
 						if (conversation.isGroupChat()) {
@@ -375,13 +420,6 @@ class MessagingBuilder {
 
 		final List<Action> newActions = new ArrayList<>();
 		final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
-		final PendingIntent proxy = proxyDirectReply(id, n, onReply, replyRemoteInput, input_history, null);
-		final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(replyRemoteInput.getResultKey())
-				.addExtras(replyRemoteInput.getExtras()).setAllowFreeFormInput(true);
-		final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, proxy)
-				.addRemoteInput(reply_remote_input.build()).setAllowGeneratedReplies(true);
-		if (SDK_INT >= P) reply_action_builder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
-		newActions.add(reply_action_builder.build());
 
 		if (n.extras.containsKey(WeChatDecorator.EXTRA_PICTURE_PATH)) {
 			final Intent intent = new Intent(ACTION_ZOOM).setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null));
@@ -389,13 +427,26 @@ class MessagingBuilder {
 					PendingIntent.getBroadcast(mContext, 0, intent.setPackage(mContext.getPackageName()), pendingIntentFlags()));
 			newActions.add(zoom_action.build());
 		}
-		// 从 EXTRA_REMOTE_INPUT_HISTORY 获取用户回复并添加到 MessagingStyle
-		if (input_history != null && input_history.length > 0) {
+		// 从 EXTRA_REMOTE_INPUT_HISTORY 获取用户回复并添加到 MessagingStyle（仅当 EXTRA_MESSAGES 中没有时）
+		if (!hasUserReplyInMessages && input_history != null && input_history.length > 0) {
 			for (final CharSequence reply : input_history) {
 				if (reply != null && reply.length() > 0) {
 					messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));  // null person = 自己发的
 				}
 			}
+		} else if (hasUserReplyInMessages) {
+			Log.d(TAG, "buildFromActions: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
+		}
+
+		// 回复：使用 RemoteInput 内联回复（修改版 HyperIsland 已保留 RemoteInput）
+		if (onReply != null && replyRemoteInput != null) {
+			final PendingIntent proxy = proxyDirectReply(id, n, onReply, replyRemoteInput, input_history, null);
+			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(replyRemoteInput.getResultKey())
+					.addExtras(replyRemoteInput.getExtras()).setAllowFreeFormInput(true);
+			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, proxy)
+					.addRemoteInput(reply_remote_input.build()).setAllowGeneratedReplies(true);
+			if (SDK_INT >= P) reply_action_builder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
+			newActions.add(reply_action_builder.build());
 		}
 
 		setActions(n, newActions.toArray(new Action[0]));
@@ -422,8 +473,8 @@ class MessagingBuilder {
 		final Uri data = proxy_intent.getData(); final Bundle results = RemoteInput.getResultsFromIntent(proxy_intent);
 		final CharSequence input = results != null ? results.getCharSequence(result_key) : null;
 		if (data == null || reply_action == null || result_key == null || input == null) return;	// Should never happen
-		// 防止无限循环
-		final String replyKey = data.getSchemeSpecificPart() + ":" + input.hashCode();
+		// M3: 防止无限循环 — 使用 id:text 作为 key，避免 hashCode 碰撞
+		final String replyKey = data.getSchemeSpecificPart() + ":" + input.toString();
 		if (mPendingReplies.contains(replyKey)) return;
 		mPendingReplies.add(replyKey);
 		final CharSequence text;
@@ -437,6 +488,14 @@ class MessagingBuilder {
 		try {
 			final Intent input_data = addTargetPackageAndWakeUp(reply_action);
 			input_data.setClipData(proxy_intent.getClipData());
+			// 关键修复：将 RemoteInput 结果附加到发送给 WeChat 的 Intent
+			// 标准系统 UI 会自动处理，但 HyperIsland 等第三方灵动岛模块不会
+			if (results != null) {
+				RemoteInput.addResultsToIntent(
+					new RemoteInput[]{ new RemoteInput.Builder(result_key).build() },
+					input_data, results);
+				Log.d(TAG, "Attached RemoteInput results to reply intent: " + text);
+			}
 
 			reply_action.send(mContext, 0, input_data, (pendingIntent, intent, _result_code, _result_data, _result_extras) -> {
 				if (BuildConfig.DEBUG) Log.d(TAG, "Reply sent: " + intent.toUri(0));
@@ -601,7 +660,140 @@ class MessagingBuilder {
 	}
 
 	private static Person buildPersonFromProfile(final String selfDisplayName) {
-		return new Person.Builder().setName(selfDisplayName).build();
+		return new Person.Builder().setName(selfDisplayName).setIcon(loadSelfIcon()).build();
+	}
+
+	// M5: 头像缓存，定期刷新
+	private static IconCompat sCachedSelfIcon = null;
+	private static long sSelfIconLoadTime = 0;
+	private static final long SELF_ICON_REFRESH_INTERVAL = 5 * 60 * 1000L; // 5分钟刷新一次
+
+	/**
+	 * 动态加载自己的微信头像
+	 * 1. 从 SharedPreferences 读取 wxid
+	 * 2. 计算 MD5 得到头像文件路径
+	 * 3. 从 /data/data/com.tencent.mm/ 加载头像
+	 */
+	@Nullable
+	private static IconCompat loadSelfIcon() {
+		// M5: 使用缓存，定期刷新
+		final long now = System.currentTimeMillis();
+		if (sCachedSelfIcon != null && (now - sSelfIconLoadTime) < SELF_ICON_REFRESH_INTERVAL) {
+			return sCachedSelfIcon;
+		}
+		try {
+			// 获取微信应用的 Context
+			Context wechatContext = NevoDecoratorService.getAppContext();
+			if (wechatContext == null) {
+				Log.w(TAG, "loadSelfIcon: appContext is null");
+				return null;
+			}
+
+			// 创建微信的 Context 来读取 SharedPreferences
+			Context wechatPkgCtx = wechatContext.createPackageContext("com.tencent.mm",
+					Context.CONTEXT_IGNORE_SECURITY);
+
+			// 从 account_history 读取 wxid
+			SharedPreferences accountPrefs = wechatPkgCtx.getSharedPreferences(
+					"com.tencent.mm_preferences_account_history", Context.MODE_PRIVATE);
+			if (accountPrefs == null) {
+				Log.w(TAG, "loadSelfIcon: account prefs is null");
+				return null;
+			}
+
+			// 获取所有 key，找到 wxid 开头的
+			String wxid = null;
+			Map<String, ?> allPrefs = accountPrefs.getAll();
+			for (String key : allPrefs.keySet()) {
+				if (key.startsWith("wxid_")) {
+					wxid = key;
+					break;
+				}
+			}
+
+			if (wxid == null) {
+				Log.w(TAG, "loadSelfIcon: wxid not found");
+				return null;
+			}
+			Log.d(TAG, "loadSelfIcon: found wxid=" + wxid);
+
+			// 计算 MD5
+			MessageDigest md = MessageDigest.getInstance("MD5");
+			byte[] digest = md.digest(wxid.getBytes());
+			StringBuilder sb = new StringBuilder();
+			for (byte b : digest) {
+				sb.append(String.format("%02x", b));
+			}
+			String md5 = sb.toString();
+			Log.d(TAG, "loadSelfIcon: md5=" + md5);
+
+			// 构建头像路径: /data/data/com.tencent.mm/MicroMsg/{user_hash}/avatar/{md5[0:2]}/{md5[2:4]}/user_{md5}.png
+			// L4: 使用动态路径
+			File wechatDataDir = null;
+			try {
+				Context wechatCtx = wechatContext.createPackageContext("com.tencent.mm", Context.CONTEXT_IGNORE_SECURITY);
+				wechatDataDir = wechatCtx.getFilesDir().getParentFile();
+			} catch (Exception ignored) {}
+			if (wechatDataDir == null) wechatDataDir = new File("/data/data/com.tencent.mm");
+			File microMsgDir = new File(wechatDataDir, "MicroMsg/");
+			if (!microMsgDir.exists()) {
+				Log.w(TAG, "loadSelfIcon: MicroMsg dir not found");
+				return null;
+			}
+
+			File userHashDir = null;
+			for (File dir : microMsgDir.listFiles()) {
+				if (dir.isDirectory() && dir.getName().length() > 20) {
+					// 检查是否有 avatar 子目录
+					File avatarDir = new File(dir, "avatar");
+					if (avatarDir.exists()) {
+						userHashDir = dir;
+						break;
+					}
+				}
+			}
+
+			if (userHashDir == null) {
+				Log.w(TAG, "loadSelfIcon: user hash dir not found");
+				return null;
+			}
+
+			// 构建完整路径
+			String avatarPath = userHashDir.getAbsolutePath() + "/avatar/"
+					+ md5.substring(0, 2) + "/" + md5.substring(2, 4)
+					+ "/user_" + md5 + ".png";
+
+			File avatarFile = new File(avatarPath);
+			if (!avatarFile.exists()) {
+				Log.w(TAG, "loadSelfIcon: avatar file not found: " + avatarPath);
+				return null;
+			}
+
+			Log.d(TAG, "loadSelfIcon: loading avatar from " + avatarPath);
+
+			// 加载并缩放头像
+			BitmapFactory.Options options = new BitmapFactory.Options();
+			options.inSampleSize = 1;
+			Bitmap bitmap = BitmapFactory.decodeFile(avatarPath, options);
+			if (bitmap == null) {
+				Log.w(TAG, "loadSelfIcon: failed to decode bitmap");
+				return null;
+			}
+
+			// 缩放到 48dp
+			int size = (int) (48 * wechatContext.getResources().getDisplayMetrics().density);
+			Bitmap scaled = Bitmap.createScaledBitmap(bitmap, size, size, true);
+			Log.d(TAG, "loadSelfIcon: success, size=" + scaled.getWidth() + "x" + scaled.getHeight());
+			IconCompat icon = IconCompat.createWithBitmap(scaled);
+			// M5: 更新缓存
+			sCachedSelfIcon = icon;
+			sSelfIconLoadTime = System.currentTimeMillis();
+			return icon;
+
+		} catch (Exception e) {
+			Log.w(TAG, "loadSelfIcon failed: " + e.getMessage());
+			return null;
+		}
 	}
 
 	@Nullable private MessagingStyle buildWithSyntheticReply(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
@@ -616,6 +808,7 @@ class MessagingBuilder {
 		// 检查通知是否已有 EXTRA_MESSAGES（用户回复后重建时）
 		final Bundle[] existingMessages = n.extras.getParcelableArray(EXTRA_MESSAGES) != null ?
 			(Bundle[]) n.extras.getParcelableArray(EXTRA_MESSAGES) : null;
+		boolean hasUserReplyInMessages = false;
 
 		if (existingMessages != null && existingMessages.length > 0) {
 			// 使用已有的消息（包括用户回复）
@@ -627,6 +820,7 @@ class MessagingBuilder {
 					final Person person;
 					if (sender != null && sender.length() == 0) {
 						person = null;  // 自己发的消息（KEY_SENDER 为空字符串）
+						hasUserReplyInMessages = true;
 					} else if (sender != null && sender.length() > 0) {
 						// 有明确的发送者名称
 						if (conversation.isGroupChat()) {
@@ -662,6 +856,21 @@ class MessagingBuilder {
 				messaging.addMessage(new Message(msgText, n.when, person));
 			}
 		}
+		// 从 EXTRA_REMOTE_INPUT_HISTORY 获取用户回复并添加到 MessagingStyle（仅当 EXTRA_MESSAGES 中没有时）
+		if (!hasUserReplyInMessages) {
+			final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
+			if (input_history != null && input_history.length > 0) {
+				for (final CharSequence reply : input_history) {
+					if (reply != null && reply.length() > 0) {
+						messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));  // null person = 自己发的
+					}
+				}
+			}
+		} else {
+			Log.d(TAG, "buildWithSyntheticReply: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
+		}
+
+		// 回复：使用 RemoteInput 内联回复（修改版 HyperIsland 已保留 RemoteInput）
 		final Intent replyIntent = new Intent(ACTION_SYNTHETIC_REPLY)
 				.setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null))
 				.setPackage(mContext.getPackageName());
@@ -673,20 +882,11 @@ class MessagingBuilder {
 				.addRemoteInput(remoteInputBuilder.build())
 				.setAllowGeneratedReplies(true);
 		if (SDK_INT >= P) replyActionBuilder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
-		// 从 EXTRA_REMOTE_INPUT_HISTORY 获取用户回复并添加到 MessagingStyle
-		final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
-		if (input_history != null && input_history.length > 0) {
-			for (final CharSequence reply : input_history) {
-				if (reply != null && reply.length() > 0) {
-					messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));  // null person = 自己发的
-				}
-			}
-		}
 
 		final List<Action> actions = new ArrayList<>();
 		actions.add(replyActionBuilder.build());
 		setActions(n, actions.toArray(new Action[0]));
-		Log.d(TAG, "Synthetic reply action added with " + actions.size() + " actions");
+		Log.d(TAG, "Synthetic reply action added with RemoteInput");
 		return messaging;
 	}
 
@@ -752,10 +952,17 @@ class MessagingBuilder {
 		});
 	}};
 
+	// M4: 跟踪注册状态，防止重复注销或泄漏
+	private volatile boolean mClosed = false;
+
 	void close() {
+		if (mClosed) return;
+		mClosed = true;
 		try { mContext.unregisterReceiver(mReplyReceiver); } catch (final RuntimeException ignored) {}
 		try { mContext.unregisterReceiver(mSyntheticReplyReceiver); } catch (final RuntimeException ignored) {}
 		try { mContext.unregisterReceiver(mZoomReceiver); } catch (final RuntimeException ignored) {}
+		mMarkReadPendingIntents.clear();
+		mPendingReplies.clear();
 	}
 
 	private final Context mContext;
@@ -763,6 +970,6 @@ class MessagingBuilder {
 	// private final SharedPreferences mPreferences;
 	private final Controller mController;
 	private final Person mUserSelf;
-	private final Map<Integer/* notification id */, PendingIntent> mMarkReadPendingIntents = new ArrayMap<>();
+	private final Map<Integer, PendingIntent> mMarkReadPendingIntents = new ArrayMap<>();
 	private static final String TAG = WeChatDecorator.TAG;
 }
