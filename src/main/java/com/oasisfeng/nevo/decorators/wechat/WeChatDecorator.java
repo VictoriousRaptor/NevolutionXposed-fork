@@ -42,6 +42,8 @@ import android.util.Log;
 import android.widget.RemoteViews;
 
 import java.io.File;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -364,6 +366,38 @@ public class WeChatDecorator extends NevoDecoratorService {
 						Log.d(TAG, "Corrected call type to video: " + content);
 					}
 				}
+				// H3: 使用后立即清理，避免脏数据影响后续通知
+				sLastCallType = null;
+				sLastCallTime = 0;
+			}
+			// 图片消息：尝试从微信图片目录找到最新图片并显示
+			if (content != null && content.contains("[图片]")) {
+				String picturePath = findLatestWeChatImage();
+				if (picturePath != null) {
+					extras.putString(EXTRA_PICTURE_PATH, picturePath);
+					Log.d(TAG, "Found image for [图片] message: " + picturePath);
+				} else {
+					Log.d(TAG, "No image found for [图片] message, keeping original");
+					return Decorating.Unprocessed;
+				}
+			}
+			// 表情包/视频/文件等消息不做处理，保留微信原始通知内容
+			if (content != null) {
+				if (content.contains("[表情]") || content.contains("[动画表情]") ||
+					content.contains("[视频]") || content.contains("[文件]") || content.contains("[链接]") ||
+					content.contains("[音乐]") || content.contains("[位置]") || content.contains("[红包]") ||
+					content.contains("[转账]") || content.contains("[小程序]")) {
+					Log.d(TAG, "Skipping media/sticker message, keeping original: " + content);
+					return Decorating.Unprocessed;
+				}
+				// 转换微信内置表情标记为 Emoji（如 [得意] -> 😎）
+				if (content.startsWith("[") && content.endsWith("]")) {
+					CharSequence translated = EmojiTranslator.translate(content);
+					if (!translated.equals(content)) {
+						extras.putCharSequence(Notification.EXTRA_TEXT, translated);
+						Log.d(TAG, "Translated emoji: " + content + " -> " + translated);
+					}
+				}
 			}
 			// 撤回...
 			int type = Conversation.TYPE_UNKNOWN;
@@ -491,7 +525,13 @@ public class WeChatDecorator extends NevoDecoratorService {
 					break;
 				}
 				if (BuildConfig.DEBUG) Log.d(TAG, channel_id + " " + channel);
-				nm.createNotificationChannel(channel);
+				if (channel != null) {
+					try {
+						nm.createNotificationChannel(channel);
+					} catch (Exception e) {
+						Log.w(TAG, "Failed to createNotificationChannel: " + channel_id + " " + e.getMessage());
+					}
+				}
 				channel = nm.getNotificationChannel(channel_id);
 				if (BuildConfig.DEBUG) Log.d(TAG, channel_id + " " + channel);
 			}
@@ -558,6 +598,101 @@ public class WeChatDecorator extends NevoDecoratorService {
 			} else {
 				Log.d(TAG, "can not recast " + id + ", so cancel it");
 				cancelNotification(id);
+			}
+		}
+
+		// M1: 图片扫描缓存，避免重复遍历目录
+		private static volatile String sCachedImagePath = null;
+		private static volatile long sCachedImageScanTime = 0;
+		private static final long IMAGE_SCAN_CACHE_TTL = 2000; // 2秒内不重复扫描
+
+		/**
+		 * L4: 动态获取微信数据目录，兼容多用户环境
+		 */
+		private static File getWeChatDataDir() {
+			// 优先使用 context 获取
+			try {
+				Context ctx = NevoDecoratorService.getAppContext();
+				if (ctx != null) {
+					// 尝试通过 createPackageContext 获取
+					Context wechatCtx = ctx.createPackageContext(WECHAT_PACKAGE, Context.CONTEXT_IGNORE_SECURITY);
+					File dataDir = wechatCtx.getFilesDir().getParentFile();
+					if (dataDir != null && dataDir.exists()) return dataDir;
+				}
+			} catch (Exception ignored) {}
+			// fallback: 使用默认路径
+			return new File("/data/data/" + WECHAT_PACKAGE);
+		}
+
+		/**
+		 * 扫描微信图片目录，找到最近 10 秒内创建的图片文件
+		 * 微信图片存储路径: /data/data/com.tencent.mm/MicroMsg/{hash}/image2/{2chars}/{2chars}/{hash}.jpg
+		 */
+		@Nullable
+		private String findLatestWeChatImage() {
+			try {
+				// M1: 使用缓存，避免频繁扫描
+				final long now = System.currentTimeMillis();
+				if (sCachedImagePath != null && (now - sCachedImageScanTime) < IMAGE_SCAN_CACHE_TTL) {
+					// 验证缓存的文件仍然存在且是最近的
+					File cached = new File(sCachedImagePath);
+					if (cached.exists() && (now - cached.lastModified()) < 10000) {
+						Log.d(TAG, "Using cached image path: " + sCachedImagePath);
+						return sCachedImagePath;
+					}
+					sCachedImagePath = null;
+				}
+
+				// L4: 使用动态路径获取微信数据目录
+				File wechatDir = new File(getWeChatDataDir(), "MicroMsg/");
+				if (!wechatDir.exists()) return null;
+
+				// 找到用户目录（最长的哈希目录）
+				File userDir = null;
+				for (File dir : wechatDir.listFiles()) {
+					if (dir.isDirectory() && dir.getName().length() > 20) {
+						userDir = dir;
+						break;
+					}
+				}
+				if (userDir == null) return null;
+
+				File imageDir = new File(userDir, "image2");
+				if (!imageDir.exists()) return null;
+
+				long newestTime = 0;
+				String newestPath = null;
+
+				// M1: 遍历 image2 目录下的子目录，提前退出
+				for (File sub1 : imageDir.listFiles()) {
+					if (!sub1.isDirectory() || sub1.getName().length() != 2) continue;
+					for (File sub2 : sub1.listFiles()) {
+						if (!sub2.isDirectory() || sub2.getName().length() != 2) continue;
+						File[] files = sub2.listFiles();
+						if (files == null) continue;
+						for (File file : files) {
+							if (!file.isFile() || !file.getName().endsWith(".jpg")) continue;
+							long lastModified = file.lastModified();
+							// 只取最近 10 秒内的图片
+							if (now - lastModified < 10000 && lastModified > newestTime) {
+								newestTime = lastModified;
+								newestPath = file.getAbsolutePath();
+							}
+						}
+					}
+				}
+
+				// M1: 更新缓存
+				sCachedImagePath = newestPath;
+				sCachedImageScanTime = now;
+
+				if (newestPath != null) {
+					Log.d(TAG, "Found latest WeChat image: " + newestPath + " age=" + (now - newestTime) + "ms");
+				}
+				return newestPath;
+			} catch (Exception e) {
+				Log.w(TAG, "Failed to find WeChat image: " + e.getMessage());
+				return null;
 			}
 		}
 	}

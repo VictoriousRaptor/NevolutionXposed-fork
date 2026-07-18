@@ -193,6 +193,25 @@ class WeChatMessage {
 				if (conversation.isGroupChat() && title_as_sender) sender = SELF;		// WeChat incorrectly use group chat title as sender for self-sent messages.
 			} else sender = null;		// Not really the sender name, revert the parsing result.
 		}
+
+		// 修正通话类型：微信 CarExtender 发送 [语音]，但 EXTRA_TEXT 是 [语音通话]
+		if (notification != null && "[语音]".equals(text)) {
+			final CharSequence extraText = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
+			if (extraText != null) {
+				final String extraTextStr = extraText.toString();
+				// 提取 EXTRA_TEXT 中的实际通话类型
+				final int start = extraTextStr.lastIndexOf("[");
+				final int end = extraTextStr.lastIndexOf("]");
+				if (start >= 0 && end > start) {
+					final String callType = extraTextStr.substring(start, end + 1);
+					if ("[语音通话]".equals(callType) || "[视频通话]".equals(callType)) {
+						Log.d(TAG, "Corrected call type from [语音] to " + callType);
+						text = callType;
+					}
+				}
+			}
+		}
+
 		return toMessage(conversation, from_self ? SELF : sender, text, 0, (notification != null) ? notification.extras.getString(WeChatDecorator.EXTRA_PICTURE_PATH) : null);
 	}
 

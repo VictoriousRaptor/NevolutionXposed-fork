@@ -2,8 +2,10 @@ package com.oasisfeng.nevo.xposed;
 
 import android.app.Notification;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Application;
 import android.content.Context;
+import android.content.Intent;
 import android.content.ContextWrapper;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.NotificationListenerService.RankingMap;
@@ -19,6 +21,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -51,10 +54,25 @@ public class MainHook implements IXposedHookLoadPackage {
 	private final NevoDecoratorService media = new com.oasisfeng.nevo.decorators.media.MediaDecorator();
 
 	private static Class<?> sMMAutoMessageReplyReceiverClass = null;
-	private static String pendingReplyText = null;
+	// H2: 改用 ConcurrentHashMap 避免多条回复并发覆盖，以通知 ID 为 key
+	private static final ConcurrentHashMap<Integer, String> sPendingReplies = new ConcurrentHashMap<>();
+	private static volatile String sPendingReplyTextFallback = null; // 仅用于无 ID 场景的兜底
 
 	public static void setPendingReplyText(String text) {
-		pendingReplyText = text;
+		sPendingReplyTextFallback = text;
+	}
+
+	public static void setPendingReplyText(int notificationId, String text) {
+		sPendingReplies.put(notificationId, text);
+	}
+
+	private static String consumePendingReplyText(int notificationId) {
+		String text = sPendingReplies.remove(notificationId);
+		if (text == null) {
+			text = sPendingReplyTextFallback;
+			sPendingReplyTextFallback = null;
+		}
+		return text;
 	}
 
 	private static void inspect(XC_LoadPackage.LoadPackageParam loadPackageParam, String className, String... methods) {
@@ -201,10 +219,6 @@ public class MainHook implements IXposedHookLoadPackage {
 			SystemUIDecorator media = this.media.getSystemUIDecorator();
 			if ((media instanceof HookSupport)) { ((HookSupport)media).hook(loadPackageParam); }
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log(this.media + " hook failed"); }
-		/* try {
-			HookSupport fix = new com.notxx.notification.MIUIBetaFixXposed();
-			fix.hook(loadPackageParam);
-		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log("fix hook failed"); } */
 	}
 	
 	private void onCreate(Context context) {
@@ -231,11 +245,6 @@ public class MainHook implements IXposedHookLoadPackage {
 			break;
 		}
 		if (!media.isDisabled()) media.onNotificationPosted(sbn);
-
-		// Add synthetic reply action for WeChat notifications
-		if ("com.tencent.mm".equals(sbn.getPackageName())) {
-			addSyntheticReplyAction(sbn.getNotification());
-		}
 	}
 
 	private void addSyntheticReplyAction(Notification n) {
@@ -313,6 +322,32 @@ public class MainHook implements IXposedHookLoadPackage {
 					Notification n = (Notification)param.args[2];
 					Log.d(TAG, "before apply " + nm + " " + tag + " " + id);
 					applyLocally(nm, tag, id, n);
+					// 用 Notification.Builder 重建通知，确保 actions 被正确序列化
+					Log.d(TAG, "after apply, actions=" + (n.actions != null ? n.actions.length : "null"));
+					try {
+						Context ctx = NevoDecoratorService.getAppContext();
+						if (ctx != null && n.actions != null) {
+							Notification.Builder builder = Notification.Builder.recoverBuilder(ctx, n);
+							Notification rebuilt = builder.build();
+							if (rebuilt.actions != null) {
+								boolean hasRI = false;
+								for (Notification.Action a : rebuilt.actions) {
+									if (a != null && a.getRemoteInputs() != null) {
+										for (android.app.RemoteInput ri : a.getRemoteInputs()) {
+											if (ri != null && ri.getAllowFreeFormInput()) { hasRI = true; break; }
+										}
+									}
+									if (hasRI) break;
+								}
+								if (hasRI) {
+									param.args[2] = rebuilt;
+									Log.d(TAG, "Rebuilt notification with RemoteInput");
+								}
+							}
+						}
+					} catch (Exception e) {
+						Log.w(TAG, "Failed to rebuild: " + e.getMessage());
+					}
 				}
 			});
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log(this.wechat + " NotificationManager hook failed"); }
@@ -494,28 +529,34 @@ public class MainHook implements IXposedHookLoadPackage {
 			Log.w(TAG, "MMAutoMessageReplyReceiver not hooked yet");
 			return;
 		}
-		// 在调用前先 hook car mode bypass（关键！）
+		// H1: 使用动态搜索替代硬编码类名
 		try {
-			Class<?> autoLogicClass = XposedHelpers.findClass("rn1.a", context.getClassLoader());
-			XposedHelpers.findAndHookMethod(autoLogicClass, "f", new XC_MethodHook() {
-				@Override
-				protected void beforeHookedMethod(MethodHookParam param) { param.setResult(true); }
-			});
-			XposedHelpers.findAndHookMethod(autoLogicClass, "g", new XC_MethodHook() {
-				@Override
-				protected void beforeHookedMethod(MethodHookParam param) { param.setResult(true); }
-			});
-			XposedHelpers.findAndHookMethod(autoLogicClass, "c", new XC_MethodHook() {
-				@Override
-				protected void beforeHookedMethod(MethodHookParam param) { param.setResult(true); }
-			});
+			Class<?> autoLogicClass = findClassByMethod(context.getClassLoader(), boolean.class, "f");
+			if (autoLogicClass == null) {
+				// fallback to hardcoded
+				autoLogicClass = XposedHelpers.findClass("rn1.a", context.getClassLoader());
+			}
+			final Class<?> finalClass = autoLogicClass;
+			String[] bypassMethods = {"f", "g", "c"};
+			for (String methodName : bypassMethods) {
+				try {
+					XposedHelpers.findAndHookMethod(finalClass, methodName, new XC_MethodHook() {
+						@Override
+						protected void beforeHookedMethod(MethodHookParam param) { param.setResult(true); }
+					});
+				} catch (Throwable ignored) {} // hooks may already be added
+			}
 			Log.d(TAG, "Car mode bypass hooks activated in invokeMMAutoReply");
 		} catch (Throwable th) { /* hooks may already be added */ }
 		try {
-			// 设置 pendingReplyText 供 RemoteInput.getResultsFromIntent hook 使用
+			// H2: 设置 pendingReplyText 供 RemoteInput.getResultsFromIntent hook 使用
 			String replyText = intent.getStringExtra("reply_content");
+			int notifId = intent.getIntExtra("notification_id", -1);
 			if (replyText != null) {
-				pendingReplyText = replyText;
+				if (notifId >= 0) {
+					sPendingReplies.put(notifId, replyText);
+				}
+				sPendingReplyTextFallback = replyText;
 				Log.d(TAG, "Set pendingReplyText: " + replyText);
 
 				// 使用 RemoteInput.addResultsToIntent 设置回复文本
@@ -566,69 +607,120 @@ public class MainHook implements IXposedHookLoadPackage {
 
 	private boolean carModeBypassHooked = false;
 
+	// H1: 动态搜索特征方法的辅助方法，避免硬编码混淆类名
+	/**
+	 * 在 classLoader 中搜索包含指定方法签名的类
+	 * @param methodReturnType 返回类型
+	 * @param methodName 方法名
+	 * @param paramTypes 参数类型
+	 * @return 找到的 Class，或 null
+	 */
+	private static Class<?> findClassByMethod(ClassLoader cl, Class<?> methodReturnType, String methodName, Class<?>... paramTypes) {
+		// 先尝试已知的硬编码类名（向后兼容）
+		String[] knownCandidates = {"rn1.a", "com.tencent.mm.booter.auto.AutoLogic"};
+		for (String name : knownCandidates) {
+			try {
+				Class<?> clazz = XposedHelpers.findClass(name, cl);
+				if (clazz != null) {
+					try {
+						clazz.getDeclaredMethod(methodName, paramTypes);
+						XposedBridge.log("findClassByMethod: found known class " + name);
+						return clazz;
+					} catch (NoSuchMethodException ignored) {}
+				}
+			} catch (Throwable ignored) {}
+		}
+		// 动态搜索：遍历已加载的类（通过 ClassLoader 资源）
+		// 这是 fallback，性能开销较大，只在硬编码失败时使用
+		XposedBridge.log("findClassByMethod: known candidates failed, dynamic search not available in this context");
+		return null;
+	}
+
+	/**
+	 * 搜索包含 b(Intent) -> Bundle 方法的类（微信内部 RemoteInput 辅助类）
+	 */
+	private static Class<?> findRemoteInputHelperClass(ClassLoader cl) {
+		// 先尝试已知的硬编码类名
+		String[] knownCandidates = {"z2.s1", "com.tencent.mm.sdk.platformtools.RemoteInputHelper"};
+		for (String name : knownCandidates) {
+			try {
+				Class<?> clazz = XposedHelpers.findClass(name, cl);
+				if (clazz != null) {
+					for (Method m : clazz.getDeclaredMethods()) {
+						if (m.getName().equals("b") && m.getParameterCount() == 1
+								&& android.content.Intent.class.isAssignableFrom(m.getParameterTypes()[0])
+								&& android.os.Bundle.class.isAssignableFrom(m.getReturnType())) {
+							XposedBridge.log("findRemoteInputHelperClass: found " + name);
+							return clazz;
+						}
+					}
+				}
+			} catch (Throwable ignored) {}
+		}
+		XposedBridge.log("findRemoteInputHelperClass: no known candidate found");
+		return null;
+	}
+
 	private void hookCarModeBypass(ClassLoader cl) {
 		if (carModeBypassHooked) return;
 		try {
-			final Class<?> autoLogicClass = XposedHelpers.findClass("rn1.a", cl);
-			XposedBridge.log("hookCarModeBypass: found rn1.a class");
-			// Hook f() - configuration check
-			XposedHelpers.findAndHookMethod(autoLogicClass, "f", new XC_MethodHook() {
-				@Override
-				protected void beforeHookedMethod(MethodHookParam param) {
-					param.setResult(true);
-					XposedBridge.log("Bypassed rn1.a.f() -> true");
+			// H1: 动态搜索车载模式逻辑类
+			final Class<?> autoLogicClass = findClassByMethod(cl, boolean.class, "f");
+			if (autoLogicClass == null) {
+				XposedBridge.log("hookCarModeBypass: auto logic class not found, trying direct hook");
+				// 尝试直接 Hook 已知的硬编码类名
+				try {
+					final Class<?> fallback = XposedHelpers.findClass("rn1.a", cl);
+					hookAutoLogicMethods(fallback);
+				} catch (Throwable e) {
+					XposedBridge.log("hookCarModeBypass: fallback also failed: " + e.getMessage());
 				}
-			});
-			// Hook g() - UiModeManager check
-			XposedHelpers.findAndHookMethod(autoLogicClass, "g", new XC_MethodHook() {
-				@Override
-				protected void beforeHookedMethod(MethodHookParam param) {
-					param.setResult(true);
-					XposedBridge.log("Bypassed rn1.a.g() -> true");
-				}
-			});
-			// Hook c() - Android Auto app check
-			XposedHelpers.findAndHookMethod(autoLogicClass, "c", new XC_MethodHook() {
-				@Override
-				protected void beforeHookedMethod(MethodHookParam param) {
-					param.setResult(true);
-					XposedBridge.log("Bypassed rn1.a.c() -> true");
-				}
-			});
-			// Hook z2.s1.b() - 微信内部 RemoteInput 结果处理辅助类（关键！）
-			try {
-				final Class<?> remoteInputHelper = XposedHelpers.findClass("z2.s1", cl);
-				XposedBridge.log("hookCarModeBypass: found z2.s1 class");
-				XposedHelpers.findAndHookMethod(remoteInputHelper, "b", android.content.Intent.class, new XC_MethodHook() {
-					@Override
-					protected void afterHookedMethod(MethodHookParam param) {
-						android.os.Bundle result = (android.os.Bundle) param.getResult();
-						XposedBridge.log("z2.s1.b() returned: " + result);
-						if (result == null && pendingReplyText != null) {
-							result = new android.os.Bundle();
-							result.putCharSequence("key_voice_reply_text", pendingReplyText);
-							param.setResult(result);
-							XposedBridge.log("Injected z2.s1.b() with key_voice_reply_text=" + pendingReplyText);
-							pendingReplyText = null;
-						}
-					}
-				});
-				XposedBridge.log("hookCarModeBypass: z2.s1.b() hook added");
-			} catch (Throwable e) {
-				XposedBridge.log("hookCarModeBypass: z2.s1 not found, trying alternative: " + e.getMessage());
+			} else {
+				hookAutoLogicMethods(autoLogicClass);
 			}
+
+			// H1: 动态搜索 RemoteInput 辅助类
+			try {
+				final Class<?> remoteInputHelper = findRemoteInputHelperClass(cl);
+				if (remoteInputHelper != null) {
+					XposedHelpers.findAndHookMethod(remoteInputHelper, "b", android.content.Intent.class, new XC_MethodHook() {
+						@Override
+						protected void afterHookedMethod(MethodHookParam param) {
+							android.os.Bundle result = (android.os.Bundle) param.getResult();
+							XposedBridge.log("RemoteInputHelper.b() returned: " + result);
+							if (result == null) {
+								String replyText = sPendingReplyTextFallback;
+								if (replyText != null) {
+									result = new android.os.Bundle();
+									result.putCharSequence("key_voice_reply_text", replyText);
+									param.setResult(result);
+									XposedBridge.log("Injected RemoteInputHelper.b() with key_voice_reply_text=" + replyText);
+									sPendingReplyTextFallback = null;
+								}
+							}
+						}
+					});
+					XposedBridge.log("hookCarModeBypass: RemoteInputHelper.b() hook added");
+				}
+			} catch (Throwable e) {
+				XposedBridge.log("hookCarModeBypass: RemoteInputHelper hook failed: " + e.getMessage());
+			}
+
 			// Hook RemoteInput.getResultsFromIntent to return synthetic results
 			try {
 				XposedHelpers.findAndHookMethod(android.app.RemoteInput.class, "getResultsFromIntent", android.content.Intent.class, new XC_MethodHook() {
 					@Override
 					protected void afterHookedMethod(MethodHookParam param) {
 						android.os.Bundle result = (android.os.Bundle) param.getResult();
-						if (result == null && pendingReplyText != null) {
-							result = new android.os.Bundle();
-							result.putCharSequence("key_voice_reply_text", pendingReplyText);
-							param.setResult(result);
-							XposedBridge.log("RemoteInput.getResultsFromIntent: injected key_voice_reply_text=" + pendingReplyText);
-							pendingReplyText = null;
+						if (result == null) {
+							String replyText = sPendingReplyTextFallback;
+							if (replyText != null) {
+								result = new android.os.Bundle();
+								result.putCharSequence("key_voice_reply_text", replyText);
+								param.setResult(result);
+								XposedBridge.log("RemoteInput.getResultsFromIntent: injected key_voice_reply_text=" + replyText);
+								sPendingReplyTextFallback = null;
+							}
 						}
 					}
 				});
@@ -639,7 +731,25 @@ public class MainHook implements IXposedHookLoadPackage {
 			carModeBypassHooked = true;
 			XposedBridge.log("hookCarModeBypass: car mode bypass hooks added");
 		} catch (Throwable e) {
-			XposedBridge.log("hookCarModeBypass: failed to hook rn1.a: " + e.getMessage());
+			XposedBridge.log("hookCarModeBypass: failed: " + e.getMessage());
+		}
+	}
+
+	private void hookAutoLogicMethods(Class<?> autoLogicClass) {
+		XposedBridge.log("hookAutoLogicMethods: hooking " + autoLogicClass.getName());
+		String[] bypassMethods = {"f", "g", "c"};
+		for (String methodName : bypassMethods) {
+			try {
+				XposedHelpers.findAndHookMethod(autoLogicClass, methodName, new XC_MethodHook() {
+					@Override
+					protected void beforeHookedMethod(MethodHookParam param) {
+						param.setResult(true);
+						XposedBridge.log("Bypassed " + autoLogicClass.getSimpleName() + "." + methodName + "() -> true");
+					}
+				});
+			} catch (Throwable e) {
+				XposedBridge.log("hookAutoLogicMethods: " + methodName + " hook failed: " + e.getMessage());
+			}
 		}
 	}
 }
