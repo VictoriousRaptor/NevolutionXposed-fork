@@ -1,0 +1,102 @@
+name: Android build and release
+
+on:
+  push:
+    branches: [master, 'fix/**', 'codex/**']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - name: Use official Gradle distribution on hosted runners
+        run: sed -i 's#https\\://mirrors.cloud.tencent.com/gradle/#https\\://services.gradle.org/distributions/#' gradle/wrapper/gradle-wrapper.properties
+      - name: Build debug APK and run unit tests
+        run: bash gradlew --no-daemon assembleDebug testDebugUnitTest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - name: Use official Gradle distribution on hosted runners
+        run: sed -i 's#https\\://mirrors.cloud.tencent.com/gradle/#https\\://services.gradle.org/distributions/#' gradle/wrapper/gradle-wrapper.properties
+      - name: Build signed release
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?Configure RELEASE_KEYSTORE_BASE64 in repository secrets}"
+          : "${ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD:?Missing RELEASE_STORE_PASSWORD}"
+          : "${ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS:?Missing RELEASE_KEY_ALIAS}"
+          : "${ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD:?Missing RELEASE_KEY_PASSWORD}"
+          export ORG_GRADLE_PROJECT_RELEASE_STORE_FILE="$RUNNER_TEMP/release.jks"
+          trap 'rm -f "$ORG_GRADLE_PROJECT_RELEASE_STORE_FILE"' EXIT
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ORG_GRADLE_PROJECT_RELEASE_STORE_FILE"
+          bash gradlew --no-daemon assembleRelease
+      - name: Verify and package release
+        id: package
+        run: |
+          set -euo pipefail
+          metadata=build/outputs/apk/release/output-metadata.json
+          version=$(jq -r '.elements[0].versionName' "$metadata")
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          apk="build/outputs/apk/release/$(jq -r '.elements[0].outputFile' "$metadata")"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$apk"
+          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+          mkdir -p release-assets
+          cp "$apk" "release-assets/NevolutionXposed-${tag}.apk"
+          (cd release-assets && sha256sum *.apk > SHA256SUMS.txt)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.package.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # A rerun of a successfully published build leaves its assets intact.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists."
+            exit 0
+          fi
+          gh release create "$TAG" release-assets/* --target "$GITHUB_SHA" \
+            --title "NevolutionXposed $TAG" --generate-notes

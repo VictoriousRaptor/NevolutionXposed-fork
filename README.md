@@ -129,7 +129,18 @@ NevolutionXposed/
 └── build.gradle                  # 构建配置
 ```
 
+## 自动构建与发布
+
+分支和 PR 自动构建；master 更新后自动构建签名 APK 并发布 GitHub Release。
+发布前需配置现有签名密钥，详见 [CI 与发布配置](docs/ci-release.md)。
+
 ## 📋 版本更新
+
+### v2.0.3
+
+- 修复 Google Play 微信 8.0.72 通知栏回复，保留 8.0.76 版本映射。
+- 改进通知内容显示和回复诊断，添加 LSPosed 推荐作用域。
+- 添加分支/PR 构建检查及 master 自动签名发布流程。
 
 ### v2.0.2 (2026-07-18)
 
