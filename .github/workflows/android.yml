@@ -1,0 +1,16 @@
+name: Android build and release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  select-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select the implementation branch
+        run: |
+          echo 'Select fix/wechat-8.0.72-reply in Run workflow to validate its build before merging.'
+          exit 1
