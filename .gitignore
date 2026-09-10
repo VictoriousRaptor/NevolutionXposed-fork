@@ -1,0 +1,10 @@
+# Local Android/WeChat diagnostic artifacts may contain private notification data.
+.debug-artifacts/
+
+# Local Android SDK path written by Gradle on developer machines.
+local.properties
+
+# Gradle and Android build outputs.
+.gradle/
+build/
+

@@ -87,6 +87,11 @@ class MessagingBuilder {
 	private static final String EXTRA_REPLY_ACTION = "pending_intent";
 	private static final String EXTRA_RESULT_KEY = "result_key";
 	private static final String EXTRA_REPLY_PREFIX = "reply_prefix";
+	private static final String DEFAULT_AUTO_REPLY_RESULT_KEY = MainHook.WECHAT_AUTO_REPLY_RESULT_KEY;
+
+	private static void logReply(final String stage, final String detail) {
+		Log.d(TAG, "NX_REPLY stage=" + stage + (detail == null || detail.isEmpty() ? "" : " " + detail));
+	}
 
 	private static final String KEY_TEXT = "text";
 	private static final String KEY_TIMESTAMP = "time";
@@ -197,7 +202,22 @@ class MessagingBuilder {
 
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
 		final Message[] messages = WeChatMessage.buildFromCarConversation(conversation, convs, archive);
-		for (final Message message : messages) messaging.addMessage(message);
+		if (hasUsableContent(messages)) {
+			for (final Message message : messages) messaging.addMessage(message);
+		} else {
+			// WeChat 8.0.72 fills its car conversation with placeholders ("[消息]")
+			// for ordinary messages. Keep the real notification text and use the car
+			// conversation only for the reply intent below.
+			logReply("car_content_placeholder", "notificationId=" + id + " source=notification_text");
+			final CharSequence text = n.extras.getCharSequence(Notification.EXTRA_TEXT);
+			if (text != null) {
+				final String sender = extractSenderFromText(text);
+				final CharSequence msgText = sender != null
+						? text.subSequence(sender.length() + SENDER_MESSAGE_SEPARATOR.length(), text.length()) : text;
+				messaging.addMessage(new Message(msgText, n.when,
+						new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build()));
+			}
+		}
 
 		// 从 EXTRA_MESSAGES 保留之前的用户回复（关键！）
 		final Bundle[] existingMessages = n.extras.getParcelableArray(EXTRA_MESSAGES) != null ?
@@ -236,20 +256,19 @@ class MessagingBuilder {
 			if (SDK_INT >= P) reply_action.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
 			actions.add(reply_action.build());
 		} else if (SDK_INT >= N && on_reply != null) {
-			// CarExtender 没有 RemoteInput，创建合成回复 Action
-			Log.d(TAG, "buildFromExtender: CarExtender has no RemoteInput, creating synthetic reply action");
-			final Intent replyIntent = new Intent(ACTION_SYNTHETIC_REPLY)
-					.setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null))
-					.setPackage(mContext.getPackageName());
-			final PendingIntent replyPendingIntent = PendingIntent.getBroadcast(mContext, id, replyIntent, pendingIntentFlags());
-			final RemoteInput.Builder remoteInputBuilder = new RemoteInput.Builder("synthetic_reply_result_key")
-					.setAllowFreeFormInput(true);
-			remoteInputBuilder.setLabel(actionReply);
-			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, replyPendingIntent)
-					.addRemoteInput(remoteInputBuilder.build())
+			// Some WeChat builds omit RemoteInput from CarExtender but still provide a valid
+			// reply PendingIntent. Preserve that version-specific PendingIntent instead of
+			// inventing a broadcast to an obfuscated receiver.
+			final RemoteInput fallbackRemoteInput = new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY)
+					.setAllowFreeFormInput(true).setLabel(actionReply).build();
+			final PendingIntent proxy = proxyDirectReply(id, n, on_reply, fallbackRemoteInput,
+					n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY), null);
+			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, proxy)
+					.addRemoteInput(fallbackRemoteInput)
 					.setAllowGeneratedReplies(true);
 			if (SDK_INT >= P) reply_action_builder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
 			actions.add(reply_action_builder.build());
+			logReply("action_native_fallback", "notificationId=" + id + " resultKey=" + DEFAULT_AUTO_REPLY_RESULT_KEY);
 		}
 		// 放大
 		if (n.extras.containsKey(WeChatDecorator.EXTRA_PICTURE_PATH)) {
@@ -330,6 +349,20 @@ class MessagingBuilder {
 	}
 
 	/** Build reply action directly from notification actions when CarExtender is absent (new WeChat versions). */
+	/** True only when the car conversation carries real message text instead of placeholders. */
+	private static boolean hasUsableContent(final Message[] messages) {
+		if (messages == null || messages.length == 0) return false;
+		for (final Message message : messages) {
+			final CharSequence text = message.getText();
+			if (text == null) continue;
+			final String value = text.toString().trim();
+			if (value.isEmpty()) continue;
+			if ("[消息]".equals(value)) continue;
+			return true;
+		}
+		return false;
+	}
+
 	@Nullable private MessagingStyle buildFromActions(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
 		final Action[] actions = n.actions;
 		if (actions == null) return null;
@@ -471,8 +504,16 @@ class MessagingBuilder {
 		final PendingIntent reply_action = proxy_intent.getParcelableExtra(EXTRA_REPLY_ACTION);
 		final String result_key = proxy_intent.getStringExtra(EXTRA_RESULT_KEY), reply_prefix = proxy_intent.getStringExtra(EXTRA_REPLY_PREFIX);
 		final Uri data = proxy_intent.getData(); final Bundle results = RemoteInput.getResultsFromIntent(proxy_intent);
-		final CharSequence input = results != null ? results.getCharSequence(result_key) : null;
-		if (data == null || reply_action == null || result_key == null || input == null) return;	// Should never happen
+		if (data == null || reply_action == null || result_key == null || results == null) {
+			logReply("native_drop", "reason=missing_metadata");
+			return;
+		}
+		final CharSequence input = results.getCharSequence(result_key);
+		if (input == null) {
+			logReply("native_drop", "reason=missing_input resultKey=" + result_key + " availableKeys=" + results.keySet());
+			return;
+		}
+		logReply("native_receiver", "notificationId=" + data.getSchemeSpecificPart() + " resultKey=" + result_key + " inputLength=" + input.length());
 		// M3: 防止无限循环 — 使用 id:text 作为 key，避免 hashCode 碰撞
 		final String replyKey = data.getSchemeSpecificPart() + ":" + input.toString();
 		if (mPendingReplies.contains(replyKey)) return;
@@ -494,11 +535,11 @@ class MessagingBuilder {
 				RemoteInput.addResultsToIntent(
 					new RemoteInput[]{ new RemoteInput.Builder(result_key).build() },
 					input_data, results);
-				Log.d(TAG, "Attached RemoteInput results to reply intent: " + text);
+				logReply("native_remote_input_attached", "resultKey=" + result_key + " inputLength=" + text.length());
 			}
 
 			reply_action.send(mContext, 0, input_data, (pendingIntent, intent, _result_code, _result_data, _result_extras) -> {
-				if (BuildConfig.DEBUG) Log.d(TAG, "Reply sent: " + intent.toUri(0));
+				logReply("native_pending_intent_callback", "notificationId=" + part + " resultCode=" + _result_code);
 				if (SDK_INT >= N) {
 					final CharSequence[] inputs;
 					if (input_history != null) {
@@ -532,7 +573,10 @@ class MessagingBuilder {
 				}
 			}, null);
 		} catch (final PendingIntent.CanceledException e) {
-			Log.w(TAG, "Reply action is already cancelled: " + part);
+			Log.w(TAG, "NX_REPLY stage=native_dispatch_failed reason=pending_intent_cancelled notificationId=" + part, e);
+			abortBroadcast();
+		} catch (final RuntimeException e) {
+			Log.w(TAG, "NX_REPLY stage=native_dispatch_failed reason=runtime notificationId=" + part, e);
 			abortBroadcast();
 		} finally {
 			// 延迟清除防循环标志
@@ -870,7 +914,12 @@ class MessagingBuilder {
 			Log.d(TAG, "buildWithSyntheticReply: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
 		}
 
-		// 回复：使用 RemoteInput 内联回复（修改版 HyperIsland 已保留 RemoteInput）
+		if (!MainHook.isSyntheticReplyAvailable()) {
+			logReply("action_synthetic_skipped", "notificationId=" + id + " reason=wechat_receiver_unavailable");
+			return messaging;
+		}
+
+		// Reply is only exposed when the target receiver was verified in this process.
 		final Intent replyIntent = new Intent(ACTION_SYNTHETIC_REPLY)
 				.setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null))
 				.setPackage(mContext.getPackageName());
@@ -886,14 +935,17 @@ class MessagingBuilder {
 		final List<Action> actions = new ArrayList<>();
 		actions.add(replyActionBuilder.build());
 		setActions(n, actions.toArray(new Action[0]));
-		Log.d(TAG, "Synthetic reply action added with RemoteInput");
+		logReply("action_synthetic", "notificationId=" + id);
 		return messaging;
 	}
 
 	private final BroadcastReceiver mSyntheticReplyReceiver = new BroadcastReceiver() { @Override public void onReceive(final Context context, final Intent proxy_intent) {
 		final Uri data = proxy_intent.getData();
 		final Bundle results = RemoteInput.getResultsFromIntent(proxy_intent);
-		if (data == null || results == null) return;
+		if (data == null || results == null) {
+			logReply("synthetic_drop", "reason=missing_data_or_results");
+			return;
+		}
 		final String part = data.getSchemeSpecificPart();
 		final int notif_id;
 		try { notif_id = Integer.parseInt(part); } catch (final NumberFormatException e) { return; }
@@ -902,23 +954,29 @@ class MessagingBuilder {
 			final CharSequence val = results.getCharSequence(key);
 			if (val != null && val.length() > 0) { reply_text = val.toString(); break; }
 		}
-		if (reply_text == null) return;
-		Log.d(TAG, "Synthetic reply: " + reply_text + " for id=" + notif_id);
+		if (reply_text == null) {
+			logReply("synthetic_drop", "notificationId=" + notif_id + " reason=missing_input keys=" + results.keySet());
+			return;
+		}
+		logReply("synthetic_receiver", "notificationId=" + notif_id + " inputLength=" + reply_text.length());
+		final boolean dispatched;
 		try {
 			// 直接调用 MMAutoMessageReplyReceiver.onReceive，绕过广播系统
-			final Intent reply_intent = new Intent("com.tencent.mm.permission.MM_AUTO_REPLY_MESSAGE");
+			final Intent reply_intent = new Intent(MainHook.WECHAT_AUTO_REPLY_ACTION);
 			reply_intent.setPackage("com.tencent.mm");
 			reply_intent.putExtra("reply_content", reply_text);
 			reply_intent.putExtra("notification_id", notif_id);
 			// 设置 RemoteInput 结果
 			final Bundle remoteInputResults = new Bundle();
-			remoteInputResults.putCharSequence("key_voice_reply_text", reply_text);
-			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder("key_voice_reply_text").build() }, reply_intent, remoteInputResults);
-			Log.d(TAG, "Directly invoking MMAutoMessageReplyReceiver with reply: " + reply_text);
-			MainHook.invokeMMAutoReply(context, reply_intent);
-		} catch (final Exception e) {
-			Log.w(TAG, "Auto-reply API failed: " + e.getMessage());
+			remoteInputResults.putCharSequence(DEFAULT_AUTO_REPLY_RESULT_KEY, reply_text);
+			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY).build() }, reply_intent, remoteInputResults);
+			dispatched = MainHook.invokeMMAutoReply(context, reply_intent);
+		} catch (final RuntimeException e) {
+			Log.w(TAG, "NX_REPLY stage=synthetic_dispatch_failed notificationId=" + notif_id, e);
+			return;
 		}
+		if (!dispatched) return;
+		logReply("synthetic_dispatched", "notificationId=" + notif_id);
 		final String finalReplyText = reply_text;
 		mController.recastNotification(notif_id, n -> {
 			// 清除 pre-applied 标记，允许重新处理

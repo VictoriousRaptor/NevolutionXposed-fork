@@ -47,6 +47,8 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  */
 public class MainHook implements IXposedHookLoadPackage {
 	private static final String TAG = "MainHook";
+	public static final String WECHAT_AUTO_REPLY_ACTION = "com.tencent.mm.permission.MM_AUTO_REPLY_MESSAGE";
+	public static final String WECHAT_AUTO_REPLY_RESULT_KEY = "key_voice_reply_text";
 
 	private final XSharedPreferences pref = DeviceSharedPreferences.get(BuildConfig.APPLICATION_ID);
 	private final NevoDecoratorService wechat = new com.oasisfeng.nevo.decorators.wechat.WeChatDecorator();
@@ -54,9 +56,42 @@ public class MainHook implements IXposedHookLoadPackage {
 	private final NevoDecoratorService media = new com.oasisfeng.nevo.decorators.media.MediaDecorator();
 
 	private static Class<?> sMMAutoMessageReplyReceiverClass = null;
+	private static volatile com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved sReplyProfile = null;
 	// H2: 改用 ConcurrentHashMap 避免多条回复并发覆盖，以通知 ID 为 key
 	private static final ConcurrentHashMap<Integer, String> sPendingReplies = new ConcurrentHashMap<>();
 	private static volatile String sPendingReplyTextFallback = null; // 仅用于无 ID 场景的兜底
+
+	private static void logReply(String stage, String detail) {
+		String message = "NX_REPLY stage=" + stage + (detail == null || detail.isEmpty() ? "" : " " + detail);
+		Log.d(TAG, message);
+		XposedBridge.log(message);
+	}
+
+	/**
+	 * Resolves the reply profile for the installed WeChat build and validates every
+	 * descriptor by signature inside the WeChat class loader. Runs once per process.
+	 */
+	private static synchronized void resolveReplyProfile(Context context) {
+		if (context == null || sReplyProfile != null) return;
+		try {
+			final android.content.pm.PackageInfo info = context.getPackageManager().getPackageInfo("com.tencent.mm", 0);
+			final String versionName = info.versionName;
+			final long versionCode = android.os.Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode;
+			final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile profile =
+					com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.forPackage(versionName, versionCode);
+			final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved resolved =
+					profile.resolve(context.getClassLoader(), versionName, versionCode);
+			sReplyProfile = resolved;
+			logReply(resolved.isUsable() ? "profile_ready" : "profile_rejected", resolved.describe());
+		} catch (Throwable e) {
+			logReply("profile_resolution_failed", Log.getStackTraceString(e));
+		}
+	}
+
+	public static boolean isSyntheticReplyAvailable() {
+		final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved resolved = sReplyProfile;
+		return resolved != null && resolved.isUsable();
+	}
 
 	public static void setPendingReplyText(String text) {
 		sPendingReplyTextFallback = text;
@@ -364,6 +399,12 @@ public class MainHook implements IXposedHookLoadPackage {
 					if (context != null && ref.compareAndSet(null, context)) {
 						XposedBridge.log("hookWeChat: Application.onCreate context=" + context);
 						NevoDecoratorService.setAppContext(context);
+						resolveReplyProfile(context);
+						// Install the car-mode gate bypass before WeChat builds its
+						// notifications, so WeChat itself creates the car conversation
+						// with the reply PendingIntent that carries key_username. The
+						// synthetic path cannot provide that username by itself.
+						MainHook.this.hookCarModeBypass(context.getClassLoader());
 						LocalDecorator wechat = MainHook.this.wechat.getLocalDecorator("com.tencent.mm");
 						wechat.onCreate(pref);
 						if (!wechat.isDisabled() && (wechat instanceof HookSupport)) ((HookSupport)wechat).hook(loadPackageParam);
@@ -395,6 +436,7 @@ public class MainHook implements IXposedHookLoadPackage {
 				if (ctx != null) {
 					NevoDecoratorService.setAppContext(ctx.getApplicationContext());
 					XposedBridge.log("applyLocally: got Context from NM: " + NevoDecoratorService.getAppContext());
+					resolveReplyProfile(NevoDecoratorService.getAppContext());
 				}
 			} catch (Throwable e) {
 				XposedBridge.log("applyLocally: failed to get Context from NM: " + e.getMessage());
@@ -458,25 +500,23 @@ public class MainHook implements IXposedHookLoadPackage {
 					// Debug: log RemoteInput.getResultsFromIntent
 					try {
 						android.os.Bundle riResults = android.app.RemoteInput.getResultsFromIntent((android.content.Intent) param.args[1]);
-						XposedBridge.log("RemoteInput.getResultsFromIntent: " + riResults);
+						logReply("wechat_receiver_enter", "remoteInputKeys=" + (riResults == null ? "none" : riResults.keySet()));
 					} catch (Throwable e) {
-						XposedBridge.log("RemoteInput.getResultsFromIntent failed: " + e.getMessage());
+						logReply("wechat_receiver_remote_input_failed", Log.getStackTraceString(e));
 					}
 					// Try to hook car mode bypass if not already done
 					hookCarModeBypass(finalCl);
 					android.content.Intent intent = (android.content.Intent) param.args[1];
-					XposedBridge.log("MMAutoMessageReplyReceiver.onReceive: action=" + intent.getAction());
+					logReply("wechat_receiver_action", "action=" + intent.getAction());
 					if (intent.getExtras() != null) {
-						for (String key : intent.getExtras().keySet()) {
-							XposedBridge.log("MMAutoMessageReplyReceiver.onReceive: " + key + "=" + intent.getExtras().get(key));
-						}
+						logReply("wechat_receiver_extras", "keys=" + intent.getExtras().keySet());
 					}
 				}
 				@Override
 				protected void afterHookedMethod(MethodHookParam param) {
-					XposedBridge.log("MMAutoMessageReplyReceiver.onReceive: completed");
+					logReply("wechat_receiver_complete", "throwable=" + (param.getThrowable() != null));
 					if (param.getThrowable() != null) {
-						XposedBridge.log("MMAutoMessageReplyReceiver.onReceive: exception=" + param.getThrowable());
+						logReply("wechat_receiver_exception", Log.getStackTraceString(param.getThrowable()));
 					}
 				}
 			});
@@ -489,19 +529,13 @@ public class MainHook implements IXposedHookLoadPackage {
 						XposedHelpers.findAndHookMethod(receiverClass, method.getName(), method.getParameterTypes(), new XC_MethodHook() {
 							@Override
 							protected void beforeHookedMethod(MethodHookParam param) {
-								StringBuilder sb = new StringBuilder("MMAutoMessageReplyReceiver." + methodName + "(");
-								for (int i = 0; i < param.args.length; i++) {
-									if (i > 0) sb.append(", ");
-									sb.append(param.args[i]);
-								}
-								sb.append(")");
-								XposedBridge.log(sb.toString());
+								logReply("wechat_receiver_method_enter", "method=" + methodName + " argCount=" + param.args.length);
 							}
 							@Override
 							protected void afterHookedMethod(MethodHookParam param) {
-								XposedBridge.log("MMAutoMessageReplyReceiver." + methodName + " returned: " + param.getResult());
+								logReply("wechat_receiver_method_exit", "method=" + methodName + " throwable=" + (param.getThrowable() != null));
 								if (param.getThrowable() != null) {
-									XposedBridge.log("MMAutoMessageReplyReceiver." + methodName + " exception: " + param.getThrowable());
+									logReply("wechat_receiver_method_exception", "method=" + methodName + " " + Log.getStackTraceString(param.getThrowable()));
 								}
 							}
 						});
@@ -524,30 +558,34 @@ public class MainHook implements IXposedHookLoadPackage {
 		}
 	}
 
-	public static void invokeMMAutoReply(android.content.Context context, android.content.Intent intent) {
+	public static boolean invokeMMAutoReply(android.content.Context context, android.content.Intent intent) {
 		if (sMMAutoMessageReplyReceiverClass == null) {
-			Log.w(TAG, "MMAutoMessageReplyReceiver not hooked yet");
-			return;
+			logReply("synthetic_unavailable", "reason=receiver_not_hooked");
+			return false;
 		}
-		// H1: 使用动态搜索替代硬编码类名
+		resolveReplyProfile(context);
+		final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved resolved = sReplyProfile;
+		if (resolved == null || !resolved.isUsable()) {
+			// Without a validated car-mode gate the receiver returns at
+			// "not open car mode" and the reply is lost silently.
+			logReply("synthetic_unavailable", "reason=profile_unusable version="
+					+ (resolved == null ? "unknown" : resolved.versionName));
+			return false;
+		}
 		try {
-			Class<?> autoLogicClass = findClassByMethod(context.getClassLoader(), boolean.class, "f");
-			if (autoLogicClass == null) {
-				// fallback to hardcoded
-				autoLogicClass = XposedHelpers.findClass("rn1.a", context.getClassLoader());
-			}
-			final Class<?> finalClass = autoLogicClass;
-			String[] bypassMethods = {"f", "g", "c"};
-			for (String methodName : bypassMethods) {
+			final Class<?> gateClass = resolved.gateClass;
+			for (final String methodName : resolved.gateMethods) {
 				try {
-					XposedHelpers.findAndHookMethod(finalClass, methodName, new XC_MethodHook() {
+					XposedHelpers.findAndHookMethod(gateClass, methodName, new XC_MethodHook() {
 						@Override
 						protected void beforeHookedMethod(MethodHookParam param) { param.setResult(true); }
 					});
 				} catch (Throwable ignored) {} // hooks may already be added
 			}
-			Log.d(TAG, "Car mode bypass hooks activated in invokeMMAutoReply");
-		} catch (Throwable th) { /* hooks may already be added */ }
+			logReply("car_mode_bypass_ready", "class=" + gateClass.getName() + " methods=" + resolved.gateMethods);
+		} catch (Throwable th) {
+			logReply("car_mode_bypass_failed", Log.getStackTraceString(th));
+		}
 		try {
 			// H2: 设置 pendingReplyText 供 RemoteInput.getResultsFromIntent hook 使用
 			String replyText = intent.getStringExtra("reply_content");
@@ -557,27 +595,29 @@ public class MainHook implements IXposedHookLoadPackage {
 					sPendingReplies.put(notifId, replyText);
 				}
 				sPendingReplyTextFallback = replyText;
-				Log.d(TAG, "Set pendingReplyText: " + replyText);
+				logReply("synthetic_prepare", "notificationId=" + notifId + " inputLength=" + replyText.length());
 
 				// 使用 RemoteInput.addResultsToIntent 设置回复文本
 				android.app.RemoteInput[] remoteInputs = new android.app.RemoteInput[]{
-					new android.app.RemoteInput.Builder("key_voice_reply_text")
+					new android.app.RemoteInput.Builder(WECHAT_AUTO_REPLY_RESULT_KEY)
 						.setAllowFreeFormInput(true)
 						.build()
 				};
 				android.os.Bundle remoteInputResults = new android.os.Bundle();
-				remoteInputResults.putCharSequence("key_voice_reply_text", replyText);
+				remoteInputResults.putCharSequence(WECHAT_AUTO_REPLY_RESULT_KEY, replyText);
 				android.app.RemoteInput.addResultsToIntent(remoteInputs, intent, remoteInputResults);
-				Log.d(TAG, "Added RemoteInput results to intent");
+				logReply("synthetic_remote_input_attached", "resultKey=" + WECHAT_AUTO_REPLY_RESULT_KEY);
 			}
 
 			// 直接调用 onReceive
-			Object instance = sMMAutoMessageReplyReceiverClass.newInstance();
+			Object instance = sMMAutoMessageReplyReceiverClass.getDeclaredConstructor().newInstance();
 			java.lang.reflect.Method onReceive = sMMAutoMessageReplyReceiverClass.getMethod("onReceive", android.content.Context.class, android.content.Intent.class);
 			onReceive.invoke(instance, context, intent);
-			Log.d(TAG, "Directly invoked MMAutoMessageReplyReceiver.onReceive");
-		} catch (Exception e) {
-			Log.w(TAG, "Failed to invoke MMAutoMessageReplyReceiver: " + e.getMessage());
+			logReply("synthetic_dispatch_complete", "receiver=" + sMMAutoMessageReplyReceiverClass.getName());
+			return true;
+		} catch (Throwable e) {
+			logReply("synthetic_dispatch_failed", Log.getStackTraceString(e));
+			return false;
 		}
 	}
 
@@ -609,92 +649,44 @@ public class MainHook implements IXposedHookLoadPackage {
 
 	// H1: 动态搜索特征方法的辅助方法，避免硬编码混淆类名
 	/**
-	 * 在 classLoader 中搜索包含指定方法签名的类
-	 * @param methodReturnType 返回类型
-	 * @param methodName 方法名
-	 * @param paramTypes 参数类型
-	 * @return 找到的 Class，或 null
+	 * 返回当前进程已验证的版本画像；未解析时尝试用已捕获的 Application Context 解析。
+	 * 之前的实现按模糊方法名猜混淆类名，8.0.72 把 dn1.a 换成 rn1.a 后就失效了。
 	 */
-	private static Class<?> findClassByMethod(ClassLoader cl, Class<?> methodReturnType, String methodName, Class<?>... paramTypes) {
-		// 先尝试已知的硬编码类名（向后兼容）
-		String[] knownCandidates = {"rn1.a", "com.tencent.mm.booter.auto.AutoLogic"};
-		for (String name : knownCandidates) {
-			try {
-				Class<?> clazz = XposedHelpers.findClass(name, cl);
-				if (clazz != null) {
-					try {
-						clazz.getDeclaredMethod(methodName, paramTypes);
-						XposedBridge.log("findClassByMethod: found known class " + name);
-						return clazz;
-					} catch (NoSuchMethodException ignored) {}
-				}
-			} catch (Throwable ignored) {}
+	private static com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved currentProfile() {
+		com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved resolved = sReplyProfile;
+		if (resolved == null) {
+			resolveReplyProfile(NevoDecoratorService.getAppContext());
+			resolved = sReplyProfile;
 		}
-		// 动态搜索：遍历已加载的类（通过 ClassLoader 资源）
-		// 这是 fallback，性能开销较大，只在硬编码失败时使用
-		XposedBridge.log("findClassByMethod: known candidates failed, dynamic search not available in this context");
-		return null;
-	}
-
-	/**
-	 * 搜索包含 b(Intent) -> Bundle 方法的类（微信内部 RemoteInput 辅助类）
-	 */
-	private static Class<?> findRemoteInputHelperClass(ClassLoader cl) {
-		// 先尝试已知的硬编码类名
-		String[] knownCandidates = {"z2.s1", "com.tencent.mm.sdk.platformtools.RemoteInputHelper"};
-		for (String name : knownCandidates) {
-			try {
-				Class<?> clazz = XposedHelpers.findClass(name, cl);
-				if (clazz != null) {
-					for (Method m : clazz.getDeclaredMethods()) {
-						if (m.getName().equals("b") && m.getParameterCount() == 1
-								&& android.content.Intent.class.isAssignableFrom(m.getParameterTypes()[0])
-								&& android.os.Bundle.class.isAssignableFrom(m.getReturnType())) {
-							XposedBridge.log("findRemoteInputHelperClass: found " + name);
-							return clazz;
-						}
-					}
-				}
-			} catch (Throwable ignored) {}
-		}
-		XposedBridge.log("findRemoteInputHelperClass: no known candidate found");
-		return null;
+		return resolved;
 	}
 
 	private void hookCarModeBypass(ClassLoader cl) {
 		if (carModeBypassHooked) return;
 		try {
-			// H1: 动态搜索车载模式逻辑类
-			final Class<?> autoLogicClass = findClassByMethod(cl, boolean.class, "f");
-			if (autoLogicClass == null) {
-				XposedBridge.log("hookCarModeBypass: auto logic class not found, trying direct hook");
-				// 尝试直接 Hook 已知的硬编码类名
-				try {
-					final Class<?> fallback = XposedHelpers.findClass("rn1.a", cl);
-					hookAutoLogicMethods(fallback);
-				} catch (Throwable e) {
-					XposedBridge.log("hookCarModeBypass: fallback also failed: " + e.getMessage());
-				}
-			} else {
-				hookAutoLogicMethods(autoLogicClass);
+			final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved resolved = currentProfile();
+			if (resolved == null || !resolved.isUsable()) {
+				logReply("car_mode_bypass_skipped", "reason=profile_unusable");
+				return;
 			}
+			hookAutoLogicMethods(resolved.gateClass, resolved.gateMethods);
 
-			// H1: 动态搜索 RemoteInput 辅助类
+			// 版本画像中已通过签名校验的 RemoteInput 辅助类
 			try {
-				final Class<?> remoteInputHelper = findRemoteInputHelperClass(cl);
+				final Class<?> remoteInputHelper = resolved.helperClass;
 				if (remoteInputHelper != null) {
 					XposedHelpers.findAndHookMethod(remoteInputHelper, "b", android.content.Intent.class, new XC_MethodHook() {
 						@Override
 						protected void afterHookedMethod(MethodHookParam param) {
 							android.os.Bundle result = (android.os.Bundle) param.getResult();
-							XposedBridge.log("RemoteInputHelper.b() returned: " + result);
+							logReply("helper_result", "keys=" + (result == null ? "none" : result.keySet()));
 							if (result == null) {
 								String replyText = sPendingReplyTextFallback;
 								if (replyText != null) {
 									result = new android.os.Bundle();
-									result.putCharSequence("key_voice_reply_text", replyText);
+									result.putCharSequence(WECHAT_AUTO_REPLY_RESULT_KEY, replyText);
 									param.setResult(result);
-									XposedBridge.log("Injected RemoteInputHelper.b() with key_voice_reply_text=" + replyText);
+									logReply("helper_result_injected", "resultKey=" + WECHAT_AUTO_REPLY_RESULT_KEY + " inputLength=" + replyText.length());
 									sPendingReplyTextFallback = null;
 								}
 							}
@@ -716,9 +708,9 @@ public class MainHook implements IXposedHookLoadPackage {
 							String replyText = sPendingReplyTextFallback;
 							if (replyText != null) {
 								result = new android.os.Bundle();
-								result.putCharSequence("key_voice_reply_text", replyText);
+								result.putCharSequence(WECHAT_AUTO_REPLY_RESULT_KEY, replyText);
 								param.setResult(result);
-								XposedBridge.log("RemoteInput.getResultsFromIntent: injected key_voice_reply_text=" + replyText);
+								logReply("platform_result_injected", "resultKey=" + WECHAT_AUTO_REPLY_RESULT_KEY + " inputLength=" + replyText.length());
 								sPendingReplyTextFallback = null;
 							}
 						}
@@ -735,10 +727,9 @@ public class MainHook implements IXposedHookLoadPackage {
 		}
 	}
 
-	private void hookAutoLogicMethods(Class<?> autoLogicClass) {
-		XposedBridge.log("hookAutoLogicMethods: hooking " + autoLogicClass.getName());
-		String[] bypassMethods = {"f", "g", "c"};
-		for (String methodName : bypassMethods) {
+	private void hookAutoLogicMethods(final Class<?> autoLogicClass, java.util.List<String> bypassMethods) {
+		XposedBridge.log("hookAutoLogicMethods: hooking " + autoLogicClass.getName() + " " + bypassMethods);
+		for (final String methodName : bypassMethods) {
 			try {
 				XposedHelpers.findAndHookMethod(autoLogicClass, methodName, new XC_MethodHook() {
 					@Override
