@@ -1,8 +1,8 @@
 package com.oasisfeng.nevo.sdk;
 
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import com.oasisfeng.nevo.xposed.compat.PackageHookContext;
+import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 
 public interface HookSupport {
-	public void hook(XC_LoadPackage.LoadPackageParam loadPackageParam) throws XposedHelpers.ClassNotFoundError;
+	public void hook(PackageHookContext loadPackageParam) throws XposedHelpers.ClassNotFoundError;
 }

@@ -25,9 +25,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK packages
-        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
-      - name: Use official Gradle distribution on hosted runners
-        run: sed -i 's#https\\://mirrors.cloud.tencent.com/gradle/#https\\://services.gradle.org/distributions/#' gradle/wrapper/gradle-wrapper.properties
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
       - name: Build debug APK and run unit tests
         run: bash gradlew --no-daemon assembleDebug testDebugUnitTest
       - uses: actions/upload-artifact@v4
@@ -54,9 +52,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK packages
-        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
-      - name: Use official Gradle distribution on hosted runners
-        run: sed -i 's#https\\://mirrors.cloud.tencent.com/gradle/#https\\://services.gradle.org/distributions/#' gradle/wrapper/gradle-wrapper.properties
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
       - name: Build signed release
         env:
           KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -82,7 +78,7 @@ jobs:
           version=$(jq -r '.elements[0].versionName' "$metadata")
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           apk="build/outputs/apk/release/$(jq -r '.elements[0].outputFile' "$metadata")"
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk"
           tag="v${version}-build.${GITHUB_RUN_NUMBER}"
           mkdir -p release-assets
           cp "$apk" "release-assets/NevolutionXposed-${tag}.apk"
