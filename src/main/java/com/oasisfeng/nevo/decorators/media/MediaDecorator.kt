@@ -16,13 +16,12 @@ import android.widget.RemoteViews
 
 import java.lang.reflect.Method
 
-import de.robv.android.xposed.XC_MethodHook
-import de.robv.android.xposed.XposedBridge
-import de.robv.android.xposed.XposedHelpers
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import com.oasisfeng.nevo.xposed.compat.PackageHookContext
+import com.oasisfeng.nevo.xposed.compat.XC_MethodHook
+import com.oasisfeng.nevo.xposed.compat.XposedBridge
+import com.oasisfeng.nevo.xposed.compat.XposedHelpers
 
 import com.oasisfeng.nevo.sdk.Decorating
-import com.oasisfeng.nevo.sdk.Decorator
 import com.oasisfeng.nevo.sdk.HookSupport
 import com.oasisfeng.nevo.sdk.NevoDecoratorService
 import com.oasisfeng.nevo.xposed.BuildConfig
@@ -36,7 +35,7 @@ class MediaDecorator : NevoDecoratorService() {
 	override fun createSystemUIDecorator() : NevoDecoratorService.SystemUIDecorator {
 		/** not working */
 		return object : NevoDecoratorService.SystemUIDecorator(this.prefKey), HookSupport {
-			override fun hook(loadPackageParam: XC_LoadPackage.LoadPackageParam) {
+			override fun hook(loadPackageParam: PackageHookContext) {
 				val remotable = XposedHelpers.findClass("android.view.RemotableViewMethod", loadPackageParam.classLoader)
 				val target = XposedHelpers.findMethodExact(View::class.java, "setOutlineAmbientShadowColor", Int::class.java)
 				val isAnnotationPresent = XposedHelpers.findMethodBestMatch(Method::class.java, "isAnnotationPresent", Class::class.java)
@@ -118,7 +117,11 @@ class MediaDecorator : NevoDecoratorService() {
 							// Log.d(TAG, id + " " + action.getIcon() + " " + n.getSmallIcon());
 							remoteViews.setViewVisibility(id, View.VISIBLE)
 							// remoteViews.setImageViewBitmap(id, BitmapFactory.decodeResource(context.getResources(),action.getIcon().getResId()));
-							remoteViews.setImageViewIcon(id, Icon.createWithResource(target, action.getIcon().getResId()))
+							val icon = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+								Icon.createWithResource(target, action.getIcon().resId)
+							else
+								Icon.createWithResource(target, action.icon)
+							remoteViews.setImageViewIcon(id, icon)
 							remoteViews.setOnClickPendingIntent(id, action.actionIntent)
 							remoteViews.setInt(id, "setColorFilter", textColor)
 							remoteViews.setInt(id, "setBackgroundResource", selectableItemBackground) }
