@@ -16,6 +16,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.ContactsContract.Contacts;
 import android.provider.ContactsContract.Profile;
 import android.service.notification.StatusBarNotification;
@@ -44,6 +46,7 @@ import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat.MessagingStyle;
 import androidx.core.app.NotificationCompat.MessagingStyle.Message;
 import androidx.core.app.Person;
+import androidx.core.content.ContextCompat;
 import androidx.core.graphics.drawable.IconCompat;
 
 import static android.app.Notification.EXTRA_REMOTE_INPUT_HISTORY;
@@ -549,8 +552,8 @@ class MessagingBuilder {
 					final int id = Integer.parseInt(part);
 					mController.recastNotification(id, n -> {
 						// 清除 pre-applied 标记，允许重新处理
-						de.robv.android.xposed.XposedHelpers.setAdditionalInstanceField(n, "pre-applied", null);
-						de.robv.android.xposed.XposedHelpers.setAdditionalInstanceField(n, "applied", null);
+						com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "pre-applied", null);
+						com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "applied", null);
 						final Bundle extras = n.extras;
 						// 按女娲石源码逻辑添加用户回复
 						Bundle[] messages;
@@ -581,7 +584,7 @@ class MessagingBuilder {
 		} finally {
 			// 延迟清除防循环标志
 			final String finalReplyKey = replyKey;
-			mContext.getMainExecutor().execute(() -> mPendingReplies.remove(finalReplyKey));
+			new Handler(Looper.getMainLooper()).post(() -> mPendingReplies.remove(finalReplyKey));
 		}
 	} };
 
@@ -688,18 +691,15 @@ class MessagingBuilder {
 
 		{
 			final IntentFilter filter = new IntentFilter(ACTION_REPLY); filter.addAction(ACTION_MENTION); filter.addDataScheme(SCHEME_ID);
-			if (SDK_INT >= TIRAMISU) context.registerReceiver(mReplyReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-			else context.registerReceiver(mReplyReceiver, filter);
+			ContextCompat.registerReceiver(context, mReplyReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
 		}
 		{
 			final IntentFilter filter = new IntentFilter(ACTION_SYNTHETIC_REPLY); filter.addDataScheme(SCHEME_ID);
-			if (SDK_INT >= TIRAMISU) context.registerReceiver(mSyntheticReplyReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-			else context.registerReceiver(mSyntheticReplyReceiver, filter);
+			ContextCompat.registerReceiver(context, mSyntheticReplyReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
 		}
 		{
 			final IntentFilter filter = new IntentFilter(ACTION_ZOOM); filter.addDataScheme(SCHEME_ID);
-			if (SDK_INT >= TIRAMISU) context.registerReceiver(mZoomReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-			else context.registerReceiver(mZoomReceiver, filter);
+			ContextCompat.registerReceiver(context, mZoomReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
 		}
 	}
 
@@ -980,8 +980,8 @@ class MessagingBuilder {
 		final String finalReplyText = reply_text;
 		mController.recastNotification(notif_id, n -> {
 			// 清除 pre-applied 标记，允许重新处理
-			de.robv.android.xposed.XposedHelpers.setAdditionalInstanceField(n, "pre-applied", null);
-			de.robv.android.xposed.XposedHelpers.setAdditionalInstanceField(n, "applied", null);
+			com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "pre-applied", null);
+			com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "applied", null);
 			final Bundle extras = n.extras;
 			// 按女娲石源码逻辑添加用户回复
 			Bundle[] messages;

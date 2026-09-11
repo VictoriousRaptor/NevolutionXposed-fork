@@ -32,7 +32,6 @@ import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.Message;
 import android.os.Parcelable;
 import android.os.Process;
 import android.preference.PreferenceManager;
@@ -44,12 +43,10 @@ import android.widget.RemoteViews;
 import java.io.File;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -68,14 +65,13 @@ import static android.service.notification.NotificationListenerService.REASON_AP
 import static android.service.notification.NotificationListenerService.REASON_CANCEL;
 import static android.service.notification.NotificationListenerService.REASON_CHANNEL_BANNED;
 
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import com.oasisfeng.nevo.xposed.compat.PackageHookContext;
+import com.oasisfeng.nevo.xposed.compat.XC_MethodHook;
+import com.oasisfeng.nevo.xposed.compat.XposedBridge;
+import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 
 import com.oasisfeng.nevo.decorators.wechat.ConversationManager.Conversation;
 import com.oasisfeng.nevo.sdk.Decorating;
-import com.oasisfeng.nevo.sdk.Decorator;
 import com.oasisfeng.nevo.sdk.HookSupport;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.xposed.BuildConfig;
@@ -89,7 +85,6 @@ import com.oasisfeng.nevo.xposed.R;
  * @class WeChatImageDecorator.
  * 
  */
-@Decorator(title = R.string.decorator_wechat_title, description = R.string.decorator_wechat_description, priority = -20)
 public class WeChatDecorator extends NevoDecoratorService {
 	
 	public static final String WECHAT_PACKAGE = "com.tencent.mm";
@@ -124,48 +119,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 
 	private static long now() { return System.currentTimeMillis(); }
 
-	// 诊断回调
-	private static interface Diagnose { void diagnose(final XC_LoadPackage.LoadPackageParam loadPackageParam, final ClassLoader loader, final Class target); }
-
-	// 诊断钩子
-	private static void hookForDiagnose(final XC_LoadPackage.LoadPackageParam loadPackageParam, final String targetClassName, final Diagnose diagnose) {
-		final List<ClassLoader> loaders = new ArrayList<>();
-		final AtomicReference<Class> targetRef = new AtomicReference<>();
-		Class clazz = android.app.Notification.Builder.class;
-		Log.d(TAG, "hookForDiagnose clazz " + clazz);
-		XposedHelpers.findAndHookMethod(clazz, "setLargeIcon", Icon.class, new XC_MethodHook() {
-			@Override
-			protected void afterHookedMethod(MethodHookParam param) {
-				if (targetRef.get() != null) return;
-				// Log.d(TAG, "method " + param.method);
-				for (ClassLoader loader : loaders) {
-					// Log.d(TAG, "loader " + loader);
-					try {
-						Class target = XposedHelpers.findClass(targetClassName, loader);
-						if (target == null) {
-							Log.d(TAG, "cannot find " + targetClassName + " with " + loader);
-							continue;
-						}
-						Log.d(TAG, "target " + target);
-						// Class ni = XposedHelpers.findClass("com.tencent.mm.booter.notification.NotificationItem", loader);
-						targetRef.set(target);
-						if (diagnose != null) diagnose.diagnose(loadPackageParam, loader, target);
-					} catch (Exception ex) { Log.d(TAG, "find " + targetClassName + " failed with " + loader); }
-				}
-			}
-		});
-		clazz = ClassLoader.class; // 
-		// Log.d(TAG, "clazz " + clazz);
-		XposedBridge.hookAllConstructors(clazz, new XC_MethodHook() {
-			@Override
-			protected void afterHookedMethod(MethodHookParam param) {
-				ClassLoader cl = (ClassLoader)param.thisObject;
-				// Log.d(TAG, "ClassLoader " + cl);
-				loaders.add(cl);
-			}
-		});
-	}
-
 	@Override public LocalDecorator createLocalDecorator(String packageName) {
 		return new Local(this.prefKey);
 	}
@@ -186,7 +139,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		 * 
 		 * @param loadPackageParam
 		 */
-		@Override public void hook(XC_LoadPackage.LoadPackageParam loadPackageParam) {
+		@Override public void hook(PackageHookContext loadPackageParam) {
 			// 图片预览
 			Class<?> clazz = java.io.FileOutputStream.class;
 			XposedHelpers.findAndHookConstructor(clazz, String.class, boolean.class, new XC_MethodHook() {
@@ -213,67 +166,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 						mCreated = created;
 						mClosed = closed;
 					}
-				}
-			});
-		}
-
-		// 抓android.support.v4.app.s$c::c(android.graphics.Bitmap) <- android.support.v4.app.NotificationCompat$Builder::setLargeIcon
-		private void hookSetLargeIcon(final XC_LoadPackage.LoadPackageParam loadPackageParam, ClassLoader loader, Class target) {
-			for (java.lang.reflect.Method method : target.getDeclaredMethods()) {
-				Class[] types = method.getParameterTypes();
-				if (types.length != 1 || !android.graphics.Bitmap.class.equals(types[0])) continue;
-				XposedBridge.hookMethod(method, new XC_MethodHook() {
-					@Override
-					protected void afterHookedMethod(MethodHookParam param) {
-						Log.d(TAG, param.method + " " + param.args[0]);
-						Object stack = XposedHelpers.getAdditionalInstanceField(param.args[0], "stack");
-						if (stack instanceof Exception) Log.d(TAG, "stack", (Exception)stack);
-					}
-				});
-				XposedBridge.hookAllConstructors(android.graphics.Bitmap.class, new XC_MethodHook() {
-					@Override
-					protected void afterHookedMethod(MethodHookParam param) {
-						XposedHelpers.setAdditionalInstanceField(param.thisObject, "stack", new Exception());
-					}
-				});
-			}
-		}
-
-		// 抓com.tencent.mm.booter.notification.c::a(NotificationItem)
-		private void hookNotificationItem(final XC_LoadPackage.LoadPackageParam loadPackageParam, ClassLoader loader, Class target) {
-			for (java.lang.reflect.Method method : target.getDeclaredMethods()) {
-				Class[] types = method.getParameterTypes();
-				if (types.length == 0/* || !android.graphics.Bitmap.class.equals(types[0])*/) continue;
-				Log.d(TAG, "method " + method);
-				XposedBridge.hookMethod(method, new XC_MethodHook() {
-					@Override
-					protected void afterHookedMethod(MethodHookParam param) {
-						for (Object arg : param.args) Log.d(TAG, param.method + " " + arg);
-					}
-				});
-			}
-		}
-
-		// 抓com.tencent.mm.sdk.platformtools.am::dispatchMessage(android.os.Message)
-		private void hookDispatchMessage(final XC_LoadPackage.LoadPackageParam loadPackageParam, ClassLoader loader, Class target) {
-			XposedHelpers.findAndHookMethod(target, "dispatchMessage", Message.class, new XC_MethodHook() {
-				@Override
-				protected void afterHookedMethod(MethodHookParam param) {
-					Message msg = (Message)param.args[0];
-					Bundle data = msg.getData();
-					// Log.d(TAG, "data " + data);
-					int msgType = data.getInt("notification.show.message.type", -1);
-					// Log.d(TAG, "msgType " + msgType);
-					if (msgType == -1) return;
-					Log.d(TAG, param.method.getName() + " " + data);
-					// for (java.lang.reflect.Field field : ni.getDeclaredFields()) {
-					// 	try {
-					// 		field.setAccessible(true);
-					// 		Log.d(TAG, "ni " + field.getName() + " " + field.getType() + " " + field.get(param.args[0]));
-					// 	} catch (IllegalAccessException ex0) {
-					// 		Log.d(TAG, "ni error " + field.getName() + " " + field.getType() + " ");
-					// 	}
-					// }
 				}
 			});
 		}
@@ -475,12 +367,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 			setSortKey(n, String.valueOf(Long.MAX_VALUE - n.when + (is_group_chat ? GROUP_CHAT_SORT_KEY_SHIFT : 0))); // Place group chat below other messages
 
 			if (getAppContext() == null) {
-				try {
-					final java.lang.reflect.Field ctxField = nm.getClass().getDeclaredField("mContext");
-					ctxField.setAccessible(true);
-					final Context ctx = (Context) ctxField.get(nm);
-					if (ctx != null) setAppContext(ctx.getApplicationContext());
-				} catch (final Exception ignored) {}
+				Log.w(TAG, "Application context is not ready; skipping notification");
+				return Decorating.Unprocessed;
 			}
 			if (mMessagingBuilder == null) {
 				try {

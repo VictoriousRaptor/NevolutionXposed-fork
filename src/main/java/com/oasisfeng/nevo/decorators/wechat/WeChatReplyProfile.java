@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import de.robv.android.xposed.XposedHelpers;
+import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 
 /**
  * Version specific WeChat reply mappings.
