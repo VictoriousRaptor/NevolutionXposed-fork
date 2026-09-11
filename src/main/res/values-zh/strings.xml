@@ -17,9 +17,13 @@
 
 <resources>
 	<string name="app_name">女娲石Xposed</string>
+	<string name="xposed_description">基于现代 libxposed API 102 增强微信、MIUI 与媒体通知。</string>
 
-	<string name="decorator_enabled">启用此插件</string>
-	<string name="decorator_fix_enabled">启用此补丁</string>
+	<string name="settings_title">女娲石 Xposed 设置</string>
+	<string name="settings_core_category">核心功能</string>
+	<string name="settings_optional_category">可选增强</string>
+	<string name="settings_apply_title">应用设置</string>
+	<string name="settings_restart_summary">修改后请重启对应的目标进程。微信增强默认开启；可能影响系统全局通知的可选增强默认关闭。</string>
 
 	<string name="decorators_misc_label">女娲石 - 通用插件集</string>
 
@@ -42,7 +46,6 @@
 
 	<string name="decorator_wechat_title">微信通知增强</string>
 	<string name="decorator_wechat_description">符合当代 Android 的最佳通知体验：可展开的会话样式、直接回复、划除即已读等高级特性。</string>
-	<string name="decorator_wechat_miui_fix">修正MIUI开发版下微信通知增强的问题</string>
 	<string name="self_display_name">我</string>
 	<string name="action_reply">回复</string>
 	<string name="action_zoom">缩放</string>
@@ -61,5 +64,21 @@
 
 	<string name="decorator_media_title">媒体通知增强</string>
 	<string name="decorator_media_description">为媒体通知产生Android O样式的外观。</string>
+
+	<!-- Settings -->
+
+	<string name="pref_activate_title">启用</string>
+	<string name="pref_activate_summary_wechat_not_installed">“微信”未安装</string>
+	<string name="pref_activate_summary_nevo_not_installed">“女娲石”尚未安装</string>
+	<string name="pref_activate_summary_already_activated">已启用</string>
+	<string name="pref_extension_title">扩展包</string>
+	<string name="pref_extension_summary">添加更多特性（快捷回复、划掉标记已读 等）</string>
+	<string name="pref_extension_summary_auto">需要安装“Android Auto”以支持更多特性（快捷回复、划掉标记已读 等）</string>
+	<string name="pref_extension_summary_installed">已安装</string>
+	<string name="pref_mention_action_title">添加 @提及 式快捷回复</string>
+	<string name="pref_mention_action_summary">额外的快捷回复操作，提及群聊中的最后发言者。\n注意，受接口限制，这 *不会* 像在聊天界面中的提及动作那样触发对方的提醒。</string>
+	<string name="pref_wear_title">Wear OS (实验性)</string>
+	<string name="pref_wear_summary">同步通知至 Wear OS 设备</string>
+	<string name="pref_version_title">版本</string>
 
 </resources>

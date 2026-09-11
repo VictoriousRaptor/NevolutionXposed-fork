@@ -22,9 +22,8 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import com.oasisfeng.nevo.xposed.compat.XposedBridge;
+import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
 import com.oasisfeng.nevo.xposed.R;
@@ -47,17 +46,13 @@ public abstract class NevoDecoratorService {
 	private static volatile Context appContext, packageContext;
 
 	public static Context getAppContext() {
-		if (appContext == null) {
-			try {
-				final android.app.Application app = android.app.AndroidAppHelper.currentApplication();
-				if (app != null) appContext = app.getApplicationContext();
-			} catch (final Exception ignored) {}
-		}
 		return appContext;
 	}
 
 	public static void setAppContext(Context context) {
-		appContext = context;
+		Context application = context == null ? null : context.getApplicationContext();
+		appContext = application != null ? application : context;
+		packageContext = null;
 	}
 
 	protected static Context getPackageContext() {

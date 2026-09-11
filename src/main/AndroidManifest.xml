@@ -3,27 +3,34 @@
 	>
 
 	<uses-permission android:name="com.tencent.mm.permission.MM_AUTO_REPLY_MESSAGE" />
+	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
 	<application
+		android:name=".ModuleApplication"
 		android:allowBackup="true"
+		android:description="@string/xposed_description"
 		android:icon="@mipmap/ic_launcher"
 		android:label="@string/app_name"
 		android:roundIcon="@mipmap/ic_launcher_round"
 		android:supportsRtl="true"
 		android:theme="@style/AppTheme">
-		<meta-data
-			android:name="xposedmodule"
-			android:value="true" />
-		<meta-data
-			android:name="xposeddescription"
-			android:value="通过xposed实现nevolution，希望可以解决持续性通知无法修改、微信通知替换有延迟和某些系统下服务不够稳定（被杀）的问题" />
-		<meta-data
-			android:name="xposedminversion"
-			android:value="54" />
-		<meta-data
-			android:name="xposedscope"
-			android:resource="@array/xposed_scope" />
-
+		<activity
+			android:name=".MainActivity"
+			android:enabled="true"
+			android:exported="true">
+			<intent-filter>
+				<action android:name="android.intent.action.MAIN" />
+				<category android:name="android.intent.category.LAUNCHER" />
+			</intent-filter>
+			<intent-filter>
+				<action android:name="android.intent.action.MAIN" />
+				<category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
+			</intent-filter>
+			<intent-filter>
+				<action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+				<category android:name="android.intent.category.DEFAULT" />
+			</intent-filter>
+		</activity>
 
 	</application>
 

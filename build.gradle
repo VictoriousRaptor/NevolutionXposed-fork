@@ -1,47 +1,39 @@
 buildscript {
-	ext.gradle_version = '8.7.3'
-	ext.kotlin_version = '2.0.21'
+	ext.gradle_version = '9.1.1'
 
 	repositories {
 		google()
 		mavenCentral()
-		maven { url "https://api.xposed.info/" }
 	}
 
 	dependencies {
 		classpath "com.android.tools.build:gradle:$gradle_version"
-		classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
 	}
 }
 
 repositories {
 	google()
 	mavenCentral()
-	maven { url "https://api.xposed.info/" }
 }
 
 if (! project.plugins.hasPlugin("com.android.feature")) apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
 
 android {
 	namespace 'com.oasisfeng.nevo.xposed'
-	compileSdk 34
+	compileSdk 37
+	compileSdkMinor 0
 
 	defaultConfig {
 		minSdk 26
 		targetSdk 34
-		versionCode 5
-		versionName "2.0.3"
+		versionCode 7
+		versionName "3.0.1"
 		testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 	}
 
 	compileOptions {
 		sourceCompatibility JavaVersion.VERSION_17
 		targetCompatibility JavaVersion.VERSION_17
-	}
-
-	kotlinOptions {
-		jvmTarget = '17'
 	}
 
 	buildFeatures {
@@ -72,15 +64,15 @@ android {
 	}
 
 	sourceSets {
-		main.java.srcDirs += 'src/main/kotlin'
+		main.kotlin.srcDirs += 'src/main/kotlin'
 	}
 }
 
 dependencies {
-	compileOnly 'de.robv.android.xposed:api:82'
-	compileOnly 'de.robv.android.xposed:api:82:sources'
-	implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
+	compileOnly 'io.github.libxposed:api:102.0.0'
+	implementation 'io.github.libxposed:service:102.0.0'
 	implementation 'androidx.core:core:1.12.0'
 	implementation 'androidx.annotation:annotation:1.7.1'
 	implementation 'androidx.palette:palette:1.0.0'
+	testImplementation 'junit:junit:4.13.2'
 }
