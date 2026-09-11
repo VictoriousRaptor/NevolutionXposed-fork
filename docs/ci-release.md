@@ -1,12 +1,13 @@
 # CI and signed releases
 
 The Android workflow builds debug APKs and runs unit tests for pull requests to
-master and pushes to master, fix/** and codex/**. Manual runs build only.
+master and pushes to master, fix/** and codex/**. Manual runs on master also
+publish a signed release; manual runs on other branches build only.
 Merging this workflow into master enables automatic releases on subsequent
 master pushes, including the merge itself. Adding it to a feature branch alone
 does not enable publishing from master.
 
-After the build job passes, master pushes build and verify a signed release APK
+After the build job passes, master pushes and manual master runs build and verify a signed release APK
 and publish it with SHA256SUMS.txt. Tags use v2.0.3-build.<run number> so multiple
 master updates at the same app version have distinct releases. Reruns preserve
 an already published release. Android versionCode is 5; bump it for the next app
