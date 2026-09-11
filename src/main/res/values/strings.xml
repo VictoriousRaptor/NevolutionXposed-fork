@@ -1,8 +1,12 @@
 <resources>
 	<string name="app_name">NevolutionXposed</string>
+	<string name="xposed_description">Enhances WeChat, MIUI and media notifications with modern libxposed API 102.</string>
 
-	<string name="decorator_enabled">Enable this Decorator</string>
-	<string name="decorator_fix_enabled">Enable this Fix</string>
+	<string name="settings_title">NevolutionXposed settings</string>
+	<string name="settings_core_category">Core feature</string>
+	<string name="settings_optional_category">Optional enhancements</string>
+	<string name="settings_apply_title">Applying changes</string>
+	<string name="settings_restart_summary">Restart the affected target process after changing a setting. WeChat enhancement is enabled by default; optional system-wide enhancements are disabled by default.</string>
 
 	<!-- decorators-misc -->
 
@@ -27,7 +31,6 @@
 
 	<string name="decorator_wechat_title">WeChat</string>
 	<string name="decorator_wechat_description">Better notification for WeChat: Messaging Style, Direct Reply and Clear to Mark Read.</string>
-	<string name="decorator_wechat_miui_fix">Fix problem in MIUI dev.</string>
 	<string name="self_display_name">我</string>
 	<string name="action_reply">Reply</string>
 	<string name="action_zoom">Zoom</string>

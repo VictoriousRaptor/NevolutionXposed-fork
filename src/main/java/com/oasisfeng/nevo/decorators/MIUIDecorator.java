@@ -12,10 +12,9 @@ import android.service.notification.StatusBarNotification;
 import android.util.ArrayMap;
 import android.util.Log;
 
-import de.robv.android.xposed.XposedHelpers;
+import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 
 import com.oasisfeng.nevo.sdk.Decorating;
-import com.oasisfeng.nevo.sdk.Decorator;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.xposed.R;
 import com.oasisfeng.nevo.decorators.media.ColorUtil;
