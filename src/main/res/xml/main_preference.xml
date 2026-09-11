@@ -1,38 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" >
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+	android:title="@string/settings_title">
 
-	<!-- wechat -->
-	<PreferenceCategory 
-		android:key="WeChatDecorator"
-		android:title="@string/decorator_wechat_title">
+	<PreferenceCategory
+		android:title="@string/settings_core_category">
 		<CheckBoxPreference 
 			android:key="WeChatDecorator.enabled"
+			android:defaultValue="true"
 			android:summary="@string/decorator_wechat_description"
-			android:title="@string/decorator_enabled"/>
-		<CheckBoxPreference 
-			android:key="WeChatDecorator.miui_fix"
-			android:summary="@string/decorator_wechat_miui_fix"
-			android:title="@string/decorator_fix_enabled"/>
+			android:title="@string/decorator_wechat_title"/>
 	</PreferenceCategory>
 
-	<!-- miui -->
-	<PreferenceCategory 
-		android:key="MIUIDecorator"
-		android:title="@string/decorator_miui_title">
+	<PreferenceCategory
+		android:title="@string/settings_optional_category">
 		<CheckBoxPreference 
 			android:key="MIUIDecorator.enabled"
+			android:defaultValue="false"
 			android:summary="@string/decorator_miui_description"
-			android:title="@string/decorator_enabled"/>
-	</PreferenceCategory>
-
-	<!-- media -->
-	<PreferenceCategory 
-		android:key="MediaDecorator"
-		android:title="@string/decorator_media_title">
+			android:title="@string/decorator_miui_title"/>
 		<CheckBoxPreference 
 			android:key="MediaDecorator.enabled"
+			android:defaultValue="false"
 			android:summary="@string/decorator_media_description"
-			android:title="@string/decorator_enabled"/>
+			android:title="@string/decorator_media_title"/>
 	</PreferenceCategory>
+
+	<Preference
+		android:selectable="false"
+		android:summary="@string/settings_restart_summary"
+		android:title="@string/settings_apply_title" />
 
 </PreferenceScreen>
