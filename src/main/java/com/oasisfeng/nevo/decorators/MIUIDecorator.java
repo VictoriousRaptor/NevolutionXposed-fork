@@ -1,15 +1,11 @@
 package com.oasisfeng.nevo.decorators;
 
-import android.app.Application;
 import android.app.Notification;
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
-import android.graphics.Color;
 import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.Bundle;
 import android.service.notification.StatusBarNotification;
-import android.util.ArrayMap;
 import android.util.Log;
 
 import com.oasisfeng.nevo.xposed.compat.XposedHelpers;

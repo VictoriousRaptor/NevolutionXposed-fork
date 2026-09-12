@@ -9,8 +9,17 @@ import java.util.WeakHashMap;
 
 public final class XposedHelpers {
 	private static final Map<Object, Map<String, Object>> ADDITIONAL_FIELDS = new WeakHashMap<>();
+	/** Striped monitors so notification threads do not serialize on a single global lock. */
+	private static final Object[] FIELD_LOCKS = new Object[16];
+	static {
+		for (int i = 0; i < FIELD_LOCKS.length; i++) FIELD_LOCKS[i] = new Object();
+	}
 
 	private XposedHelpers() {}
+
+	private static Object fieldLock(Object receiver) {
+		return FIELD_LOCKS[(System.identityHashCode(receiver) >>> 1) % FIELD_LOCKS.length];
+	}
 
 	public static Class<?> findClass(String className, ClassLoader classLoader) {
 		try {
@@ -52,17 +61,6 @@ public final class XposedHelpers {
 	public static Object findAndHookMethod(Class<?> clazz, String methodName, Object... parameterTypesAndCallback) {
 		ParsedHook parsed = parseHook(parameterTypesAndCallback);
 		return XposedBridge.hookMethod(findMethodExact(clazz, methodName, parsed.parameterTypes), parsed.callback);
-	}
-
-	public static Object findAndHookConstructor(Class<?> clazz, Object... parameterTypesAndCallback) {
-		ParsedHook parsed = parseHook(parameterTypesAndCallback);
-		try {
-			Constructor<?> constructor = clazz.getDeclaredConstructor(parsed.parameterTypes);
-			constructor.setAccessible(true);
-			return XposedBridge.hookMethod(constructor, parsed.callback);
-		} catch (NoSuchMethodException e) {
-			throw new NoSuchMethodError(clazz.getName() + " constructor");
-		}
 	}
 
 	public static Object callMethod(Object receiver, String methodName, Object... args) {
@@ -113,14 +111,14 @@ public final class XposedHelpers {
 	}
 
 	public static Object getAdditionalInstanceField(Object receiver, String key) {
-		synchronized (ADDITIONAL_FIELDS) {
+		synchronized (fieldLock(receiver)) {
 			Map<String, Object> fields = ADDITIONAL_FIELDS.get(receiver);
 			return fields == null ? null : fields.get(key);
 		}
 	}
 
 	public static Object setAdditionalInstanceField(Object receiver, String key, Object value) {
-		synchronized (ADDITIONAL_FIELDS) {
+		synchronized (fieldLock(receiver)) {
 			Map<String, Object> fields = ADDITIONAL_FIELDS.get(receiver);
 			Object previous = fields == null ? null : fields.get(key);
 			if (value == null) {

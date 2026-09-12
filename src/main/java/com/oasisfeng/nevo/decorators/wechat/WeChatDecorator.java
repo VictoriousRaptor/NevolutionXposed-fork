@@ -20,31 +20,18 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.Icon;
 import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Parcelable;
 import android.os.Process;
-import android.preference.PreferenceManager;
 import android.provider.Settings;
-import android.service.notification.StatusBarNotification;
 import android.util.Log;
-import android.widget.RemoteViews;
 
 import java.io.File;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -53,22 +40,14 @@ import java.util.regex.Pattern;
 import androidx.annotation.ColorInt;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
-import androidx.annotation.StringRes;
 import androidx.core.app.NotificationCompat.MessagingStyle;
 import androidx.core.graphics.drawable.IconCompat;
 
 import static android.os.Build.VERSION.SDK_INT;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
-import static android.os.Build.VERSION_CODES.P;
-import static android.service.notification.NotificationListenerService.REASON_APP_CANCEL;
-import static android.service.notification.NotificationListenerService.REASON_CANCEL;
-import static android.service.notification.NotificationListenerService.REASON_CHANNEL_BANNED;
 
 import com.oasisfeng.nevo.xposed.compat.PackageHookContext;
-import com.oasisfeng.nevo.xposed.compat.XC_MethodHook;
-import com.oasisfeng.nevo.xposed.compat.XposedBridge;
-import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 
 import com.oasisfeng.nevo.decorators.wechat.ConversationManager.Conversation;
 import com.oasisfeng.nevo.sdk.Decorating;
@@ -155,7 +134,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 
 		private MessagingBuilder mMessagingBuilder;
 		private String channelGroupMessage, channelMessage, channelMisc;
-		private boolean mWeChatTargetingO;
+		/** Resolved once per process; the installed WeChat build never changes while it runs. */
+		private Boolean mWeChatTargetingO;
 		private final ConversationManager mConversationManager = new ConversationManager();
 
 		@Override public void onCreate(SharedPreferences pref) {
@@ -179,7 +159,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 
 		@Override public Decorating apply(NotificationManager nm, String tag, int id, Notification n) {
 			if (ImagePreviewLoader.isPreview(n)) return Decorating.Processed;
-			mWeChatTargetingO = isWeChatTargeting26OrAbove();
+			if (mWeChatTargetingO == null) mWeChatTargetingO = isWeChatTargeting26OrAbove();
 			if (BuildConfig.DEBUG) Log.d(TAG, "apply tag " + tag + " id " + id);
 
 			// 排除通话通知（语音通话、视频通话）- 只排除通话状态通知，不排除普通消息
@@ -352,10 +332,11 @@ public class WeChatDecorator extends NevoDecoratorService {
 				}
 			}
 			if (BuildConfig.DEBUG) Log.d(TAG, "Calling buildFromExtender...");
-			MessagingStyle messaging = mMessagingBuilder.buildFromExtender(conversation, id, n, title, getArchivedNotifications(id));
+			final List<Notification> archive = getArchivedNotifications(id);
+			MessagingStyle messaging = mMessagingBuilder.buildFromExtender(conversation, id, n, title, archive);
 			if (BuildConfig.DEBUG) Log.d(TAG, "buildFromExtender returned: " + (messaging != null ? "non-null" : "null")); // build message from android auto
 			if (messaging == null)	// EXTRA_TEXT will be written in buildFromArchive()
-				messaging = mMessagingBuilder.buildFromArchive(conversation, n, title, getArchivedNotifications(id));
+				messaging = mMessagingBuilder.buildFromArchive(conversation, n, title, archive);
 			if (messaging == null) return Decorating.Unprocessed;
 			final List<MessagingStyle.Message> messages = messaging.getMessages();
 			if (messages.isEmpty()) return Decorating.Unprocessed;
@@ -409,13 +390,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 			return Decorating.Processed;
 		}
 
-		private void reviveNotificationAfterChannelDeletion(final int id) {
-			if (BuildConfig.DEBUG) Log.d(TAG, "Revive silently: " + id);
-			modifyNotification(id, n -> {
-				n.extras.putBoolean(KEY_SILENT_REVIVAL, true);
-			});
-		}
-
 		@RequiresApi(O) private NotificationChannel migrate(NotificationManager nm, final String old_id, final String new_id, final String new_name, final boolean silent) {
 			final NotificationChannel channel_message = nm.getNotificationChannel(old_id);
 			nm.deleteNotificationChannel(old_id);
@@ -447,7 +421,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		}
 
 		@Nullable private Uri getDefaultSound() {	// Before targeting O, WeChat actually plays sound by itself (not via Notification).
-			return mWeChatTargetingO ? Settings.System.DEFAULT_NOTIFICATION_URI : null;
+			return Boolean.TRUE.equals(mWeChatTargetingO) ? Settings.System.DEFAULT_NOTIFICATION_URI : null;
 		}
 
 		private boolean isWeChatTargeting26OrAbove() {
