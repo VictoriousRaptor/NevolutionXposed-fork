@@ -483,6 +483,50 @@ class MessagingBuilder {
 		return PendingIntent.getBroadcast(mContext, 0, proxy.setPackage(mContext.getPackageName()), pendingIntentFlags());
 	}
 
+	/**
+	 * Appends only the inline reply action from WeChat's car conversation, leaving the rest of the
+	 * notification untouched. Used for message types whose original layout is kept on purpose
+	 * (stickers, video, files, links, …) but which should still be replyable from the notification.
+	 */
+	boolean attachReplyAction(final int id, final Notification n) {
+		final Notification.CarExtender.UnreadConversation convs = new Notification.CarExtender(n).getUnreadConversation();
+		if (convs == null) {
+			logReply("action_media_reply_skipped", "notificationId=" + id + " reason=no_car_conversation");
+			return false;
+		}
+		final PendingIntent onReply = convs.getReplyPendingIntent();
+		if (onReply == null || SDK_INT < N) {
+			logReply("action_media_reply_skipped", "notificationId=" + id + " reason=no_reply_intent");
+			return false;
+		}
+		final RemoteInput remoteInput = convs.getRemoteInput();
+		final RemoteInput replyInput;
+		if (remoteInput != null) {
+			final RemoteInput.Builder builder = new RemoteInput.Builder(remoteInput.getResultKey())
+					.addExtras(remoteInput.getExtras()).setAllowFreeFormInput(true);
+			final String participant = convs.getParticipant();
+			if (participant != null) builder.setLabel(participant);
+			replyInput = builder.build();
+		} else {
+			replyInput = new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY)
+					.setAllowFreeFormInput(true).setLabel(actionReply).build();
+		}
+		final PendingIntent proxy = proxyDirectReply(id, n, onReply, replyInput,
+				n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY), null);
+		final Action.Builder replyAction = new Action.Builder(null, actionReply, proxy)
+				.addRemoteInput(replyInput).setAllowGeneratedReplies(true);
+		if (SDK_INT >= P) replyAction.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
+
+		final Action[] existing = n.actions;
+		final Action[] merged = new Action[existing == null ? 1 : existing.length + 1];
+		if (existing != null) System.arraycopy(existing, 0, merged, 0, existing.length);
+		merged[merged.length - 1] = replyAction.build();
+		setActions(n, merged);
+		logReply("action_media_reply_attached", "notificationId=" + id + " resultKey=" + replyInput.getResultKey()
+				+ " existingActions=" + (existing == null ? 0 : existing.length));
+		return true;
+	}
+
 	private final Set<String> mPendingReplies = new java.util.HashSet<>();
 
 	private final BroadcastReceiver mReplyReceiver = new BroadcastReceiver() { @Override public void onReceive(final Context context, final Intent proxy_intent) {
