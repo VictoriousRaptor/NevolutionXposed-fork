@@ -28,8 +28,21 @@ public class RemotePreferenceStoreTest {
 
 		assertEquals(RemotePreferenceStore.BOOLEAN_KEYS.length, merged.size());
 		assertEquals(Boolean.TRUE, merged.get("WeChatDecorator.enabled"));
+		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
 		assertEquals(Boolean.FALSE, merged.get("MIUIDecorator.enabled"));
 		assertEquals(Boolean.FALSE, merged.get("MediaDecorator.enabled"));
+	}
+
+	@Test public void imagePreviewStaysOffUntilTheUserOptsIn() {
+		Map<String, Boolean> values = new LinkedHashMap<>();
+
+		RemotePreferenceStore.applySchemaMigration(values, 1);
+
+		assertEquals(Boolean.FALSE, values.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
+		// An explicit user choice still wins over the default.
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.merge(
+				Collections.singletonMap(RemotePreferenceStore.KEY_IMAGE_PREVIEW, true), Collections.emptyMap())
+				.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
 	}
 
 	@Test public void obsoleteMiuiFixPreferenceIsNotSynchronized() {
