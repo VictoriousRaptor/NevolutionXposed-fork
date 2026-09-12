@@ -130,6 +130,9 @@ public class WeChatDecorator extends NevoDecoratorService {
 		
 		private final WeChatImageEvents imageEvents = new WeChatImageEvents();
 		private final ImagePreviewLoader imagePreviews = new ImagePreviewLoader(imageEvents);
+		private static final String PREF_IMAGE_PREVIEW = "WeChatDecorator.image_preview";
+		/** Opt-in: without the setting, notifications keep WeChat's original [图片] text. */
+		private boolean mImagePreviewEnabled;
 		private static void imageLog(String stage, String details) {
 			if (BuildConfig.DEBUG) Log.i(TAG, "NX_IMAGE stage=" + stage + " " + details);
 		}
@@ -143,6 +146,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 		 * @param loadPackageParam
 		 */
 		@Override public void hook(PackageHookContext loadPackageParam) {
+			if (! mImagePreviewEnabled) {
+				imageLog("hooks_skipped", "reason=preview_disabled scans=0");
+				return;
+			}
 			imageEvents.install(getAppContext(), loadPackageParam.classLoader);
 		}
 
@@ -152,14 +159,15 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private final ConversationManager mConversationManager = new ConversationManager();
 
 		@Override public void onCreate(SharedPreferences pref) {
-			imageLog("process_init", "revision=image-events-1");
+			imageLog("process_init", "revision=image-events-7");
 			super.onCreate(pref);
+			mImagePreviewEnabled = pref.getBoolean(PREF_IMAGE_PREVIEW, false);
 
 			mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);		// Must be called after loadPreferences().
 			channelGroupMessage = moduleString(R.string.channel_group_message, "群聊消息");
 			channelMessage = moduleString(R.string.channel_message, "新消息");
 			channelMisc = moduleString(R.string.channel_misc, "其他通知");
-			imageLog("decorator_ready", "disabled=" + isDisabled());
+			imageLog("decorator_ready", "disabled=" + isDisabled() + " image_preview=" + mImagePreviewEnabled);
 		}
 
 		private String moduleString(int resource, String fallback) {
@@ -247,10 +255,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 				// H3: 使用后立即清理，避免脏数据影响后续通知
 				sLastCallType = null;
 				sLastCallTime = 0;
-			}
-			// Post the text notification immediately. Resolve only message-associated paths off the UI thread.
-			if (content != null && content.endsWith("[图片]")) {
-				imagePreviews.request(getAppContext(), nm, tag, id, n);
 			}
 			// 表情包/视频/文件等消息不做处理，保留微信原始通知内容
 			if (content != null) {
@@ -353,6 +357,15 @@ public class WeChatDecorator extends NevoDecoratorService {
 			final List<MessagingStyle.Message> messages = messaging.getMessages();
 			if (messages.isEmpty()) return Decorating.Unprocessed;
 
+			if (mImagePreviewEnabled) {
+				if (content != null && content.endsWith("[图片]")) {
+					// The car conversation resolves the talker (key_username) while rebuilding; queue on that identity.
+					imagePreviews.request(getAppContext(), nm, tag, id, n, () -> conversation.key);
+				} else {
+					// A later message replaces the notification; keep the image while it is still part of the conversation.
+					imagePreviews.keepPreview(getAppContext(), nm, tag, id, n, conversation.key, messages);
+				}
+			}
 			if (is_group_chat) messaging.setGroupConversation(true).setConversationTitle(title);
 			MessagingBuilder.flatIntoExtras(messaging, extras);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
