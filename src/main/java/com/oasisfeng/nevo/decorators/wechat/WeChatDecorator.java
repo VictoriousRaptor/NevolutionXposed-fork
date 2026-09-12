@@ -128,8 +128,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 			super(prefKey);
 		}
 		
-		private String mPath;
-		private long mCreated, mClosed;
+		private final ImagePreviewLoader imagePreviews = new ImagePreviewLoader();
+		private static void imageLog(String stage, String details) {
+			if (BuildConfig.DEBUG) Log.i(TAG, "NX_IMAGE stage=" + stage + " " + details);
+		}
 	
 		/**
 		 * 
@@ -140,34 +142,29 @@ public class WeChatDecorator extends NevoDecoratorService {
 		 * @param loadPackageParam
 		 */
 		@Override public void hook(PackageHookContext loadPackageParam) {
-			// 图片预览
-			Class<?> clazz = java.io.FileOutputStream.class;
-			XposedHelpers.findAndHookConstructor(clazz, String.class, boolean.class, new XC_MethodHook() {
-				@Override
-				protected void beforeHookedMethod(MethodHookParam param) {
-					String path = (String)param.args[0];
-					if (path == null || !path.contains("/image2/")) return;
-					long created = now();
-					XposedHelpers.setAdditionalInstanceField(param.thisObject, "path", path);
-					XposedHelpers.setAdditionalInstanceField(param.thisObject, "created", created);
-					if (BuildConfig.DEBUG) Log.d(TAG, created + " " + path);
-				}
-			});
-			XposedHelpers.findAndHookMethod(clazz, "close", new XC_MethodHook() {
-				@Override
-				protected void afterHookedMethod(MethodHookParam param) {
-					String path = (String)XposedHelpers.getAdditionalInstanceField(param.thisObject, "path");
-					if (path == null) return;
-					long created = (Long)XposedHelpers.getAdditionalInstanceField(param.thisObject, "created");
-					long closed = now();
-					if (BuildConfig.DEBUG) Log.d(TAG, created + "=>" + closed + " " + path);
-					synchronized (this) {
-						mPath = path;
-						mCreated = created;
-						mClosed = closed;
+			imageLog("hooks_begin", "revision=image-fix-1");
+			// Diagnostics only: image lookup no longer depends on intercepting Java file writes.
+			try {
+				XposedHelpers.findAndHookConstructor(java.io.FileOutputStream.class, String.class, boolean.class, new XC_MethodHook() {
+					@Override protected void afterHookedMethod(MethodHookParam param) {
+						String path = (String) param.args[0];
+						if (path == null || !path.contains("/image2/") || param.thisObject == null) return;
+						XposedHelpers.setAdditionalInstanceField(param.thisObject, "nxImageWrite", Boolean.TRUE);
+						imageLog("write_open", "jpg=" + path.endsWith(".jpg"));
 					}
-				}
-			});
+				});
+				XposedHelpers.findAndHookMethod(java.io.FileOutputStream.class, "close", new XC_MethodHook() {
+					@Override protected void afterHookedMethod(MethodHookParam param) {
+						if (XposedHelpers.getAdditionalInstanceField(param.thisObject, "nxImageWrite") == null) return;
+						XposedHelpers.setAdditionalInstanceField(param.thisObject, "nxImageWrite", null);
+						imageLog("write_close", "success=" + !param.hasThrowable());
+					}
+				});
+				imageLog("hooks_ready", "revision=image-fix-1");
+			} catch (Throwable failure) {
+				XposedBridge.rethrowFrameworkError(failure);
+				imageLog("hooks_unavailable", "type=" + failure.getClass().getSimpleName());
+			}
 		}
 
 		private MessagingBuilder mMessagingBuilder;
@@ -176,15 +173,25 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private final ConversationManager mConversationManager = new ConversationManager();
 
 		@Override public void onCreate(SharedPreferences pref) {
+			imageLog("process_init", "revision=image-fix-1");
 			super.onCreate(pref);
 
 			mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);		// Must be called after loadPreferences().
-			channelGroupMessage = getString(R.string.channel_group_message);
-			channelMessage = getString(R.string.channel_message);
-			channelMisc = getString(R.string.channel_misc);
+			channelGroupMessage = moduleString(R.string.channel_group_message, "群聊消息");
+			channelMessage = moduleString(R.string.channel_message, "新消息");
+			channelMisc = moduleString(R.string.channel_misc, "其他通知");
+			imageLog("decorator_ready", "disabled=" + isDisabled());
+		}
+
+		private String moduleString(int resource, String fallback) {
+			Context context = getPackageContext();
+			if (context == null) return fallback;
+			try { return context.getString(resource); }
+			catch (android.content.res.Resources.NotFoundException ignored) { return fallback; }
 		}
 
 		@Override public Decorating apply(NotificationManager nm, String tag, int id, Notification n) {
+			if (ImagePreviewLoader.isPreview(n)) return Decorating.Processed;
 			mWeChatTargetingO = isWeChatTargeting26OrAbove();
 			if (BuildConfig.DEBUG) Log.d(TAG, "apply tag " + tag + " id " + id);
 
@@ -262,16 +269,9 @@ public class WeChatDecorator extends NevoDecoratorService {
 				sLastCallType = null;
 				sLastCallTime = 0;
 			}
-			// 图片消息：尝试从微信图片目录找到最新图片并显示
-			if (content != null && content.contains("[图片]")) {
-				String picturePath = findLatestWeChatImage();
-				if (picturePath != null) {
-					extras.putString(EXTRA_PICTURE_PATH, picturePath);
-					Log.d(TAG, "Found image for [图片] message: " + picturePath);
-				} else {
-					Log.d(TAG, "No image found for [图片] message, keeping original");
-					return Decorating.Unprocessed;
-				}
+			// Post the text notification immediately. Decode a unique recent image off the UI thread.
+			if (content != null && content.endsWith("[图片]")) {
+				imagePreviews.request(getAppContext(), nm, tag, id, n);
 			}
 			// 表情包/视频/文件等消息不做处理，保留微信原始通知内容
 			if (content != null) {
@@ -321,20 +321,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (content == null || content.isEmpty()) return Decorating.Unprocessed;
 
 			extras.putCharSequence(Notification.EXTRA_TEXT, content);
-
-			int sep = content.indexOf(WeChatMessage.SENDER_MESSAGE_SEPARATOR);
-			if (sep > 0) {
-				String person = content.substring(0, sep);
-				String msg = content.substring(sep + WeChatMessage.SENDER_MESSAGE_SEPARATOR.length());
-				if (BuildConfig.DEBUG) Log.d(TAG, person + "|" + msg);
-				if ("[图片]".equals(msg) && mPath != null && now() - mClosed < 1000) {
-					synchronized (this) {
-						if (BuildConfig.DEBUG) Log.d(TAG, "putString " + mPath);
-						extras.putString(EXTRA_PICTURE_PATH, mPath); // 保存图片地址
-						mPath = null;
-					}
-				}
-			}
 
 			if (type == Conversation.TYPE_UNKNOWN) type = WeChatMessage.guessConversationType(content, n.tickerText != null ? n.tickerText != null ? n.tickerText.toString().trim() : "" : "", title);
 			final boolean is_group_chat = Conversation.isGroupChat(type);
@@ -489,99 +475,5 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 		}
 
-		// M1: 图片扫描缓存，避免重复遍历目录
-		private static volatile String sCachedImagePath = null;
-		private static volatile long sCachedImageScanTime = 0;
-		private static final long IMAGE_SCAN_CACHE_TTL = 2000; // 2秒内不重复扫描
-
-		/**
-		 * L4: 动态获取微信数据目录，兼容多用户环境
-		 */
-		private static File getWeChatDataDir() {
-			// 优先使用 context 获取
-			try {
-				Context ctx = NevoDecoratorService.getAppContext();
-				if (ctx != null) {
-					// 尝试通过 createPackageContext 获取
-					Context wechatCtx = ctx.createPackageContext(WECHAT_PACKAGE, Context.CONTEXT_IGNORE_SECURITY);
-					File dataDir = wechatCtx.getFilesDir().getParentFile();
-					if (dataDir != null && dataDir.exists()) return dataDir;
-				}
-			} catch (Exception ignored) {}
-			// fallback: 使用默认路径
-			return new File("/data/data/" + WECHAT_PACKAGE);
-		}
-
-		/**
-		 * 扫描微信图片目录，找到最近 10 秒内创建的图片文件
-		 * 微信图片存储路径: /data/data/com.tencent.mm/MicroMsg/{hash}/image2/{2chars}/{2chars}/{hash}.jpg
-		 */
-		@Nullable
-		private String findLatestWeChatImage() {
-			try {
-				// M1: 使用缓存，避免频繁扫描
-				final long now = System.currentTimeMillis();
-				if (sCachedImagePath != null && (now - sCachedImageScanTime) < IMAGE_SCAN_CACHE_TTL) {
-					// 验证缓存的文件仍然存在且是最近的
-					File cached = new File(sCachedImagePath);
-					if (cached.exists() && (now - cached.lastModified()) < 10000) {
-						Log.d(TAG, "Using cached image path: " + sCachedImagePath);
-						return sCachedImagePath;
-					}
-					sCachedImagePath = null;
-				}
-
-				// L4: 使用动态路径获取微信数据目录
-				File wechatDir = new File(getWeChatDataDir(), "MicroMsg/");
-				if (!wechatDir.exists()) return null;
-
-				// 找到用户目录（最长的哈希目录）
-				File userDir = null;
-				for (File dir : wechatDir.listFiles()) {
-					if (dir.isDirectory() && dir.getName().length() > 20) {
-						userDir = dir;
-						break;
-					}
-				}
-				if (userDir == null) return null;
-
-				File imageDir = new File(userDir, "image2");
-				if (!imageDir.exists()) return null;
-
-				long newestTime = 0;
-				String newestPath = null;
-
-				// M1: 遍历 image2 目录下的子目录，提前退出
-				for (File sub1 : imageDir.listFiles()) {
-					if (!sub1.isDirectory() || sub1.getName().length() != 2) continue;
-					for (File sub2 : sub1.listFiles()) {
-						if (!sub2.isDirectory() || sub2.getName().length() != 2) continue;
-						File[] files = sub2.listFiles();
-						if (files == null) continue;
-						for (File file : files) {
-							if (!file.isFile() || !file.getName().endsWith(".jpg")) continue;
-							long lastModified = file.lastModified();
-							// 只取最近 10 秒内的图片
-							if (now - lastModified < 10000 && lastModified > newestTime) {
-								newestTime = lastModified;
-								newestPath = file.getAbsolutePath();
-							}
-						}
-					}
-				}
-
-				// M1: 更新缓存
-				sCachedImagePath = newestPath;
-				sCachedImageScanTime = now;
-
-				if (newestPath != null) {
-					Log.d(TAG, "Found latest WeChat image: " + newestPath + " age=" + (now - newestTime) + "ms");
-				}
-				return newestPath;
-			} catch (Exception e) {
-				Log.w(TAG, "Failed to find WeChat image: " + e.getMessage());
-				return null;
-			}
-		}
 	}
 }
