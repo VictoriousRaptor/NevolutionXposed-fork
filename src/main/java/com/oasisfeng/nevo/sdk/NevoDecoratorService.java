@@ -7,26 +7,21 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
-import android.service.notification.NotificationListenerService.RankingMap;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 import android.util.LruCache;
 import android.widget.RemoteViews;
 
 import androidx.annotation.Keep;
-import androidx.annotation.Nullable;
 
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
-import com.oasisfeng.nevo.xposed.compat.XposedBridge;
 import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
-import com.oasisfeng.nevo.xposed.R;
 
 public abstract class NevoDecoratorService {
 	private static final int MAX_NUM_ARCHIVED = 20;
@@ -85,11 +80,11 @@ public abstract class NevoDecoratorService {
 			mNM = nm;
 		}
 
-		// M2: 限制缓存大小，每个 key 最多缓存 MAX_NUM_ARCHIVED 条通知
-		private static final int MAX_CACHE_ENTRIES = 50;
-		private static final LruCache<Integer, LinkedList<Notification>> cache = new LruCache<Integer, LinkedList<Notification>>(MAX_CACHE_ENTRIES) {
+		// M2: 按通知条数计费，避免每个会话都保留 MAX_NUM_ARCHIVED 条而总量失控
+		private static final int MAX_CACHED_NOTIFICATIONS = 120;
+		private static final LruCache<Integer, LinkedList<Notification>> cache = new LruCache<Integer, LinkedList<Notification>>(MAX_CACHED_NOTIFICATIONS) {
 			protected int sizeOf(Integer key, LinkedList<Notification> value) {
-				return value != null ? 1 : 0;
+				return value != null ? value.size() : 0;
 			}
 
 			protected void entryRemoved(boolean evicted, Integer key, LinkedList<Notification> oldValue, LinkedList<Notification> newValue) {
@@ -104,16 +99,16 @@ public abstract class NevoDecoratorService {
 			LinkedList<Notification> queue = cache.get(id);
 			if (queue == null) {
 				queue = new LinkedList<>();
-				cache.put(id, queue);
 			}
 			queue.add(n);
 			if (BuildConfig.DEBUG) Log.d(TAG, "cache queue " + queue);
 			if (queue.size() > MAX_NUM_ARCHIVED) queue.remove();
+			cache.put(id, queue);		// Re-put so the LRU accounts for the added notification.
 		}
 	
 		protected static List<Notification> getArchivedNotifications(int key) {
 			LinkedList<Notification> queue = cache.get(key);
-			return queue != null ? new ArrayList<>(queue) : new ArrayList<>();
+			return queue != null ? Collections.unmodifiableList(queue) : Collections.<Notification>emptyList();
 		}
 	
 		protected static Notification getArchivedNotification(int key) {
@@ -159,14 +154,27 @@ public abstract class NevoDecoratorService {
 			XposedHelpers.setObjectField(n, "mSortKey", sortKey);
 		}
 	
-		public static void setActions(Notification n, Action... actions) {
+		private static final java.lang.reflect.Field ACTIONS_FIELD = notificationActionsField();
+
+		private static java.lang.reflect.Field notificationActionsField() {
 			try {
-				java.lang.reflect.Field field = Notification.class.getDeclaredField("actions");
+				final java.lang.reflect.Field field = Notification.class.getDeclaredField("actions");
 				field.setAccessible(true);
-				field.set(n, actions);
-			} catch (Exception e) {
-				XposedHelpers.setObjectField(n, "actions", actions);
+				return field;
+			} catch (final NoSuchFieldException e) {
+				return null;
 			}
+		}
+
+		public static void setActions(Notification n, Action... actions) {
+			final java.lang.reflect.Field field = ACTIONS_FIELD;
+			if (field != null) {
+				try {
+					field.set(n, actions);
+					return;
+				} catch (final Exception ignored) {}
+			}
+			XposedHelpers.setObjectField(n, "actions", actions);
 		}
 	
 		protected final String prefKey;
@@ -213,11 +221,11 @@ public abstract class NevoDecoratorService {
 			return mNLS;
 		}
 
-		// M2: 限制缓存大小
-		private static final int MAX_SBN_CACHE_ENTRIES = 50;
-		private static final LruCache<String, LinkedList<StatusBarNotification>> cache = new LruCache<String, LinkedList<StatusBarNotification>>(MAX_SBN_CACHE_ENTRIES) {
+		// M2: 同样按条数计费，避免缓存总量随会话数线性增长
+		private static final int MAX_CACHED_SBN = 120;
+		private static final LruCache<String, LinkedList<StatusBarNotification>> cache = new LruCache<String, LinkedList<StatusBarNotification>>(MAX_CACHED_SBN) {
 			protected int sizeOf(String key, LinkedList<StatusBarNotification> value) {
-				return value != null ? 1 : 0;
+				return value != null ? value.size() : 0;
 			}
 
 			protected void entryRemoved(boolean evicted, String key, LinkedList<StatusBarNotification> oldValue, LinkedList<StatusBarNotification> newValue) {
@@ -232,15 +240,15 @@ public abstract class NevoDecoratorService {
 			LinkedList<StatusBarNotification> queue = cache.get(key);
 			if (queue == null) {
 				queue = new LinkedList<>();
-				cache.put(key, queue);
 			}
 			queue.add(sbn);
 			if (queue.size() > MAX_NUM_ARCHIVED) queue.remove();
+			cache.put(key, queue);		// Re-put so the LRU accounts for the added notification.
 		}
 	
 		protected static List<StatusBarNotification> getArchivedNotifications(String key) {
 			LinkedList<StatusBarNotification> queue = cache.get(key);
-			return queue != null ? new ArrayList<>(queue) : new ArrayList<>();
+			return queue != null ? Collections.unmodifiableList(queue) : Collections.<StatusBarNotification>emptyList();
 		}
 	
 		protected static StatusBarNotification getArchivedNotification(String key) {
@@ -250,34 +258,6 @@ public abstract class NevoDecoratorService {
 	
 		protected static boolean hasArchivedNotifications(String key) {
 			return cache.get(key) != null;
-		}
-	
-		public static void setId(StatusBarNotification sbn, int id) {
-			XposedHelpers.setIntField(sbn, "id", id);
-		}
-	
-		public static void setNotification(StatusBarNotification sbn, Notification n) {
-			XposedHelpers.setObjectField(sbn, "notification", n);
-		}
-	
-		public static int getOriginalId(StatusBarNotification sbn) {
-			return (Integer)XposedHelpers.getAdditionalInstanceField(sbn, "originalId");
-		}
-	
-		public static void setOriginalId(StatusBarNotification sbn, int id) {
-			XposedHelpers.setAdditionalInstanceField(sbn, "originalId", (Integer)id);
-		}
-	
-		public static String getOriginalKey(StatusBarNotification sbn) {
-			return (String)XposedHelpers.getAdditionalInstanceField(sbn, "originalKey");
-		}
-	
-		public static void setOriginalKey(StatusBarNotification sbn, String key) {
-			XposedHelpers.setAdditionalInstanceField(sbn, "originalKey", key);
-		}
-	
-		public static void setOriginalTag(StatusBarNotification sbn, String tag) {
-			XposedHelpers.setAdditionalInstanceField(sbn, "originalTag", tag);
 		}
 	
 		protected final String prefKey;
@@ -307,11 +287,6 @@ public abstract class NevoDecoratorService {
 			if (BuildConfig.DEBUG) Log.d(TAG, "cancelNotification " + key);
 			if (mNLS != null) mNLS.cancelNotification(key);
 		}
-	
-		protected final void recastNotification(final StatusBarNotification sbn) {
-			if (BuildConfig.DEBUG) Log.d(TAG, "recastNotification " + sbn + " " + mNLS);
-			if (mNLS != null) mNLS.onNotificationPosted(sbn, null);
-		}
 	}
 
 	protected final String prefKey;
@@ -333,33 +308,4 @@ public abstract class NevoDecoratorService {
 		if (systemUIDecorator == null) systemUIDecorator = createSystemUIDecorator();
 		return systemUIDecorator;
 	}
-
-	// public boolean isDisabled() { return disabled; }
-	// public void setDisabled(boolean disabled) { this.disabled = disabled; }
-
-	// @Keep public void onCreate(SharedPreferences pref) {
-	// 	this.disabled = !pref.getBoolean(prefKey  + ".enabled", true);
-	// 	if (BuildConfig.DEBUG) Log.d(TAG, prefKey + ".disabled " + this.disabled);
-	// }
-
-	// @Keep public void onDestroy() {}
-
-	// /**
-	//  * 在应用进程中执行的通知预处理，某些功能（NotificationChannel等）在此实现。
-	//  */
-	// @Keep public void preApply(NotificationManager nm, String tag, int id, Notification n) {}
-	// @Keep public Decorating onNotificationPosted(final StatusBarNotification sbn) {
-	// 	apply(sbn);
-	// 	return Decorating.Processed;
-	// }
-	// /**
-	//  * 在系统UI（SystemUI）中执行的通知处理。
-	//  */
-	// @Deprecated
-	// @Keep public void apply(final StatusBarNotification evolving) {}
-	// @Keep public void onNotificationRemoved(final StatusBarNotification evolving, final int reason) {
-	// 	Log.d(TAG, "onNotificationRemoved(" + evolving + ", " + reason + ")");
-	// 	onNotificationRemoved(evolving.getKey(), reason);
-	// }
-	// @Keep public void onNotificationRemoved(final String key, final int reason) {}
 }

@@ -13,7 +13,6 @@ import java.util.List;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat.MessagingStyle.Message;
 import androidx.core.app.Person;
-import androidx.core.graphics.drawable.IconCompat;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
 
