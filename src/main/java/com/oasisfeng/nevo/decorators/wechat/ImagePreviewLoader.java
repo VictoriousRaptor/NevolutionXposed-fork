@@ -13,16 +13,13 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import java.io.File;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -32,12 +29,18 @@ final class ImagePreviewLoader {
 	private static final String READY = "nevo.wechat.imageReady";
 	private static final AtomicLong SEQUENCE = new AtomicLong(SystemClock.elapsedRealtimeNanos());
 	private final Handler main = new Handler(Looper.getMainLooper());
-	private final ThreadPoolExecutor worker = new ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS,
-			new ArrayBlockingQueue<>(8), runnable -> {
+	private final WeChatImageEvents events;
+	private final ScheduledThreadPoolExecutor worker = new ScheduledThreadPoolExecutor(1, runnable -> {
 		Thread thread = new Thread(runnable, "NX-image-preview");
 		thread.setDaemon(true);
 		return thread;
 	});
+	ImagePreviewLoader(WeChatImageEvents events) {
+		this.events = events;
+		worker.setKeepAliveTime(30, TimeUnit.SECONDS);
+		worker.allowCoreThreadTimeOut(true);
+		worker.setRemoveOnCancelPolicy(true);
+	}
 	private final Map<String, Request> pending = new ConcurrentHashMap<>();
 	// Accessed only by the worker; one candidate must never be assigned to two notifications.
 	private final LinkedHashMap<String, Long> claimed = new LinkedHashMap<>();
@@ -48,21 +51,27 @@ final class ImagePreviewLoader {
 		Log.i("WeChatDecorator", "NX_IMAGE stage=" + stage + " " + detail);
 	}
 
-	void request(Context context, NotificationManager manager, String tag, int id, Notification n) {
+	synchronized void request(Context context, NotificationManager manager, String tag, int id, Notification n) {
 		if (context == null || n.extras.containsKey(TOKEN)) return;
+		if (!events.isAvailable()) { log("fallback", "reason=events_unavailable scans=0"); return; }
+		String talker = WeChatImageEvents.notificationTalker(n);
+		if (talker == null) { log("fallback", "reason=notification_identity_missing scans=0"); return; }
 		String key = id + ":" + tag;
 		Request old = pending.get(key);
-		if (old != null && old.when == n.when && TextUtils.equals(old.title, n.extras.getCharSequence(Notification.EXTRA_TITLE))
+		if (old != null && old.talker.equals(talker) && old.when == n.when && TextUtils.equals(old.title, n.extras.getCharSequence(Notification.EXTRA_TITLE))
 				&& TextUtils.equals(old.text, n.extras.getCharSequence(Notification.EXTRA_TEXT))) {
 			n.extras.putLong(TOKEN, old.token);
 			return;
 		}
-		Request request = new Request(key, n);
+		if (pending.size() >= 8 && !pending.containsKey(key)) { log("fallback", "reason=request_limit"); return; }
+		if (worker.getQueue().size() >= 16) { log("fallback", "reason=queue_limit"); return; }
+		if (old != null && old.future != null) old.future.cancel(false);
+		Request request = new Request(key, talker, n);
 		pending.put(key, request);
 		n.extras.putLong(TOKEN, request.token);
 		log("queued", "request=" + request.token + " id=" + id);
 		try {
-			worker.execute(() -> resolve(context, manager, tag, id, request));
+			request.future = worker.schedule(() -> resolve(context, manager, tag, id, request), 0, TimeUnit.MILLISECONDS);
 		} catch (RejectedExecutionException overloaded) {
 			pending.remove(key, request);
 			log("fallback", "request=" + request.token + " reason=queue_full");
@@ -70,84 +79,52 @@ final class ImagePreviewLoader {
 	}
 
 	private void resolve(Context context, NotificationManager manager, String tag, int id, Request request) {
-		long started = SystemClock.elapsedRealtime();
+		if (pending.get(request.key) != request) return;
 		try {
-			if (pending.get(request.key) != request) return;
-			File selected = find(context, request);
-			if (selected == null) return;
-			String path = selected.getAbsolutePath();
-			Long owner = claimed.get(path);
-			if (owner != null && owner != request.token) {
-				log("fallback", "request=" + request.token + " reason=already_assigned");
+			ImageEventIndex.Entry event = events.index.select(request.talker,
+					request.when > 0 ? request.when : request.received, SystemClock.elapsedRealtime());
+			if (event == null) { retry(context, manager, tag, id, request, "no_unique_message_event"); return; }
+			Long owner = claimed.get(event.key);
+			if (owner != null && owner != request.token) { finish(request, "message_already_assigned"); return; }
+			for (String path : event.paths) {
+				String resolved = events.resolvePath(path);
+				if (resolved == null || !new File(resolved).isAbsolute()) continue;
+				File file = new File(resolved);
+				long size = file.length(), modified = file.lastModified();
+				if (size <= 0 || size > 20 * 1024 * 1024 || !file.isFile() || !file.canRead()) continue;
+				BitmapFactory.Options options = bounds(file);
+				if (options.outWidth <= 0 || options.outHeight <= 0 || options.outMimeType == null
+						|| !options.outMimeType.startsWith("image/")) continue;
+				int sample = 1;
+				while (options.outWidth / sample > 384 || options.outHeight / sample > 384) sample *= 2;
+				options.inJustDecodeBounds = false;
+				options.inSampleSize = sample;
+				options.inPreferredConfig = Bitmap.Config.RGB_565;
+				Bitmap bitmap = BitmapFactory.decodeFile(resolved, options);
+				if (bitmap == null) continue;
+				if (file.length() != size || file.lastModified() != modified) { bitmap.recycle(); continue; }
+				claimed.put(event.key, request.token);
+				while (claimed.size() > 64) claimed.remove(claimed.keySet().iterator().next());
+				log("decoded", "request=" + request.token + " source=message_event scans=0 mime=" + options.outMimeType
+						+ " width=" + bitmap.getWidth() + " height=" + bitmap.getHeight()
+						+ " elapsedMs=" + (SystemClock.elapsedRealtime() - request.started));
+				main.post(() -> publish(context, manager, tag, id, request, bitmap));
 				return;
 			}
-			BitmapFactory.Options options = bounds(selected);
-			int sample = 1;
-			while (options.outWidth / sample > 384 || options.outHeight / sample > 384) sample *= 2;
-			long size = selected.length(), modified = selected.lastModified();
-			options.inJustDecodeBounds = false;
-			options.inSampleSize = sample;
-			options.inPreferredConfig = Bitmap.Config.RGB_565;
-			Bitmap bitmap = BitmapFactory.decodeFile(path, options);
-			if (bitmap == null || selected.length() != size || selected.lastModified() != modified) {
-				if (bitmap != null) bitmap.recycle();
-				log("fallback", "request=" + request.token + " reason=decode_or_file_changed");
-				return;
-			}
-			claimed.put(path, request.token);
-			while (claimed.size() > 64) claimed.remove(claimed.keySet().iterator().next());
-			log("decoded", "request=" + request.token + " mime=" + options.outMimeType
-					+ " width=" + bitmap.getWidth() + " height=" + bitmap.getHeight()
-					+ " elapsedMs=" + (SystemClock.elapsedRealtime() - started));
-			main.post(() -> publish(context, manager, tag, id, request, bitmap));
-		} catch (Exception | OutOfMemoryError failure) {
-			log("fallback", "request=" + request.token + " type=" + failure.getClass().getSimpleName());
-		} finally {
-			pending.remove(request.key, request);
-		}
+			retry(context, manager, tag, id, request, "file_not_ready");
+		} catch (Exception | OutOfMemoryError failure) { finish(request, failure.getClass().getSimpleName()); }
 	}
 
-	private File find(Context context, Request request) {
-		File root = new File(context.getApplicationInfo().dataDir, "MicroMsg");
-		File[] accounts = root.listFiles();
-		if (accounts == null) { log("fallback", "reason=root_unreadable"); return null; }
-		File imageDir = null;
-		for (File account : accounts) {
-			File images = new File(account, "image2");
-			if (!account.isDirectory() || !images.isDirectory()) continue;
-			if (imageDir != null) { log("fallback", "reason=multiple_image_accounts"); return null; }
-			imageDir = images;
-		}
-		if (imageDir == null) { log("fallback", "reason=no_image_directory"); return null; }
-		long deadline = SystemClock.elapsedRealtime() + 20000;
-		List<File> candidates = new ArrayList<>();
-		ArrayDeque<File> directories = new ArrayDeque<>();
-		directories.add(imageDir);
-		int files = 0, dirs = 0;
-		while (!directories.isEmpty()) {
-			if (pending.get(request.key) != request || SystemClock.elapsedRealtime() > deadline || ++dirs > 80000) {
-				log("fallback", "request=" + request.token + " reason=scan_cancelled_or_limit");
-				return null;
-			}
-			File[] children = directories.removeFirst().listFiles();
-			if (children == null) { log("fallback", "reason=incomplete_scan"); return null; }
-			for (File file : children) {
-				if (file.isDirectory()) {
-					if (file.getName().length() == 2) directories.addLast(file);
-				} else if (file.isFile()) {
-					if (++files > 150000) { log("fallback", "reason=file_limit"); return null; }
-					if (ImageCandidateSelector.isRecent(file.lastModified(), request.received)) candidates.add(file);
-				}
-			}
-		}
-		File selected = ImageCandidateSelector.unique(candidates, file -> {
-			if (file.length() <= 0 || file.length() > 20 * 1024 * 1024) return false;
-			BitmapFactory.Options info = bounds(file);
-			return info.outWidth > 0 && info.outHeight > 0 && info.outMimeType != null && info.outMimeType.startsWith("image/");
-		});
-		log("scan_result", "request=" + request.token + " files=" + files + " candidates=" + candidates.size()
-				+ " selected=" + (selected != null) + " criterion=unique_decodable_within_2s");
-		return selected;
+	private void retry(Context context, NotificationManager manager, String tag, int id, Request request, String reason) {
+		long elapsed = SystemClock.elapsedRealtime() - request.started;
+		if (elapsed >= 5000 || ++request.attempts >= 16) { finish(request, reason); return; }
+		if (pending.get(request.key) != request) return;
+		request.future = worker.schedule(() -> resolve(context, manager, tag, id, request), elapsed < 1000 ? 100 : 500, TimeUnit.MILLISECONDS);
+	}
+
+	private void finish(Request request, String reason) {
+		pending.remove(request.key, request);
+		log("fallback", "request=" + request.token + " reason=" + reason + " scans=0");
 	}
 
 	private static BitmapFactory.Options bounds(File file) {
@@ -167,7 +144,7 @@ final class ImagePreviewLoader {
 					break;
 				}
 			}
-			if (current == null) {
+			if (current == null || pending.get(request.key) != request) {
 				bitmap.recycle();
 				log("discarded", "request=" + request.token + " reason=notification_removed_or_replaced");
 				return;
@@ -183,16 +160,21 @@ final class ImagePreviewLoader {
 					+ (result.actions == null ? 0 : result.actions.length));
 		} catch (Exception failure) {
 			log("publish_failed", "request=" + request.token + " type=" + failure.getClass().getSimpleName());
+		} finally {
+			pending.remove(request.key, request);
 		}
 	}
 
 	private static final class Request {
-		final String key;
+		final String key, talker;
 		final long token = SEQUENCE.incrementAndGet(), received = System.currentTimeMillis();
-		final long when;
+		final long when, started = SystemClock.elapsedRealtime();
+		int attempts;
+		volatile ScheduledFuture<?> future;
 		final CharSequence title, text;
-		Request(String key, Notification n) {
+		Request(String key, String talker, Notification n) {
 			this.key = key;
+			this.talker = talker;
 			when = n.when;
 			title = n.extras.getCharSequence(Notification.EXTRA_TITLE);
 			text = n.extras.getCharSequence(Notification.EXTRA_TEXT);
