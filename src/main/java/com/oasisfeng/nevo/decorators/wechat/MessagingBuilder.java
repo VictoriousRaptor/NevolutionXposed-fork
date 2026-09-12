@@ -127,7 +127,7 @@ class MessagingBuilder {
 	@Nullable MessagingStyle buildFromArchive(final Conversation conversation, final Notification n, final CharSequence title, final List<Notification> archive) {
 		// Chat history in big content view
 		if (archive.isEmpty()) {
-			Log.d(TAG, "No history");
+			if (BuildConfig.DEBUG) Log.d(TAG, "No history");
 			return null;
 		}
 
@@ -141,7 +141,8 @@ class MessagingBuilder {
 			final Bundle its_extras = notification.extras;
 			final CharSequence its_title = EmojiTranslator.translate(its_extras.getCharSequence(Notification.EXTRA_TITLE));
 			if (! title.equals(its_title)) {
-				Log.d(TAG, "Skip other conversation with the same key in archive: " + its_title);	// ID reset by WeChat due to notification removal in previous evolving
+				// ID reset by WeChat due to notification removal in previous evolving
+				if (BuildConfig.DEBUG) Log.d(TAG, "Skip other conversation with the same key in archive");
 				continue;
 			}
 			final CharSequence its_text = its_extras.getCharSequence(EXTRA_TEXT);
@@ -233,7 +234,7 @@ class MessagingBuilder {
 				final CharSequence msgSender = msgBundle.getCharSequence(KEY_SENDER);
 				// 只保留用户自己的回复（sender 为空字符串或 null 且时间戳较新）
 				if (msgText != null && (msgSender == null || msgSender.length() == 0)) {
-					Log.d(TAG, "Preserving user reply from EXTRA_MESSAGES: " + msgText);
+					if (BuildConfig.DEBUG) Log.d(TAG, "Preserving user reply from EXTRA_MESSAGES");
 					messaging.addMessage(new Message(msgText, msgTimestamp, (Person) null));
 					hasUserReplyInMessages = true;
 				}
@@ -282,17 +283,17 @@ class MessagingBuilder {
 		// 从 EXTRA_REMOTE_INPUT_HISTORY 补充用户回复（仅当 EXTRA_MESSAGES 中没有时）
 		if (!hasUserReplyInMessages) {
 			final CharSequence[] carInputHistory = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
-			Log.d(TAG, "buildFromExtender: EXTRA_REMOTE_INPUT_HISTORY=" + (carInputHistory != null ? carInputHistory.length + " items" : "null"));
+			if (BuildConfig.DEBUG) Log.d(TAG, "buildFromExtender: EXTRA_REMOTE_INPUT_HISTORY=" + (carInputHistory != null ? carInputHistory.length + " items" : "null"));
 			if (carInputHistory != null && carInputHistory.length > 0) {
 				for (final CharSequence reply : carInputHistory) {
-					Log.d(TAG, "buildFromExtender: adding user reply: " + reply);
+					if (BuildConfig.DEBUG) Log.d(TAG, "buildFromExtender: adding a user reply");
 					if (reply != null && reply.length() > 0) {
 						messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));
 					}
 				}
 			}
 		} else {
-			Log.d(TAG, "buildFromExtender: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
+			if (BuildConfig.DEBUG) Log.d(TAG, "buildFromExtender: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
 		}
 
 		setActions(n, actions.toArray(new Action[actions.size()]));
@@ -341,7 +342,7 @@ class MessagingBuilder {
 
 			return count < 0xFFFF ? (count & 0xFFFF) | ((text_start << 16) & 0xFFFF0000) : 0xFFFF | ((text_start << 16) & 0xFF00);
 		} catch (final NumberFormatException ignored) {
-			Log.d(TAG, "Failed to parse: " + text);
+			if (BuildConfig.DEBUG) Log.d(TAG, "Failed to parse the leading unread counter");
 			return - 1;
 		}
 	}
@@ -391,11 +392,11 @@ class MessagingBuilder {
 		}
 
 		if (onReply == null || replyRemoteInput == null) {
-			Log.d(TAG, "No reply action found in notification actions");
+			if (BuildConfig.DEBUG) Log.d(TAG, "No reply action found in notification actions");
 			return null;
 		}
 
-		Log.d(TAG, "Found reply action via notification actions fallback");
+		if (BuildConfig.DEBUG) Log.d(TAG, "Found reply action via notification actions fallback");
 
 		final PendingIntent onRead = n.deleteIntent;
 		if (onRead != null) mMarkReadPendingIntents.put(id, onRead);
@@ -471,7 +472,7 @@ class MessagingBuilder {
 				}
 			}
 		} else if (hasUserReplyInMessages) {
-			Log.d(TAG, "buildFromActions: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
+			if (BuildConfig.DEBUG) Log.d(TAG, "buildFromActions: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
 		}
 
 		// 回复：使用 RemoteInput 内联回复（修改版 HyperIsland 已保留 RemoteInput）
@@ -681,7 +682,7 @@ class MessagingBuilder {
 			Log.w(TAG, "Failed to create module context: " + e.getMessage());
 		}
 		final Context pkgCtx = moduleContext != null ? moduleContext : context;
-		Log.d(TAG, "pkgCtx=" + pkgCtx + " moduleContext=" + moduleContext);
+		if (BuildConfig.DEBUG) Log.d(TAG, "pkgCtx=" + pkgCtx + " moduleContext=" + moduleContext);
 		actionReply = "回复";
 		actionZoom = "缩放";
 		mController = controller;
@@ -763,7 +764,6 @@ class MessagingBuilder {
 				Log.w(TAG, "loadSelfIcon: wxid not found");
 				return null;
 			}
-			Log.d(TAG, "loadSelfIcon: found wxid=" + wxid);
 
 			// 计算 MD5
 			MessageDigest md = MessageDigest.getInstance("MD5");
@@ -773,7 +773,6 @@ class MessagingBuilder {
 				sb.append(String.format("%02x", b));
 			}
 			String md5 = sb.toString();
-			Log.d(TAG, "loadSelfIcon: md5=" + md5);
 
 			// 构建头像路径: /data/data/com.tencent.mm/MicroMsg/{user_hash}/avatar/{md5[0:2]}/{md5[2:4]}/user_{md5}.png
 			// L4: 使用动态路径
@@ -813,11 +812,11 @@ class MessagingBuilder {
 
 			File avatarFile = new File(avatarPath);
 			if (!avatarFile.exists()) {
-				Log.w(TAG, "loadSelfIcon: avatar file not found: " + avatarPath);
+				Log.w(TAG, "loadSelfIcon: avatar file not found");
 				return null;
 			}
 
-			Log.d(TAG, "loadSelfIcon: loading avatar from " + avatarPath);
+			if (BuildConfig.DEBUG) Log.d(TAG, "loadSelfIcon: loading avatar");
 
 			// 加载并缩放头像
 			BitmapFactory.Options options = new BitmapFactory.Options();
@@ -831,7 +830,7 @@ class MessagingBuilder {
 			// 缩放到 48dp
 			int size = (int) (48 * wechatContext.getResources().getDisplayMetrics().density);
 			Bitmap scaled = Bitmap.createScaledBitmap(bitmap, size, size, true);
-			Log.d(TAG, "loadSelfIcon: success, size=" + scaled.getWidth() + "x" + scaled.getHeight());
+			if (BuildConfig.DEBUG) Log.d(TAG, "loadSelfIcon: success, size=" + scaled.getWidth() + "x" + scaled.getHeight());
 			IconCompat icon = IconCompat.createWithBitmap(scaled);
 			// M5: 更新缓存
 			sCachedSelfIcon = icon;
@@ -847,10 +846,10 @@ class MessagingBuilder {
 	@Nullable private MessagingStyle buildWithSyntheticReply(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
 		final PendingIntent contentIntent = n.contentIntent;
 		if (contentIntent == null) {
-			Log.d(TAG, "No contentIntent for synthetic reply");
+			if (BuildConfig.DEBUG) Log.d(TAG, "No contentIntent for synthetic reply");
 			return null;
 		}
-		Log.d(TAG, "Building synthetic reply action for notification " + id);
+		if (BuildConfig.DEBUG) Log.d(TAG, "Building synthetic reply action for notification " + id);
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
 
 		// 检查通知是否已有 EXTRA_MESSAGES（用户回复后重建时）
@@ -915,7 +914,7 @@ class MessagingBuilder {
 				}
 			}
 		} else {
-			Log.d(TAG, "buildWithSyntheticReply: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
+			if (BuildConfig.DEBUG) Log.d(TAG, "buildWithSyntheticReply: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
 		}
 
 		if (!MainHook.isSyntheticReplyAvailable()) {
