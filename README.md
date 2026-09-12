@@ -1,12 +1,11 @@
 # NevolutionXposed - 微信通知增强
 
-基于现代 libxposed API 102 的 Android Xposed 模块，为微信和 System UI 提供通知栏直接回复、MIUI 推送图标修复与媒体通知增强。
+基于现代 libxposed API 102 的 Android Xposed 模块，为微信和 System UI 提供通知栏直接回复与媒体通知增强。
 
 ## 功能
 
 - 微信通知栏直接回复（内置微信 8.0.72 / 8.0.76 适配描述）
 - 微信 Car Mode 检查绕过与 RemoteInput 回复结果转发
-- MIUI 推送通知图标修复
 - 媒体通知样式增强
 - 通话通知识别与排除
 - 可在模块应用内分别启用或停用上述装饰器
@@ -25,7 +24,7 @@
 2. 模块使用固定作用域：
    - `com.android.systemui`
    - `com.tencent.mm`
-3. 从桌面启动 NevolutionXposed，可配置微信、MIUI 与媒体通知功能。设置会通过 libxposed service 同步到被注入进程。
+3. 从桌面启动 NevolutionXposed，可配置微信与媒体通知功能。设置会通过 libxposed service 同步到被注入进程。
 4. 修改设置或模块状态后，重启对应目标进程使配置生效。
 
 ## 构建
@@ -77,7 +76,7 @@ hook(method)
 
 ```text
 src/main/java/com/oasisfeng/nevo/
-├── decorators/            # 微信、MIUI、媒体通知逻辑
+├── decorators/            # 微信、媒体通知逻辑
 ├── sdk/                   # 通知装饰器抽象
 └── xposed/
     ├── MainHook.java      # API 102 模块入口
@@ -91,8 +90,8 @@ src/main/java/com/oasisfeng/nevo/
 ### v3.0.1
 
 - 增加桌面、LSPosed 模块菜单和标准系统首选项三种设置入口。
-- 微信通知增强默认开启；MIUI 与媒体通知增强默认关闭。
-- 删除未被代码使用的微信 MIUI 修复开关。
+- 微信通知增强默认开启；媒体通知增强默认关闭。
+- 移除 MIUI 推送图标修复功能（含其图标处理与缓存代码）。
 
 ### v3.0.0
 

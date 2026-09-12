@@ -1,6 +1,6 @@
 <resources>
 	<string name="app_name">NevolutionXposed</string>
-	<string name="xposed_description">Enhances WeChat, MIUI and media notifications with modern libxposed API 102.</string>
+	<string name="xposed_description">Enhances WeChat and media notifications with modern libxposed API 102.</string>
 
 	<string name="settings_title">NevolutionXposed settings</string>
 	<string name="settings_core_category">Core feature</string>
@@ -42,10 +42,7 @@
 	<string name="channel_group_message">New Group Message</string>
 	<string name="channel_misc">Other Notification</string>
 
-	<!-- decorator-miui -->
 
-	<string name="decorator_miui_title">MIUI</string>
-	<string name="decorator_miui_description">Generate smallIcon for MiPushFramework.</string>
 
 	<!-- decorator-media -->
 
