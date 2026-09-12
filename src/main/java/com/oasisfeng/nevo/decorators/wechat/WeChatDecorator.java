@@ -246,6 +246,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 					content.contains("[音乐]") || content.contains("[位置]") || content.contains("[红包]") ||
 					content.contains("[转账]") || content.contains("[小程序]")) {
 					if (BuildConfig.DEBUG) Log.d(TAG, "Skipping media/sticker message, keeping original");
+					// Keep WeChat's own layout, but still offer inline reply when WeChat exposes one.
+					if (ensureMessagingBuilder()) mMessagingBuilder.attachReplyAction(id, n);
 					return Decorating.Unprocessed;
 				}
 				// 转换微信内置表情标记为 Emoji（如 [得意] -> 😎）
@@ -322,15 +324,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 				Log.w(TAG, "Application context is not ready; skipping notification");
 				return Decorating.Unprocessed;
 			}
-			if (mMessagingBuilder == null) {
-				try {
-					if (BuildConfig.DEBUG) Log.d(TAG, "mMessagingBuilder is null, initializing...");
-					mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);
-				} catch (final Exception e) {
-					Log.w(TAG, "Failed to init mMessagingBuilder: " + e.getMessage());
-					return Decorating.Unprocessed;
-				}
-			}
+			if (!ensureMessagingBuilder()) return Decorating.Unprocessed;
 			if (BuildConfig.DEBUG) Log.d(TAG, "Calling buildFromExtender...");
 			final List<Notification> archive = getArchivedNotifications(id);
 			MessagingStyle messaging = mMessagingBuilder.buildFromExtender(conversation, id, n, title, archive);
@@ -388,6 +382,20 @@ public class WeChatDecorator extends NevoDecoratorService {
 
 			VoiceCall.tweakIfNeeded(n);
 			return Decorating.Processed;
+		}
+
+		/** Creates the messaging builder on demand; returns false when it cannot be created. */
+		private boolean ensureMessagingBuilder() {
+			if (mMessagingBuilder != null) return true;
+			if (getAppContext() == null) return false;
+			try {
+				if (BuildConfig.DEBUG) Log.d(TAG, "mMessagingBuilder is null, initializing...");
+				mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);
+				return true;
+			} catch (final Exception e) {
+				Log.w(TAG, "Failed to init mMessagingBuilder: " + e.getMessage());
+				return false;
+			}
 		}
 
 		@RequiresApi(O) private NotificationChannel migrate(NotificationManager nm, final String old_id, final String new_id, final String new_name, final boolean silent) {
