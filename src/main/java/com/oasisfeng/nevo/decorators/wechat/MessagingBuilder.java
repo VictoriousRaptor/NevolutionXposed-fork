@@ -693,10 +693,8 @@ class MessagingBuilder {
 		return new Person.Builder().setName(selfDisplayName).setIcon(loadSelfIcon()).build();
 	}
 
-	// M5: 头像缓存，定期刷新
+	// M5: 头像缓存（进程内只解析一次；像素可复用，无需定时刷新）
 	private static IconCompat sCachedSelfIcon = null;
-	private static long sSelfIconLoadTime = 0;
-	private static final long SELF_ICON_REFRESH_INTERVAL = 5 * 60 * 1000L; // 5分钟刷新一次
 
 	/**
 	 * 动态加载自己的微信头像
@@ -706,11 +704,7 @@ class MessagingBuilder {
 	 */
 	@Nullable
 	private static IconCompat loadSelfIcon() {
-		// M5: 使用缓存，定期刷新
-		final long now = System.currentTimeMillis();
-		if (sCachedSelfIcon != null && (now - sSelfIconLoadTime) < SELF_ICON_REFRESH_INTERVAL) {
-			return sCachedSelfIcon;
-		}
+		if (sCachedSelfIcon != null) return sCachedSelfIcon;
 		try {
 			// 获取微信应用的 Context
 			Context wechatContext = NevoDecoratorService.getAppContext();
@@ -758,10 +752,7 @@ class MessagingBuilder {
 			// 构建头像路径: /data/data/com.tencent.mm/MicroMsg/{user_hash}/avatar/{md5[0:2]}/{md5[2:4]}/user_{md5}.png
 			// L4: 使用动态路径
 			File wechatDataDir = null;
-			try {
-				Context wechatCtx = wechatContext.createPackageContext("com.tencent.mm", Context.CONTEXT_IGNORE_SECURITY);
-				wechatDataDir = wechatCtx.getFilesDir().getParentFile();
-			} catch (Exception ignored) {}
+			try { wechatDataDir = wechatPkgCtx.getFilesDir().getParentFile(); } catch (Exception ignored) {}
 			if (wechatDataDir == null) wechatDataDir = new File("/data/data/com.tencent.mm");
 			File microMsgDir = new File(wechatDataDir, "MicroMsg/");
 			if (!microMsgDir.exists()) {
@@ -813,9 +804,7 @@ class MessagingBuilder {
 			Bitmap scaled = Bitmap.createScaledBitmap(bitmap, size, size, true);
 			if (BuildConfig.DEBUG) Log.d(TAG, "loadSelfIcon: success, size=" + scaled.getWidth() + "x" + scaled.getHeight());
 			IconCompat icon = IconCompat.createWithBitmap(scaled);
-			// M5: 更新缓存
 			sCachedSelfIcon = icon;
-			sSelfIconLoadTime = System.currentTimeMillis();
 			return icon;
 
 		} catch (Exception e) {
