@@ -13,7 +13,6 @@ import java.util.List;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat.MessagingStyle.Message;
 import androidx.core.app.Person;
-import androidx.core.graphics.drawable.IconCompat;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
 
@@ -78,6 +77,8 @@ class WeChatMessage {
 	private static Message buildFromBasicFields(final Conversation conversation) {
 		// Trim the possible trailing white spaces in ticker.
 		CharSequence ticker = conversation.isRecall() ? conversation.summary : conversation.ticker;
+		if (ticker == null) ticker = conversation.summary;
+		if (ticker == null) return null;	// Caller falls back to the archived notifications.
 		int ticker_length = ticker.length();
 		int ticker_end = ticker_length;
 		while (ticker_end > 0 && ticker.charAt(ticker_end - 1) == ' ') ticker_end--;
@@ -113,13 +114,12 @@ class WeChatMessage {
 			} else text = content_wo_prefix;
 		} else if (! startsWith(content_wo_prefix, sender, SENDER_MESSAGE_SEPARATOR)) {    // Ensure sender matches (in ticker and summary)
 			if (unread_count > 0)	// When unread count prefix is present, sender should also be included in summary.
-				Log.e(TAG, "Sender mismatch: \"" + sender + "\" in ticker, summary: " + summary.subSequence(0, Math.min(10, content_length)));
+				if (BuildConfig.DEBUG) Log.w(TAG, "Sender mismatch between ticker and summary");
 			if (startsWith(ticker, sender, SENDER_MESSAGE_SEPARATOR)) {	// Normal case for single unread message
 				Message msg = toMessage(conversation, sender, content_wo_prefix, conversation.timestamp);
 				return msg != null ? msg : new Message(content_wo_prefix, conversation.timestamp, new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build());
 			}
 		}
-		Log.d(TAG, "text " + text);
 		Message result = toMessage(conversation, sender, text, conversation.timestamp);
 		return result != null ? result : new Message(text, conversation.timestamp, new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build());
 	}
@@ -135,7 +135,7 @@ class WeChatMessage {
 		try {
 			return Integer.parseInt(count.toString());
 		} catch (final NumberFormatException ignored) {
-			Log.d(TAG, "Failed to parse as int: " + prefix);
+			if (BuildConfig.DEBUG) Log.d(TAG, "Failed to parse unread count prefix, length=" + length);
 			return 0;
 		}
 	}
@@ -205,7 +205,7 @@ class WeChatMessage {
 				if (start >= 0 && end > start) {
 					final String callType = extraTextStr.substring(start, end + 1);
 					if ("[语音通话]".equals(callType) || "[视频通话]".equals(callType)) {
-						Log.d(TAG, "Corrected call type from [语音] to " + callType);
+						if (BuildConfig.DEBUG) Log.d(TAG, "Corrected call type from [语音] to " + callType);
 						text = callType;
 					}
 				}
@@ -235,7 +235,7 @@ class WeChatMessage {
 		// 只跳过通话中的实时状态消息
 		if (textStr.equals("语音通话中") || textStr.equals("视频通话中") ||
 			textStr.equals("[语音通话中]") || textStr.equals("[视频通话中]")) {
-			Log.d(TAG, "shouldSkipMessage: skipping in-call status: " + textStr);
+			if (BuildConfig.DEBUG) Log.d(TAG, "shouldSkipMessage: skipping in-call status");
 			return true;
 		}
 		// 其他消息（包括 [语音]、[语音通话]、[视频通话]）都不跳过
@@ -252,14 +252,14 @@ class WeChatMessage {
 	private static boolean isSelfMessage(final Conversation conversation, final @Nullable CharSequence sender) {
 		// 第一层：sender 为 SELF（空字符串）→ 自己发的
 		if (SELF.equals(sender)) {
-			Log.d(TAG, "isSelfMessage: true (SELF)");
+			if (BuildConfig.DEBUG) Log.d(TAG, "isSelfMessage: true (SELF)");
 			return true;
 		}
 		// 第二层：仅群聊中，sender 与 conversation.title 相同 → 自己发的
 		// 私聊中 sender == title 是正常情况（朋友名字 = 会话标题），不代表是自己发的
 		if (conversation.isGroupChat() && sender != null && conversation.title != null) {
 			if (TextUtils.equals(sender, conversation.title)) {
-				Log.d(TAG, "isSelfMessage: true (group chat, sender matches title: " + sender + ")");
+				if (BuildConfig.DEBUG) Log.d(TAG, "isSelfMessage: true (group chat, sender matches title)");
 				return true;
 			}
 		}
@@ -278,14 +278,11 @@ class WeChatMessage {
 		// 第二层验证：双层验证判断是否是自己发的消息
 		if (isSelfMessage(conversation, sender)) {
 			person = null;  // 自己发的消息
-			Log.d(TAG, "toMessage: self message, text=" + text);
 		} else if (conversation.isGroupChat()) {
 			person = conversation.getGroupParticipant(s, s);
-			Log.d(TAG, "toMessage: group chat, sender=" + s + " text=" + text);
 		} else {
 			// 朋友发的消息：用 conversation.title 作为发送者名称
 			person = new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build();
-			Log.d(TAG, "toMessage: friend message, sender=" + s + " title=" + conversation.title + " text=" + text);
 		}
 
 		Message r = new Message(EmojiTranslator.translate(text), time, person);

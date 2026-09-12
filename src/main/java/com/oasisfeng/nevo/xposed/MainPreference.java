@@ -1,22 +1,17 @@
 package com.oasisfeng.nevo.xposed;
 
 import android.os.Bundle;
-import android.preference.PreferenceFragment;
-import android.preference.PreferenceManager;
-import android.util.Log;
 
-import java.util.Map;
+import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.PreferenceManager;
 
 import static android.os.Build.VERSION.SDK_INT;
 import static android.os.Build.VERSION_CODES.N;
 
-@SuppressWarnings("deprecation")
-public class MainPreference extends PreferenceFragment {
-	@Override
-	public void onCreate(Bundle savedInstanceState) {
-		super.onCreate(savedInstanceState);
-		PreferenceManager manager = getPreferenceManager();
+public class MainPreference extends PreferenceFragmentCompat {
+	@Override public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
+		final PreferenceManager manager = getPreferenceManager();
 		if (SDK_INT >= N) manager.setStorageDeviceProtected();
-		addPreferencesFromResource(R.xml.main_preference);
+		setPreferencesFromResource(R.xml.main_preference, rootKey);
 	}
 }

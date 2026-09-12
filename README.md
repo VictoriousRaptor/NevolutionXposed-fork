@@ -1,12 +1,11 @@
 # NevolutionXposed - 微信通知增强
 
-基于现代 libxposed API 102 的 Android Xposed 模块，为微信和 System UI 提供通知栏直接回复、MIUI 推送图标修复与媒体通知增强。
+基于现代 libxposed API 102 的 Android Xposed 模块，为微信和 System UI 提供通知栏直接回复与媒体通知增强。
 
 ## 功能
 
 - 微信通知栏直接回复（内置微信 8.0.72 / 8.0.76 适配描述）
 - 微信 Car Mode 检查绕过与 RemoteInput 回复结果转发
-- MIUI 推送通知图标修复
 - 媒体通知样式增强
 - 通话通知识别与排除
 - 可在模块应用内分别启用或停用上述装饰器
@@ -25,7 +24,7 @@
 2. 模块使用固定作用域：
    - `com.android.systemui`
    - `com.tencent.mm`
-3. 从桌面启动 NevolutionXposed，可配置微信、MIUI 与媒体通知功能。设置会通过 libxposed service 同步到被注入进程。
+3. 从桌面启动 NevolutionXposed，可配置微信与媒体通知功能。设置会通过 libxposed service 同步到被注入进程。
 4. 修改设置或模块状态后，重启对应目标进程使配置生效。
 
 ## 构建
@@ -77,7 +76,7 @@ hook(method)
 
 ```text
 src/main/java/com/oasisfeng/nevo/
-├── decorators/            # 微信、MIUI、媒体通知逻辑
+├── decorators/            # 微信、媒体通知逻辑
 ├── sdk/                   # 通知装饰器抽象
 └── xposed/
     ├── MainHook.java      # API 102 模块入口
@@ -88,11 +87,20 @@ src/main/java/com/oasisfeng/nevo/
 
 ## 版本记录
 
+### v3.1.0
+
+- 微信通知：移除每次进程启动的方法枚举扫描与逐方法追踪，热路径日志改为仅调试构建输出，且不再写消息正文、联系人与账号信息。
+- 通知栏回复加固：回复画像只在验证可用后缓存、失败可重试；合成回复文本单次有效并有超时，且只对模块自己派发的 Intent 生效。
+- 媒体/表情/文件/链接类通知保留微信原始布局的同时补上「回复」输入框。
+- 通知重建按需触发：由 `recoverBuilder` 产出的通知会被复用，实测同一条图片消息从每次通知都重建降到 5 次通知 2 次重建。
+- 设置界面迁移到 AndroidX Preference（`PreferenceFragmentCompat` + `AppCompatActivity`），移除已废弃的 `android.preference`。
+- 移除 MIUI 推送图标修复功能（含其图标处理与缓存代码），偏好迁移到 schema 3 并清理历史键。
+- 修复语音通话识别使用宿主 Resources 读取模块资源而导致的装饰中断；通知缓存改为按条数计费（上限 120 条）。
+
 ### v3.0.1
 
 - 增加桌面、LSPosed 模块菜单和标准系统首选项三种设置入口。
-- 微信通知增强默认开启；MIUI 与媒体通知增强默认关闭。
-- 删除未被代码使用的微信 MIUI 修复开关。
+- 微信通知增强默认开启；媒体通知增强默认关闭。
 
 ### v3.0.0
 

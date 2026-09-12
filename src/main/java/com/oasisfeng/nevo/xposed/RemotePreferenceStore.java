@@ -14,12 +14,13 @@ import io.github.libxposed.service.XposedService;
 final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenceChangeListener {
 	static final String GROUP = "settings";
 	private static final String SCHEMA_VERSION_KEY = "settings_schema_version";
-	private static final int CURRENT_SCHEMA_VERSION = 2;
+	static final int CURRENT_SCHEMA_VERSION = 3;
+	/** Key of the removed MIUI decorator; purged from local and remote storage on migration. */
+	private static final String OBSOLETE_MIUI_KEY = "MIUIDecorator.enabled";
 	static final String KEY_IMAGE_PREVIEW = "WeChatDecorator.image_preview";
 	static final String[] BOOLEAN_KEYS = {
 			"WeChatDecorator.enabled",
 			KEY_IMAGE_PREVIEW,
-			"MIUIDecorator.enabled",
 			"MediaDecorator.enabled"
 	};
 
@@ -43,9 +44,9 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 		if (!local.contains(KEY_IMAGE_PREVIEW)) {
 			editor.putBoolean(KEY_IMAGE_PREVIEW, false);
 		}
-		editor.putBoolean("MIUIDecorator.enabled", false);
 		editor.putBoolean("MediaDecorator.enabled", false);
 		editor.remove("WeChatDecorator.miui_fix");
+		editor.remove(OBSOLETE_MIUI_KEY);
 		editor.putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
 		editor.apply();
 	}
@@ -97,18 +98,16 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 			localEditor.putBoolean(entry.getKey(), entry.getValue());
 			remoteEditor.putBoolean(entry.getKey(), entry.getValue());
 		}
-		localEditor.remove("WeChatDecorator.miui_fix").putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
-		remoteEditor.remove("WeChatDecorator.miui_fix").putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
+		localEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
+		remoteEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
 		localEditor.apply();
 		remoteEditor.apply();
 	}
 
 	static void applySchemaMigration(Map<String, Boolean> values, int schemaVersion) {
-		if (schemaVersion < 1) {
-			values.put("MIUIDecorator.enabled", false);
-			values.put("MediaDecorator.enabled", false);
-		}
+		if (schemaVersion < 1) values.put("MediaDecorator.enabled", false);
 		if (schemaVersion < 2) values.put(KEY_IMAGE_PREVIEW, false);
+		if (schemaVersion < 3) values.remove(OBSOLETE_MIUI_KEY);
 	}
 
 	private static Map<String, Boolean> readKnownBooleans(SharedPreferences preferences) {
