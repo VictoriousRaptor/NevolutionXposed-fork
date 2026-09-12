@@ -19,11 +19,6 @@
 	<PreferenceCategory
 		android:title="@string/settings_optional_category">
 		<CheckBoxPreference 
-			android:key="MIUIDecorator.enabled"
-			android:defaultValue="false"
-			android:summary="@string/decorator_miui_description"
-			android:title="@string/decorator_miui_title"/>
-		<CheckBoxPreference 
 			android:key="MediaDecorator.enabled"
 			android:defaultValue="false"
 			android:summary="@string/decorator_media_description"
