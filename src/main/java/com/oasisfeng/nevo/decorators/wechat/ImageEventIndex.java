@@ -10,6 +10,8 @@ import java.util.List;
 final class ImageEventIndex {
 	static final int CAPACITY = 64;
 	static final long TTL_MS = 30000;
+	/** WeChat's own notification timestamp lags the message by seconds, so observation time is the primary anchor. */
+	static final long OBSERVED_WINDOW_MS = 5000;
 	private final LinkedHashMap<String, Entry> entries = new LinkedHashMap<>();
 
 	synchronized void put(String talker, long messageId, long created, List<String> paths, long now) {
@@ -27,16 +29,21 @@ final class ImageEventIndex {
 		while (entries.size() > CAPACITY) entries.remove(entries.keySet().iterator().next());
 	}
 
-	synchronized Entry select(String talker, long notificationTime, long now) {
+	synchronized Entry select(String talker, long notificationTime, long observedAt, long now) {
 		prune(now);
 		if (talker == null || talker.isEmpty()) return null;
 		Entry result = null;
 		for (Entry entry : entries.values()) {
-			if (!entry.talker.equals(talker) || !ImageCandidateSelector.isRecent(entry.created, notificationTime)) continue;
+			if (!entry.talker.equals(talker) || !matches(entry, notificationTime, observedAt)) continue;
 			if (result != null) return null; // Never guess between messages in the same conversation.
 			result = entry;
 		}
 		return result;
+	}
+
+	private static boolean matches(Entry entry, long notificationTime, long observedAt) {
+		if (entry.created > 0 && notificationTime > 0 && ImageCandidateSelector.isRecent(entry.created, notificationTime)) return true;
+		return Math.abs(entry.observed - observedAt) <= OBSERVED_WINDOW_MS;
 	}
 
 	synchronized int size(long now) { prune(now); return entries.size(); }

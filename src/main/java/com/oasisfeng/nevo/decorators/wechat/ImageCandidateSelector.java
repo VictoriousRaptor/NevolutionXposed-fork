@@ -1,25 +1,19 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
-import java.io.File;
-import java.util.List;
-import java.util.function.Predicate;
-
-/** Conservative temporal fallback, not an exact WeChat message-to-file mapping. */
+/** Narrow helpers for message-associated images; notification images are never discovered by scanning directories. */
 final class ImageCandidateSelector {
 	static final long WINDOW_MS = 2000;
 
-	static boolean isRecent(long modified, long received) {
-		return modified > 0 && modified >= received - WINDOW_MS && modified <= received + WINDOW_MS;
+	/** Tolerates either timestamp being expressed in seconds or milliseconds; the window itself stays absolute. */
+	static boolean isRecent(long messageTime, long notificationTime) {
+		if (messageTime <= 0 || notificationTime <= 0) return false;
+		return near(messageTime, notificationTime)
+				|| near(messageTime, notificationTime * 1000)
+				|| near(messageTime * 1000, notificationTime);
 	}
 
-	static File unique(List<File> candidates, Predicate<File> decodable) {
-		File selected = null;
-		for (File file : candidates) {
-			if (!decodable.test(file)) continue;
-			if (selected != null && !selected.equals(file)) return null;
-			selected = file;
-		}
-		return selected;
+	private static boolean near(long actual, long expected) {
+		return actual >= expected - WINDOW_MS && actual <= expected + WINDOW_MS;
 	}
 
 	static boolean matchesRequest(long expected, long actual) {

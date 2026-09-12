@@ -31,6 +31,8 @@
 
 	<string name="decorator_wechat_title">WeChat</string>
 	<string name="decorator_wechat_description">Better notification for WeChat: Messaging Style, Direct Reply and Clear to Mark Read.</string>
+	<string name="decorator_wechat_image_preview_title">Image preview in notifications</string>
+	<string name="decorator_wechat_image_preview_description">Show the received picture instead of [图片] in the notification. Requires a WeChat process restart after changing; with this off, notifications keep the original [图片] text.</string>
 	<string name="self_display_name">我</string>
 	<string name="action_reply">Reply</string>
 	<string name="action_zoom">Zoom</string>
