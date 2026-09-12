@@ -14,9 +14,11 @@ import io.github.libxposed.service.XposedService;
 final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenceChangeListener {
 	static final String GROUP = "settings";
 	private static final String SCHEMA_VERSION_KEY = "settings_schema_version";
-	private static final int CURRENT_SCHEMA_VERSION = 1;
+	private static final int CURRENT_SCHEMA_VERSION = 2;
+	static final String KEY_IMAGE_PREVIEW = "WeChatDecorator.image_preview";
 	static final String[] BOOLEAN_KEYS = {
 			"WeChatDecorator.enabled",
+			KEY_IMAGE_PREVIEW,
 			"MIUIDecorator.enabled",
 			"MediaDecorator.enabled"
 	};
@@ -37,6 +39,9 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 		SharedPreferences.Editor editor = local.edit();
 		if (!local.contains("WeChatDecorator.enabled")) {
 			editor.putBoolean("WeChatDecorator.enabled", true);
+		}
+		if (!local.contains(KEY_IMAGE_PREVIEW)) {
+			editor.putBoolean(KEY_IMAGE_PREVIEW, false);
 		}
 		editor.putBoolean("MIUIDecorator.enabled", false);
 		editor.putBoolean("MediaDecorator.enabled", false);
@@ -99,9 +104,11 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 	}
 
 	static void applySchemaMigration(Map<String, Boolean> values, int schemaVersion) {
-		if (schemaVersion >= CURRENT_SCHEMA_VERSION) return;
-		values.put("MIUIDecorator.enabled", false);
-		values.put("MediaDecorator.enabled", false);
+		if (schemaVersion < 1) {
+			values.put("MIUIDecorator.enabled", false);
+			values.put("MediaDecorator.enabled", false);
+		}
+		if (schemaVersion < 2) values.put(KEY_IMAGE_PREVIEW, false);
 	}
 
 	private static Map<String, Boolean> readKnownBooleans(SharedPreferences preferences) {

@@ -9,6 +9,11 @@
 			android:defaultValue="true"
 			android:summary="@string/decorator_wechat_description"
 			android:title="@string/decorator_wechat_title"/>
+		<CheckBoxPreference
+			android:key="WeChatDecorator.image_preview"
+			android:defaultValue="false"
+			android:summary="@string/decorator_wechat_image_preview_description"
+			android:title="@string/decorator_wechat_image_preview_title"/>
 	</PreferenceCategory>
 
 	<PreferenceCategory
