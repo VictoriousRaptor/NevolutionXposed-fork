@@ -386,7 +386,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 				if (BuildConfig.DEBUG) Log.d(TAG, channel_id + " " + channel);
 			}
 
-			VoiceCall.tweakIfNeeded(getAppContext(), n);
+			VoiceCall.tweakIfNeeded(n);
 			return Decorating.Processed;
 		}
 
