@@ -192,16 +192,16 @@ public class WeChatDecorator extends NevoDecoratorService {
 						if (textStr.contains("视频通话")) {
 							sLastCallType = "视频通话";
 							sLastCallTime = System.currentTimeMillis();
-							Log.d(TAG, "Detected video call invitation");
+							if (BuildConfig.DEBUG) Log.d(TAG, "Detected video call invitation");
 						} else if (textStr.contains("语音通话")) {
 							sLastCallType = "语音通话";
 							sLastCallTime = System.currentTimeMillis();
-							Log.d(TAG, "Detected voice call invitation");
+							if (BuildConfig.DEBUG) Log.d(TAG, "Detected voice call invitation");
 						}
 					}
 					if (textStr.contains("邀请你") || textStr.contains("通话中") ||
 						textStr.contains("calling") || textStr.contains("Voice call") || textStr.contains("Video call")) {
-						Log.d(TAG, "Skipping voice/video call notification: " + textStr);
+						if (BuildConfig.DEBUG) Log.d(TAG, "Skipping voice/video call notification");
 						return Decorating.Unprocessed;
 					}
 				}
@@ -221,7 +221,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			// Log.d(TAG, "deleteIntent " + n.deleteIntent);
 			CharSequence title = extras.getCharSequence(Notification.EXTRA_TITLE);
 			if (title == null || title.length() == 0) {
-				Log.e(TAG, "Title is missing: " + n);
+				Log.w(TAG, "Title is missing; leaving notification untouched");
 				return Decorating.Unprocessed;
 			}
 			if (title != (title = EmojiTranslator.translate(title))) extras.putCharSequence(Notification.EXTRA_TITLE, title);
@@ -234,12 +234,15 @@ public class WeChatDecorator extends NevoDecoratorService {
 			String content = text != null ? text.toString() : null;
 			// [2条]...
 			if (content != null && content.startsWith("[")) {
-				if (BuildConfig.DEBUG) Log.d(TAG, "content " + content);
 				final int end = content.indexOf(']');
-				if (content.charAt(end - 1) == '条') {
-					n.number = Integer.parseInt(content.substring(1, end - 1));
-					if (BuildConfig.DEBUG) Log.d(TAG, "n.number " + n.number);
-					content = content.substring(end + 1);
+				if (end > 1 && content.charAt(end - 1) == '条') {
+					try {
+						n.number = Integer.parseInt(content.substring(1, end - 1));
+						if (BuildConfig.DEBUG) Log.d(TAG, "n.number " + n.number);
+						content = content.substring(end + 1);
+					} catch (final NumberFormatException e) {
+						Log.w(TAG, "Unparsable unread count prefix; keeping text unchanged");
+					}
 				}
 			}
 			// 修正通话类型：微信 CarExtender 总是发送 [语音通话]，需要根据 id=41 通知修正为 [视频通话]
@@ -249,7 +252,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 					if ("视频通话".equals(sLastCallType)) {
 						content = content.replace("[语音通话]", "[视频通话]");
 						extras.putCharSequence(Notification.EXTRA_TEXT, content);
-						Log.d(TAG, "Corrected call type to video: " + content);
+						if (BuildConfig.DEBUG) Log.d(TAG, "Corrected call type to video");
 					}
 				}
 				// H3: 使用后立即清理，避免脏数据影响后续通知
@@ -262,7 +265,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 					content.contains("[视频]") || content.contains("[文件]") || content.contains("[链接]") ||
 					content.contains("[音乐]") || content.contains("[位置]") || content.contains("[红包]") ||
 					content.contains("[转账]") || content.contains("[小程序]")) {
-					Log.d(TAG, "Skipping media/sticker message, keeping original: " + content);
+					if (BuildConfig.DEBUG) Log.d(TAG, "Skipping media/sticker message, keeping original");
 					return Decorating.Unprocessed;
 				}
 				// 转换微信内置表情标记为 Emoji（如 [得意] -> 😎）
@@ -270,7 +273,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 					CharSequence translated = EmojiTranslator.translate(content);
 					if (!translated.equals(content)) {
 						extras.putCharSequence(Notification.EXTRA_TEXT, translated);
-						Log.d(TAG, "Translated emoji: " + content + " -> " + translated);
+						if (BuildConfig.DEBUG) Log.d(TAG, "Translated emoji marker");
 					}
 				}
 			}
@@ -279,7 +282,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 			String recaller = null;
 			boolean is_recall = false;
 			if (content != null && content.contains("撤回")) {
-				if (BuildConfig.DEBUG) Log.d(TAG, "content " + content);
 				if (CHANNEL_MISC.equals(channel_id)) {	// Misc. notifications on Android 8+.
 					return Decorating.Unprocessed;
 				} else if (n.tickerText == null) {		// Legacy misc. notifications.
@@ -293,9 +295,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 						recaller = matcher.group("recaller");
 						extras.putBoolean(EXTRA_RECALL, true);
 						extras.putString(EXTRA_RECALLER, recaller);
-						if (BuildConfig.DEBUG) Log.d(TAG, "recaller " + recaller);
+						if (BuildConfig.DEBUG) Log.d(TAG, "recall notification detected, recaller=" + (recaller != null));
 					} else {
-						Log.d(TAG, "Skip further process for non-conversation notification: " + title);    // E.g. web login confirmation notification.
+						// E.g. web login confirmation notification.
+						if (BuildConfig.DEBUG) Log.d(TAG, "Skip further process for non-conversation notification");
 						return Decorating.Unprocessed;
 					}
 				}
@@ -341,16 +344,16 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 			if (mMessagingBuilder == null) {
 				try {
-					Log.d(TAG, "mMessagingBuilder is null, initializing...");
+					if (BuildConfig.DEBUG) Log.d(TAG, "mMessagingBuilder is null, initializing...");
 					mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);
 				} catch (final Exception e) {
 					Log.w(TAG, "Failed to init mMessagingBuilder: " + e.getMessage());
 					return Decorating.Unprocessed;
 				}
 			}
-			Log.d(TAG, "Calling buildFromExtender...");
+			if (BuildConfig.DEBUG) Log.d(TAG, "Calling buildFromExtender...");
 			MessagingStyle messaging = mMessagingBuilder.buildFromExtender(conversation, id, n, title, getArchivedNotifications(id));
-			Log.d(TAG, "buildFromExtender returned: " + (messaging != null ? "non-null" : "null")); // build message from android auto
+			if (BuildConfig.DEBUG) Log.d(TAG, "buildFromExtender returned: " + (messaging != null ? "non-null" : "null")); // build message from android auto
 			if (messaging == null)	// EXTRA_TEXT will be written in buildFromArchive()
 				messaging = mMessagingBuilder.buildFromArchive(conversation, n, title, getArchivedNotifications(id));
 			if (messaging == null) return Decorating.Unprocessed;
@@ -407,7 +410,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		}
 
 		private void reviveNotificationAfterChannelDeletion(final int id) {
-			Log.d(TAG, ("Revive silently: ") + id);
+			if (BuildConfig.DEBUG) Log.d(TAG, "Revive silently: " + id);
 			modifyNotification(id, n -> {
 				n.extras.putBoolean(KEY_SILENT_REVIVAL, true);
 			});
@@ -459,10 +462,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (hasArchivedNotifications(id)) {
 				Notification n = getArchivedNotification(id);
 				for (ModifyNotification modify : modifies) modify.modify(n);
-				Log.d(TAG, "recast " + id + " " + n.extras.getCharSequence(Notification.EXTRA_TITLE));
+				if (BuildConfig.DEBUG) Log.d(TAG, "recast " + id);
 				recastNotification(id, n);
 			} else {
-				Log.d(TAG, "can not recast " + id + ", so cancel it");
+				if (BuildConfig.DEBUG) Log.d(TAG, "can not recast " + id + ", so cancel it");
 				cancelNotification(id);
 			}
 		}

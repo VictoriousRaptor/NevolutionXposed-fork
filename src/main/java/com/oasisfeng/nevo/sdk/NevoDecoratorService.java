@@ -296,20 +296,20 @@ public abstract class NevoDecoratorService {
 		@Keep public void onDestroy() {}
 	
 		@Keep public Decorating onNotificationPosted(final StatusBarNotification sbn) {
-			Log.d(TAG, "onNotificationPosted(" + sbn + ")");
+			if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationPosted(" + sbn + ")");
 			return Decorating.Unprocessed;
 		}
 		@Keep public void onNotificationRemoved(final StatusBarNotification evolving, final int reason) {
-			Log.d(TAG, "onNotificationRemoved(" + evolving + ", " + reason + ")");
+			if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationRemoved(" + evolving + ", " + reason + ")");
 		}
 
 		protected final void cancelNotification(String key) {
-			Log.d(TAG, "cancelNotification " + key);
+			if (BuildConfig.DEBUG) Log.d(TAG, "cancelNotification " + key);
 			if (mNLS != null) mNLS.cancelNotification(key);
 		}
 	
 		protected final void recastNotification(final StatusBarNotification sbn) {
-			Log.d(TAG, "recastNotification " + sbn + " " + mNLS);
+			if (BuildConfig.DEBUG) Log.d(TAG, "recastNotification " + sbn + " " + mNLS);
 			if (mNLS != null) mNLS.onNotificationPosted(sbn, null);
 		}
 	}

@@ -4,7 +4,6 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
-import android.util.Log;
 import android.util.LruCache;
 
 import top.trumeet.common.utils.ImgUtils;
@@ -54,14 +53,10 @@ public class IconCache {
             @Override
             Bitmap gen() {
                 try {
-					Log.d("inspect", "context " + ctx);
 					Drawable icon = ctx.getPackageManager().getApplicationIcon(pkg);
-					Log.d("inspect", "icon " + icon);
                     Bitmap r = drawableToBitmap(icon);
-					Log.d("inspect", "bitmap " + r);
 					return r;
                 } catch (IllegalArgumentException ignored) {
-					Log.d("inspect", "ooo " + pkg);
 					return null;
                 } catch (Exception ignored) {
                     return null;
