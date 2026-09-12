@@ -128,7 +128,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 			super(prefKey);
 		}
 		
-		private final ImagePreviewLoader imagePreviews = new ImagePreviewLoader();
+		private final WeChatImageEvents imageEvents = new WeChatImageEvents();
+		private final ImagePreviewLoader imagePreviews = new ImagePreviewLoader(imageEvents);
 		private static void imageLog(String stage, String details) {
 			if (BuildConfig.DEBUG) Log.i(TAG, "NX_IMAGE stage=" + stage + " " + details);
 		}
@@ -142,29 +143,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		 * @param loadPackageParam
 		 */
 		@Override public void hook(PackageHookContext loadPackageParam) {
-			imageLog("hooks_begin", "revision=image-fix-1");
-			// Diagnostics only: image lookup no longer depends on intercepting Java file writes.
-			try {
-				XposedHelpers.findAndHookConstructor(java.io.FileOutputStream.class, String.class, boolean.class, new XC_MethodHook() {
-					@Override protected void afterHookedMethod(MethodHookParam param) {
-						String path = (String) param.args[0];
-						if (path == null || !path.contains("/image2/") || param.thisObject == null) return;
-						XposedHelpers.setAdditionalInstanceField(param.thisObject, "nxImageWrite", Boolean.TRUE);
-						imageLog("write_open", "jpg=" + path.endsWith(".jpg"));
-					}
-				});
-				XposedHelpers.findAndHookMethod(java.io.FileOutputStream.class, "close", new XC_MethodHook() {
-					@Override protected void afterHookedMethod(MethodHookParam param) {
-						if (XposedHelpers.getAdditionalInstanceField(param.thisObject, "nxImageWrite") == null) return;
-						XposedHelpers.setAdditionalInstanceField(param.thisObject, "nxImageWrite", null);
-						imageLog("write_close", "success=" + !param.hasThrowable());
-					}
-				});
-				imageLog("hooks_ready", "revision=image-fix-1");
-			} catch (Throwable failure) {
-				XposedBridge.rethrowFrameworkError(failure);
-				imageLog("hooks_unavailable", "type=" + failure.getClass().getSimpleName());
-			}
+			imageEvents.install(getAppContext(), loadPackageParam.classLoader);
 		}
 
 		private MessagingBuilder mMessagingBuilder;
@@ -173,7 +152,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private final ConversationManager mConversationManager = new ConversationManager();
 
 		@Override public void onCreate(SharedPreferences pref) {
-			imageLog("process_init", "revision=image-fix-1");
+			imageLog("process_init", "revision=image-events-1");
 			super.onCreate(pref);
 
 			mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);		// Must be called after loadPreferences().
@@ -269,7 +248,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 				sLastCallType = null;
 				sLastCallTime = 0;
 			}
-			// Post the text notification immediately. Decode a unique recent image off the UI thread.
+			// Post the text notification immediately. Resolve only message-associated paths off the UI thread.
 			if (content != null && content.endsWith("[图片]")) {
 				imagePreviews.request(getAppContext(), nm, tag, id, n);
 			}
