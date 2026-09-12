@@ -201,53 +201,31 @@ public class ImgUtils {
     }
 
     private static void denoiseWhitePoint(int width, int height, int[] pixels, int exThre) {
+        // Neighbour offsets of a pixel, row-major; avoids allocating an int[8] for every pixel.
+        final int[] neighbours = { -width - 1, -width, -width + 1, -1, 1, width - 1, width, width + 1 };
         for (int i = 1; i < height - 1; i++) {
+            final int row = width * i;
             for (int j = 1; j < width - 1; j++) {
-                int[] dots = new int[]{
-                        getPixel(width, pixels, i - 1, j - 1),
-                        getPixel(width, pixels, i - 1, j),
-                        getPixel(width, pixels, i - 1, j + 1),
-                        getPixel(width, pixels, i, j - 1),
-//                        pixels[width * i + j],
-                        getPixel(width, pixels, i, j + 1),
-                        getPixel(width, pixels, i + 1, j - 1),
-                        getPixel(width, pixels, i + 1, j),
-                        getPixel(width, pixels, i + 1, j + 1)};
-
                 int whCnt = 0;
-                int trCnt = 0;
-
-                for (int dot : dots) {
-                    if (dot == Color.WHITE) {
-                        whCnt++;
-                    } else {
-                        trCnt++;
-                    }
-                }
-
-                if (trCnt > (dots.length - exThre)) {
-                    pixels[width * i + j] = Color.TRANSPARENT;
-                }
+                for (int offset : neighbours) if (pixels[row + j + offset] == Color.WHITE) whCnt++;
+                if (neighbours.length - whCnt > neighbours.length - exThre) pixels[row + j] = Color.TRANSPARENT;
             }
         }
-    }
-
-    private static int getPixel(int width, int[] pixels, int i, int j) {
-        return pixels[width * i + j];
     }
 
     private static void getGreyHistogram(Bitmap bitmap, int[] histogram) {
         int width = bitmap.getWidth();
         int height = bitmap.getHeight();
-        for (int x = 0; x < width; x++) {
-            for (int y = 0; y < height; y++) {
-                int dot = bitmap.getPixel(x, y);
-                int red = ((dot & 0x00FF0000) >> 16);
-                int green = ((dot & 0x0000FF00) >> 8);
-                int blue = (dot & 0x000000FF);
-                int gray = (int) ((float) red * 0.3 + (float) green * 0.59 + (float) blue * 0.11);
-                histogram[gray]++;
-            }
+        int[] pixels = new int[width * height];
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+        for (int dot : pixels) {
+            int red = ((dot & 0x00FF0000) >> 16);
+            int green = ((dot & 0x0000FF00) >> 8);
+            int blue = (dot & 0x000000FF);
+            int gray = (int) ((float) red * 0.3 + (float) green * 0.59 + (float) blue * 0.11);
+            if (gray > 255) gray = 255;
+            else if (gray < 0) gray = 0;
+            histogram[gray]++;
         }
     }
 
