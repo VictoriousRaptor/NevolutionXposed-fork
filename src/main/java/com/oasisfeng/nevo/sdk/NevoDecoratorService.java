@@ -119,6 +119,29 @@ public abstract class NevoDecoratorService {
 		protected static boolean hasArchivedNotifications(int key) {
 			return cache.get(key) != null;
 		}
+
+		private static final String KEY_ACTIONS_SERIALIZED = "nevo.actionsSerialized";
+
+		/** Marks a notification whose RemoteInput actions are already parceled by a full rebuild. */
+		public static void markActionsSerialized(final Notification n) {
+			XposedHelpers.setAdditionalInstanceField(n, KEY_ACTIONS_SERIALIZED, Boolean.TRUE);
+		}
+
+		/** True when the notification came out of {@code Notification.Builder.recoverBuilder()} already. */
+		public static boolean hasSerializedActions(final Notification n) {
+			return XposedHelpers.getAdditionalInstanceField(n, KEY_ACTIONS_SERIALIZED) != null;
+		}
+
+		/**
+		 * Swaps the most recently cached notification of a conversation for its rebuilt copy, so later
+		 * recasts reuse the notification whose actions are already properly serialized.
+		 */
+		public static void replaceCachedNotification(final int id, final Notification original, final Notification replacement) {
+			final LinkedList<Notification> queue = cache.get(id);
+			if (queue == null) return;
+			final int index = queue.lastIndexOf(original);
+			if (index >= 0) queue.set(index, replacement);
+		}
 	
 		public static RemoteViews overrideBigContentView(Notification n, RemoteViews remoteViews) {
 			n.extras.putParcelable(EXTRAS_BIG_CONTENT_VIEW_OVERRIDE, remoteViews);

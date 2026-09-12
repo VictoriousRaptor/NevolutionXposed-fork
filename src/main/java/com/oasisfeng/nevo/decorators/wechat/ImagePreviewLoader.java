@@ -12,6 +12,7 @@ import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
+import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.xposed.BuildConfig;
 
 import java.io.File;
@@ -201,6 +202,8 @@ final class ImagePreviewLoader {
 			Notification result = builder.build();
 			result.extras.putBoolean(READY, true);
 			result.extras.putLong(TOKEN, request.token);
+			// recoverBuilder() already parceled the actions, so the notify hook may skip its own rebuild.
+			NevoDecoratorService.LocalDecorator.markActionsSerialized(result);
 			manager.notify(tag, id, result);
 			log("published", "request=" + request.token + " style=BigPicture actions="
 					+ (result.actions == null ? 0 : result.actions.length));
@@ -224,6 +227,7 @@ final class ImagePreviewLoader {
 			Notification result = builder.build();
 			result.extras.putBoolean(READY, true);
 			result.extras.putLong(TOKEN, preview.token);
+			NevoDecoratorService.LocalDecorator.markActionsSerialized(result);
 			manager.notify(tag, id, result);
 			log("reattached", "request=" + preview.token + " id=" + id + " style=BigPicture");
 		} catch (Exception failure) {
