@@ -685,7 +685,11 @@ class MessagingBuilder {
 		actionReply = "回复";
 		actionZoom = "缩放";
 		mController = controller;
-		String selfName = pkgCtx.getString(R.string.self_display_name);
+		String selfName = "我";
+		if (moduleContext != null) {
+			try { selfName = moduleContext.getString(R.string.self_display_name); }
+			catch (android.content.res.Resources.NotFoundException ignored) {}
+		}
 		if (selfName == null || selfName.isEmpty()) selfName = "我";
 		mUserSelf = buildPersonFromProfile(selfName);
 
