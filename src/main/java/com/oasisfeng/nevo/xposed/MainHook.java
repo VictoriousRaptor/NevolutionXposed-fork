@@ -300,10 +300,12 @@ public class MainHook extends XposedModule {
 					// full notification teardown/rebuild, so skip it when the notification has none.
 					try {
 						final Context ctx = NevoDecoratorService.getAppContext();
-						if (ctx != null && hasFreeFormRemoteInput(n)) {
+						if (ctx != null && !LocalDecorator.hasSerializedActions(n) && hasFreeFormRemoteInput(n)) {
 							Notification.Builder builder = Notification.Builder.recoverBuilder(ctx, n);
 							Notification rebuilt = builder.build();
 							if (hasFreeFormRemoteInput(rebuilt)) {
+								LocalDecorator.markActionsSerialized(rebuilt);
+								LocalDecorator.replaceCachedNotification(id, n, rebuilt);
 								param.args[2] = rebuilt;
 								if (BuildConfig.DEBUG) Log.d(TAG, "Rebuilt notification with RemoteInput");
 							}
