@@ -1,6 +1,8 @@
 package com.oasisfeng.nevo.xposed;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -29,8 +31,8 @@ public class RemotePreferenceStoreTest {
 		assertEquals(RemotePreferenceStore.BOOLEAN_KEYS.length, merged.size());
 		assertEquals(Boolean.TRUE, merged.get("WeChatDecorator.enabled"));
 		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
-		assertEquals(Boolean.FALSE, merged.get("MIUIDecorator.enabled"));
 		assertEquals(Boolean.FALSE, merged.get("MediaDecorator.enabled"));
+		assertFalse(merged.containsKey("MIUIDecorator.enabled"));
 	}
 
 	@Test public void imagePreviewStaysOffUntilTheUserOptsIn() {
@@ -61,19 +63,19 @@ public class RemotePreferenceStoreTest {
 		RemotePreferenceStore.applySchemaMigration(values, 0);
 
 		assertEquals(Boolean.FALSE, values.get("WeChatDecorator.enabled"));
-		assertEquals(Boolean.FALSE, values.get("MIUIDecorator.enabled"));
 		assertEquals(Boolean.FALSE, values.get("MediaDecorator.enabled"));
+		assertNull(values.get("MIUIDecorator.enabled"));	// The MIUI decorator was removed.
 	}
 
 	@Test public void currentSchemaKeepsExplicitUserChoices() {
 		Map<String, Boolean> values = new LinkedHashMap<>();
 		values.put("WeChatDecorator.enabled", false);
-		values.put("MIUIDecorator.enabled", true);
+		values.put("MediaDecorator.enabled", true);
 
-		RemotePreferenceStore.applySchemaMigration(values, 1);
+		RemotePreferenceStore.applySchemaMigration(values, RemotePreferenceStore.CURRENT_SCHEMA_VERSION);
 
 		assertEquals(Boolean.FALSE, values.get("WeChatDecorator.enabled"));
-		assertEquals(Boolean.TRUE, values.get("MIUIDecorator.enabled"));
+		assertEquals(Boolean.TRUE, values.get("MediaDecorator.enabled"));
 	}
 
 	@Test public void mergeReturnsOnlyKnownKeysInStableOrder() {

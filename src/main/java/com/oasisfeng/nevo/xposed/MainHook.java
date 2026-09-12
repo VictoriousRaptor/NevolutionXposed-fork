@@ -6,25 +6,15 @@ import android.app.PendingIntent;
 import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
-import android.content.ContextWrapper;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.NotificationListenerService.RankingMap;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
-import android.widget.RemoteViews;
 
-import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 
-import java.io.File;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 import com.oasisfeng.nevo.sdk.HookSupport;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService;
@@ -51,14 +41,17 @@ public class MainHook extends XposedModule {
 	private android.content.SharedPreferences pref;
 	private String processName;
 	private final NevoDecoratorService wechat = new com.oasisfeng.nevo.decorators.wechat.WeChatDecorator();
-	private final NevoDecoratorService miui = new com.oasisfeng.nevo.decorators.MIUIDecorator();
 	private final NevoDecoratorService media = new com.oasisfeng.nevo.decorators.media.MediaDecorator();
 
 	private static Class<?> sMMAutoMessageReplyReceiverClass = null;
 	private static volatile com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved sReplyProfile = null;
-	// H2: 改用 ConcurrentHashMap 避免多条回复并发覆盖，以通知 ID 为 key
-	private static final ConcurrentHashMap<Integer, String> sPendingReplies = new ConcurrentHashMap<>();
-	private static volatile String sPendingReplyTextFallback = null; // 仅用于无 ID 场景的兜底
+	/** A rejected profile is retried, but never more often than this. */
+	private static final long PROFILE_RETRY_INTERVAL_MS = 5_000L;
+	private static volatile long sLastProfileAttempt = 0L;
+	/** Single-use synthetic reply text; expires so a stale reply cannot leak into a later one. */
+	private static final long PENDING_REPLY_TTL_MS = 30_000L;
+	private static volatile String sPendingReplyText = null;
+	private static volatile long sPendingReplySetAt = 0L;
 
 	private static void logReply(String stage, String detail) {
 		String message = "NX_REPLY stage=" + stage + (detail == null || detail.isEmpty() ? "" : " " + detail);
@@ -68,10 +61,17 @@ public class MainHook extends XposedModule {
 
 	/**
 	 * Resolves the reply profile for the installed WeChat build and validates every
-	 * descriptor by signature inside the WeChat class loader. Runs once per process.
+	 * descriptor by signature inside the WeChat class loader. A usable result is cached
+	 * for the process; a rejected one is retried at most once per retry interval, so a
+	 * transient failure does not disable synthetic replies until the process restarts.
 	 */
 	private static synchronized void resolveReplyProfile(Context context) {
-		if (context == null || sReplyProfile != null) return;
+		if (context == null) return;
+		final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved cached = sReplyProfile;
+		if (cached != null && cached.isUsable()) return;
+		final long now = android.os.SystemClock.elapsedRealtime();
+		if (now - sLastProfileAttempt < PROFILE_RETRY_INTERVAL_MS) return;
+		sLastProfileAttempt = now;
 		try {
 			final android.content.pm.PackageInfo info = context.getPackageManager().getPackageInfo("com.tencent.mm", 0);
 			final String versionName = info.versionName;
@@ -84,6 +84,7 @@ public class MainHook extends XposedModule {
 			logReply(resolved.isUsable() ? "profile_ready" : "profile_rejected", resolved.describe());
 		} catch (Throwable e) {
 			XposedBridge.rethrowFrameworkError(e);
+			sReplyProfile = null;
 			logReply("profile_resolution_failed", Log.getStackTraceString(e));
 		}
 	}
@@ -93,60 +94,36 @@ public class MainHook extends XposedModule {
 		return resolved != null && resolved.isUsable();
 	}
 
-	public static void setPendingReplyText(String text) {
-		sPendingReplyTextFallback = text;
+	/** Arms the single-use synthetic reply text. */
+	private static void rememberPendingReply(String text) {
+		sPendingReplyText = text;
+		sPendingReplySetAt = android.os.SystemClock.elapsedRealtime();
 	}
 
-	public static void setPendingReplyText(int notificationId, String text) {
-		sPendingReplies.put(notificationId, text);
+	private static boolean isSyntheticReplyIntent(Object candidate) {
+		return candidate instanceof Intent && WECHAT_AUTO_REPLY_ACTION.equals(((Intent) candidate).getAction());
 	}
 
-	private static String consumePendingReplyText(int notificationId) {
-		String text = sPendingReplies.remove(notificationId);
-		if (text == null) {
-			text = sPendingReplyTextFallback;
-			sPendingReplyTextFallback = null;
-		}
+	/**
+	 * Consumes the armed text exactly once, and only for the synthetic reply intent we
+	 * dispatched ourselves, so an unrelated RemoteInput lookup can never pick it up.
+	 */
+	private static String takePendingReplyText(Object intentArgument) {
+		if (!isSyntheticReplyIntent(intentArgument)) return null;
+		final String text = sPendingReplyText;
+		if (text == null) return null;
+		sPendingReplyText = null;
+		if (android.os.SystemClock.elapsedRealtime() - sPendingReplySetAt > PENDING_REPLY_TTL_MS) return null;
 		return text;
-	}
-
-	private static void inspect(PackageHookContext loadPackageParam, String className, String... methods) {
-		try {
-			final Class<?> clazz = XposedHelpers.findClass(className, loadPackageParam.classLoader);
-			XposedBridge.log("inspect clazz: " + clazz + " " + loadPackageParam.packageName);
-			Consumer<String> inspect = method -> {
-				XposedBridge.hookAllMethods(clazz, method, new XC_MethodHook() {
-					@Override
-					protected void afterHookedMethod(MethodHookParam param) {
-						Log.d("inspect.method", loadPackageParam.packageName + " " + param.method.getName());
-						for (Object arg : param.args) {
-							Log.d("inspect.method", loadPackageParam.packageName + " arg " + arg);
-						}
-						if (BuildConfig.DEBUG) Log.d(TAG, loadPackageParam.packageName + " " + Log.getStackTraceString(new Exception()));
-					}
-				});
-			};
-			for (String method : methods) {
-				inspect.accept(method);
-			}
-		} catch (XposedHelpers.ClassNotFoundError e) { /* XposedBridge.log("ContextImpl hook failed"); */ }
-	}
-
-	@Keep
-	private static void inspectThen(PackageHookContext loadPackageParam, String className, Consumer<Class<?>>... thens) {
-		try {
-			final Class<?> clazz = XposedHelpers.findClass(className, loadPackageParam.classLoader);
-			XposedBridge.log("inspect clazz: " + clazz + " " + loadPackageParam.packageName);
-			for (Consumer<Class<?>> then : thens) {
-				then.accept(clazz);
-			}
-		} catch (XposedHelpers.ClassNotFoundError e) { /* XposedBridge.log("ContextImpl hook failed"); */ }
 	}
 
 	@Override
 	public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
 		XposedBridge.attach(this);
 		processName = param.getProcessName();
+		// Single line per process: proves whether the framework injected this module and lets the
+		// device smoke test tell "not injected" apart from "injected but no notification yet".
+		if (BuildConfig.DEBUG) Log.d(TAG, "onModuleLoaded: " + processName);
 		if (!"com.android.systemui".equals(processName) && !"com.tencent.mm".equals(processName)) {
 			detach();
 			return;
@@ -171,12 +148,6 @@ public class MainHook extends XposedModule {
 			hookWeChat(loadPackageParam);
 			break;
 		}
-		/* inspect(loadPackageParam,
-				"com.android.server.notification.NotificationManagerService",
-				"getNotificationChannel",
-				"deleteNotificationChannel",
-				"deleteNotificationChannelGroup",
-				"createNotificationChannels"); */
 	}
 
 	private void hookSystemUI(PackageHookContext loadPackageParam) {
@@ -186,7 +157,7 @@ public class MainHook extends XposedModule {
 			protected void beforeHookedMethod(MethodHookParam param) {
 				StatusBarNotification sbn = (StatusBarNotification)param.args[0];
 				// RankingMap rankingMap = (RankingMap)param.args[1];
-				Log.d(TAG, "onNotificationPosted");
+				if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationPosted");
 				onNotificationPosted(sbn);
 			}
 		}, onNotificationRemoved = new XC_MethodHook() { // 捕获通知移除
@@ -206,7 +177,7 @@ public class MainHook extends XposedModule {
 				} catch (Exception e) {
 					reason = 0;
 				}
-				Log.d(TAG, "onNotificationRemoved");
+				if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationRemoved");
 				onNotificationRemoved(sbn, reason);
 			}
 		}, nls = new XC_MethodHook() { // 捕获NotificationListenerService的具体实现
@@ -219,10 +190,9 @@ public class MainHook extends XposedModule {
 				}
 				try {
 					final Class<?> clazz = nls.getClass();
-					XposedBridge.log("NL clazz: " + clazz + " " + loadPackageParam.packageName);
+					if (BuildConfig.DEBUG) Log.d(TAG, "NL clazz: " + clazz + " " + loadPackageParam.packageName);
 					Method method = XposedHelpers.findMethodExact(clazz, "onNotificationPosted", 
 							StatusBarNotification.class, RankingMap.class);
-					Log.d(TAG, "method " + method);
 					XposedBridge.hookMethod(method, onNotificationPosted);
 					// Try Android 16+ signature first, then fall back to older signature
 					try {
@@ -240,7 +210,6 @@ public class MainHook extends XposedModule {
 						}
 					}
 					if (method != null) {
-						Log.d(TAG, "method " + method);
 						XposedBridge.hookMethod(method, onNotificationRemoved);
 					} else {
 						XposedBridge.log("WARNING: onNotificationRemoved hook completely failed, notification removal tracking disabled");
@@ -256,59 +225,57 @@ public class MainHook extends XposedModule {
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log("NotificationListenerService hook failed "); }
 		try {
 			final Class<?> clazz = XposedHelpers.findClass("android.app.ContextImpl", loadPackageParam.classLoader);
-			XposedBridge.log("CI clazz: " + clazz);
 			AtomicReference<Context> ref = new AtomicReference<>();
 			XposedBridge.hookAllMethods(clazz, "createAppContext", new XC_MethodHook() {
 				@Override
 				protected void afterHookedMethod(MethodHookParam param) {
 					Context context = (Context)param.getResult();
 					if (ref.compareAndSet(null, context)) {
-						XposedBridge.log("onCreate " + context);
+						if (BuildConfig.DEBUG) Log.d(TAG, "onCreate " + context);
 						onCreate(context);
 					}
 				}
 			});
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log("ContextImpl hook failed"); }
 		try {
-			SystemUIDecorator media = this.media.getSystemUIDecorator();
-			if ((media instanceof HookSupport)) { ((HookSupport)media).hook(loadPackageParam); }
-		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log(this.media + " hook failed"); }
+			final SystemUIDecorator media = this.media.getSystemUIDecorator();
+			if (media instanceof HookSupport && isDecoratorEnabled("MediaDecorator"))
+				((HookSupport) media).hook(loadPackageParam);
+		} catch (Throwable e) {
+			XposedBridge.rethrowFrameworkError(e);
+			XposedBridge.log(this.media + " hook failed: " + e.getMessage());
+		}
+	}
+
+	/**
+	 * SystemUI hooks are installed before {@code onCreate(pref)} runs, so the remote setting is
+	 * read directly instead of relying on the decorator's flag; unknown state means "disabled".
+	 */
+	private boolean isDecoratorEnabled(String prefKey) {
+		final android.content.SharedPreferences preferences = pref;
+		return preferences != null && preferences.getBoolean(prefKey + ".enabled", false);
 	}
 	
 	private void onCreate(Context context) {
 		NevoDecoratorService.setAppContext(context);
 
-		SystemUIDecorator miui = this.miui.getSystemUIDecorator(),
-				media = this.media.getSystemUIDecorator();
-		miui.onCreate(pref);
+		final SystemUIDecorator media = this.media.getSystemUIDecorator();
 		media.onCreate(pref);
 	}
 
 	private void onNotificationPosted(StatusBarNotification sbn) {
 		if (XposedHelpers.getAdditionalInstanceField(sbn, "applied") != null) {
-			Log.d(TAG, "skip " + sbn);
+			if (BuildConfig.DEBUG) Log.d(TAG, "skip " + sbn);
 			return;
 		}
 		XposedHelpers.setAdditionalInstanceField(sbn, "applied", true);
 
-		SystemUIDecorator miui = this.miui.getSystemUIDecorator(),
-				media = this.media.getSystemUIDecorator();
-		switch (sbn.getPackageName()) {
-			case "com.xiaomi.xmsf":
-			if (!miui.isDisabled()) miui.onNotificationPosted(sbn);
-			break;
-		}
+		final SystemUIDecorator media = this.media.getSystemUIDecorator();
 		if (!media.isDisabled()) media.onNotificationPosted(sbn);
 	}
 
 	private void onNotificationRemoved(StatusBarNotification sbn, int reason) {
-		SystemUIDecorator miui = this.miui.getSystemUIDecorator(),
-				media = this.media.getSystemUIDecorator();
-		switch (sbn.getPackageName()) {
-			case "com.xiaomi.xmsf":
-			if (!miui.isDisabled()) miui.onNotificationRemoved(sbn, reason);
-			break;
-		}
+		final SystemUIDecorator media = this.media.getSystemUIDecorator();
 		if (!media.isDisabled()) media.onNotificationRemoved(sbn, reason);
 	}
 
@@ -316,9 +283,8 @@ public class MainHook extends XposedModule {
 		if (!"com.tencent.mm".equals(loadPackageParam.processName)) return;
 		try {
 			final Class<?> clazz = XposedHelpers.findClass("android.app.NotificationManager", loadPackageParam.classLoader);
-			XposedBridge.log("NM clazz: " + clazz);
 			Method method = XposedHelpers.findMethodExact(clazz, "notify", String.class, int.class, Notification.class);
-			XposedBridge.log("NM.notify: " + method);
+			if (BuildConfig.DEBUG) Log.d(TAG, "NM.notify: " + method);
 			XposedBridge.hookMethod(method, new XC_MethodHook() {
 				@Override
 				protected void beforeHookedMethod(MethodHookParam param) {
@@ -326,29 +292,22 @@ public class MainHook extends XposedModule {
 					String tag = (String)param.args[0];
 					int id = (int)param.args[1];
 					Notification n = (Notification)param.args[2];
-					Log.d(TAG, "before apply " + nm + " " + tag + " " + id);
+					if (BuildConfig.DEBUG) Log.d(TAG, "before apply " + nm + " " + tag + " " + id);
 					applyLocally(nm, tag, id, n);
 					// 用 Notification.Builder 重建通知，确保 actions 被正确序列化
-					Log.d(TAG, "after apply, actions=" + (n.actions != null ? n.actions.length : "null"));
+					if (BuildConfig.DEBUG) Log.d(TAG, "after apply, actions=" + (n.actions != null ? n.actions.length : "null"));
+					// Rebuilding is only ever needed for free-form RemoteInput actions, and it costs a
+					// full notification teardown/rebuild, so skip it when the notification has none.
 					try {
-						Context ctx = NevoDecoratorService.getAppContext();
-						if (ctx != null && n.actions != null) {
+						final Context ctx = NevoDecoratorService.getAppContext();
+						if (ctx != null && !LocalDecorator.hasSerializedActions(n) && hasFreeFormRemoteInput(n)) {
 							Notification.Builder builder = Notification.Builder.recoverBuilder(ctx, n);
 							Notification rebuilt = builder.build();
-							if (rebuilt.actions != null) {
-								boolean hasRI = false;
-								for (Notification.Action a : rebuilt.actions) {
-									if (a != null && a.getRemoteInputs() != null) {
-										for (android.app.RemoteInput ri : a.getRemoteInputs()) {
-											if (ri != null && ri.getAllowFreeFormInput()) { hasRI = true; break; }
-										}
-									}
-									if (hasRI) break;
-								}
-								if (hasRI) {
-									param.args[2] = rebuilt;
-									Log.d(TAG, "Rebuilt notification with RemoteInput");
-								}
+							if (hasFreeFormRemoteInput(rebuilt)) {
+								LocalDecorator.markActionsSerialized(rebuilt);
+								LocalDecorator.replaceCachedNotification(id, n, rebuilt);
+								param.args[2] = rebuilt;
+								if (BuildConfig.DEBUG) Log.d(TAG, "Rebuilt notification with RemoteInput");
 							}
 						}
 					} catch (Exception e) {
@@ -359,8 +318,6 @@ public class MainHook extends XposedModule {
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log(this.wechat + " NotificationManager hook failed"); }
 		try {
 			AtomicReference<Context> ref = new AtomicReference<>();
-			XposedBridge.log("hookWeChat: registering Application.onCreate hook");
-			hookWeChatMessageSending(loadPackageParam);
 			hookAutoReplyReceiver(loadPackageParam);
 			XposedHelpers.findAndHookMethod(Application.class, "onCreate", new XC_MethodHook() {
 				@Override
@@ -368,7 +325,7 @@ public class MainHook extends XposedModule {
 					Application app = (Application) param.thisObject;
 					Context context = app.getApplicationContext();
 					if (context != null && ref.compareAndSet(null, context)) {
-						XposedBridge.log("hookWeChat: Application.onCreate context=" + context);
+						if (BuildConfig.DEBUG) Log.d(TAG, "Application.onCreate context=" + context);
 						NevoDecoratorService.setAppContext(context);
 						resolveReplyProfile(context);
 						// Install the car-mode gate bypass before WeChat builds its
@@ -386,22 +343,16 @@ public class MainHook extends XposedModule {
 			XposedBridge.rethrowFrameworkError(e);
 			XposedBridge.log(this.wechat + " Application.onCreate hook failed: " + e.getMessage());
 		}
-		/* inspect(loadPackageParam,
-				"com.android.server.notification.NotificationManagerService",
-				"getNotificationChannel",
-				"deleteNotificationChannel",
-				"deleteNotificationChannelGroup",
-				"createNotificationChannels"); */
 	}
 
 	// TODO
 	private void applyLocally(NotificationManager nm, String tag, int id, Notification n) {
 		if (NevoDecoratorService.getAppContext() == null) {
-			XposedBridge.log("applyLocally: application context is not ready; skipping notification");
+			if (BuildConfig.DEBUG) Log.d(TAG, "applyLocally: application context is not ready; skipping notification");
 			return;
 		}
 		if (XposedHelpers.getAdditionalInstanceField(n, "pre-applied") != null) {
-			Log.d(TAG, "skip " + n);
+			if (BuildConfig.DEBUG) Log.d(TAG, "skip " + n);
 			return;
 		}
 		XposedHelpers.setAdditionalInstanceField(n, "pre-applied", true);
@@ -410,54 +361,28 @@ public class MainHook extends XposedModule {
 		if (!wechat.isDisabled()) wechat.apply(nm, tag, id, n);
 	}
 
-
-	private void hookWeChatMessageSending(PackageHookContext loadPackageParam) {
-		XposedBridge.log("hookWeChatMessageSending: searching for CarExtender handling code");
-		final ClassLoader cl = loadPackageParam.classLoader;
-		// Search for classes related to CarExtender or CarNotification
-		String[] candidates = {
-			"android.app.Notification$CarExtender",
-			"android.app.Notification$CarExtender$UnreadConversation",
-			"android.support.v4.app.NotificationCompat$CarExtender",
-			"androidx.core.app.NotificationCompat$CarExtender",
-		};
-		for (String className : candidates) {
-			try {
-				Class<?> clazz = XposedHelpers.findClass(className, cl);
-				XposedBridge.log("hookWeChatMessageSending: found " + className);
-				for (java.lang.reflect.Method m : clazz.getDeclaredMethods()) {
-					XposedBridge.log("hookWeChatMessageSending: " + className + "." + m.getName());
-				}
-			} catch (Throwable e) {
-				XposedBridge.rethrowFrameworkError(e);
-				XposedBridge.log("hookWeChatMessageSending: " + className + " not found");
-			}
+	/** True when the notification carries an inline reply input, i.e. the rebuild workaround is needed. */
+	private static boolean hasFreeFormRemoteInput(Notification n) {
+		final Notification.Action[] actions = n.actions;
+		if (actions == null) return false;
+		for (final Notification.Action action : actions) {
+			if (action == null) continue;
+			final android.app.RemoteInput[] inputs = action.getRemoteInputs();
+			if (inputs == null) continue;
+			for (final android.app.RemoteInput input : inputs)
+				if (input != null && input.getAllowFreeFormInput()) return true;
 		}
-		// Search for classes that might handle reply PendingIntents
-		String[] replyCandidates = {
-			"com.tencent.mm.plugin.auto.service.MMAutoMessageReplyReceiver",
-			"com.tencent.mm.booter.notification.NotificationItem",
-		};
-		for (String className : replyCandidates) {
-			try {
-				Class<?> clazz = XposedHelpers.findClass(className, cl);
-				XposedBridge.log("hookWeChatMessageSending: found " + className);
-				for (java.lang.reflect.Method m : clazz.getDeclaredMethods()) {
-					XposedBridge.log("hookWeChatMessageSending: " + className + "." + m.getName() + " params=" + java.util.Arrays.toString(m.getParameterTypes()));
-				}
-			} catch (Throwable e) {
-				XposedBridge.rethrowFrameworkError(e);
-				XposedBridge.log("hookWeChatMessageSending: " + className + " not found");
-			}
-		}
+		return false;
 	}
+
 
 	private void hookAutoReplyReceiver(PackageHookContext loadPackageParam) {
 		try {
 			final Class<?> receiverClass = XposedHelpers.findClass("com.tencent.mm.plugin.auto.service.MMAutoMessageReplyReceiver", loadPackageParam.classLoader);
 			sMMAutoMessageReplyReceiverClass = receiverClass;
-			XposedBridge.log("hookAutoReplyReceiver: found class " + receiverClass);
-			// Hook onReceive and trace ALL method calls from within
+			if (BuildConfig.DEBUG) Log.d(TAG, "hookAutoReplyReceiver: found class " + receiverClass);
+			// Only the public entry point is traced; hooking every declared method of the
+			// receiver produced per-call logging without adding diagnostic value.
 			final ClassLoader finalCl = loadPackageParam.classLoader;
 			XposedHelpers.findAndHookMethod(receiverClass, "onReceive", android.content.Context.class, android.content.Intent.class, new XC_MethodHook() {
 				@Override
@@ -486,40 +411,6 @@ public class MainHook extends XposedModule {
 					}
 				}
 			});
-			// Hook ALL methods in the receiver class
-			for (java.lang.reflect.Method method : receiverClass.getDeclaredMethods()) {
-				if (!"onReceive".equals(method.getName())) {
-					XposedBridge.log("hookAutoReplyReceiver: found method " + method.getName() + " params=" + java.util.Arrays.toString(method.getParameterTypes()));
-					final String methodName = method.getName();
-					try {
-						XposedHelpers.findAndHookMethod(receiverClass, method.getName(), method.getParameterTypes(), new XC_MethodHook() {
-							@Override
-							protected void beforeHookedMethod(MethodHookParam param) {
-								logReply("wechat_receiver_method_enter", "method=" + methodName + " argCount=" + param.args.length);
-							}
-							@Override
-							protected void afterHookedMethod(MethodHookParam param) {
-								logReply("wechat_receiver_method_exit", "method=" + methodName + " throwable=" + (param.getThrowable() != null));
-								if (param.getThrowable() != null) {
-									logReply("wechat_receiver_method_exception", "method=" + methodName + " " + Log.getStackTraceString(param.getThrowable()));
-								}
-							}
-						});
-					} catch (Throwable e) {
-						XposedBridge.rethrowFrameworkError(e);
-						XposedBridge.log("hookAutoReplyReceiver: failed to hook " + methodName + ": " + e.getMessage());
-					}
-				}
-			}
-			// Also hook the parent class methods
-			Class<?> superClass = receiverClass.getSuperclass();
-			while (superClass != null && !superClass.equals(Object.class)) {
-				XposedBridge.log("hookAutoReplyReceiver: parent class " + superClass.getName());
-				for (java.lang.reflect.Method method : superClass.getDeclaredMethods()) {
-					XposedBridge.log("hookAutoReplyReceiver: parent method " + superClass.getName() + "." + method.getName());
-				}
-				superClass = superClass.getSuperclass();
-			}
 		} catch (Throwable e) {
 			XposedBridge.rethrowFrameworkError(e);
 			XposedBridge.log("hookAutoReplyReceiver failed: " + e.getMessage());
@@ -558,14 +449,11 @@ public class MainHook extends XposedModule {
 			logReply("car_mode_bypass_failed", Log.getStackTraceString(th));
 		}
 		try {
-			// H2: 设置 pendingReplyText 供 RemoteInput.getResultsFromIntent hook 使用
-			String replyText = intent.getStringExtra("reply_content");
-			int notifId = intent.getIntExtra("notification_id", -1);
+			final String replyText = intent.getStringExtra("reply_content");
+			final int notifId = intent.getIntExtra("notification_id", -1);
 			if (replyText != null) {
-				if (notifId >= 0) {
-					sPendingReplies.put(notifId, replyText);
-				}
-				sPendingReplyTextFallback = replyText;
+				// Single-use fallback, consumed only by the intent dispatched below.
+				rememberPendingReply(replyText);
 				logReply("synthetic_prepare", "notificationId=" + notifId + " inputLength=" + replyText.length());
 
 				// 使用 RemoteInput.addResultsToIntent 设置回复文本
@@ -628,19 +516,16 @@ public class MainHook extends XposedModule {
 						protected void afterHookedMethod(MethodHookParam param) {
 							android.os.Bundle result = (android.os.Bundle) param.getResult();
 							logReply("helper_result", "keys=" + (result == null ? "none" : result.keySet()));
-							if (result == null) {
-								String replyText = sPendingReplyTextFallback;
-								if (replyText != null) {
-									result = new android.os.Bundle();
-									result.putCharSequence(WECHAT_AUTO_REPLY_RESULT_KEY, replyText);
-									param.setResult(result);
-									logReply("helper_result_injected", "resultKey=" + WECHAT_AUTO_REPLY_RESULT_KEY + " inputLength=" + replyText.length());
-									sPendingReplyTextFallback = null;
-								}
-							}
+							if (result != null || param.args.length == 0) return;
+							final String replyText = takePendingReplyText(param.args[0]);
+							if (replyText == null) return;
+							result = new android.os.Bundle();
+							result.putCharSequence(WECHAT_AUTO_REPLY_RESULT_KEY, replyText);
+							param.setResult(result);
+							logReply("helper_result_injected", "resultKey=" + WECHAT_AUTO_REPLY_RESULT_KEY + " inputLength=" + replyText.length());
 						}
 					});
-					XposedBridge.log("hookCarModeBypass: RemoteInputHelper.b() hook added");
+					if (BuildConfig.DEBUG) Log.d(TAG, "RemoteInputHelper.b() hook added");
 				}
 			} catch (Throwable e) {
 				XposedBridge.rethrowFrameworkError(e);
@@ -653,25 +538,22 @@ public class MainHook extends XposedModule {
 					@Override
 					protected void afterHookedMethod(MethodHookParam param) {
 						android.os.Bundle result = (android.os.Bundle) param.getResult();
-						if (result == null) {
-							String replyText = sPendingReplyTextFallback;
-							if (replyText != null) {
-								result = new android.os.Bundle();
-								result.putCharSequence(WECHAT_AUTO_REPLY_RESULT_KEY, replyText);
-								param.setResult(result);
-								logReply("platform_result_injected", "resultKey=" + WECHAT_AUTO_REPLY_RESULT_KEY + " inputLength=" + replyText.length());
-								sPendingReplyTextFallback = null;
-							}
-						}
+						if (result != null || param.args.length == 0) return;
+						final String replyText = takePendingReplyText(param.args[0]);
+						if (replyText == null) return;
+						result = new android.os.Bundle();
+						result.putCharSequence(WECHAT_AUTO_REPLY_RESULT_KEY, replyText);
+						param.setResult(result);
+						logReply("platform_result_injected", "resultKey=" + WECHAT_AUTO_REPLY_RESULT_KEY + " inputLength=" + replyText.length());
 					}
 				});
-				XposedBridge.log("hookCarModeBypass: RemoteInput.getResultsFromIntent hook added");
+				if (BuildConfig.DEBUG) Log.d(TAG, "RemoteInput.getResultsFromIntent hook added");
 			} catch (Throwable e) {
 				XposedBridge.rethrowFrameworkError(e);
 				XposedBridge.log("hookCarModeBypass: failed to hook RemoteInput: " + e.getMessage());
 			}
 			carModeBypassHooked = true;
-			XposedBridge.log("hookCarModeBypass: car mode bypass hooks added");
+			if (BuildConfig.DEBUG) Log.d(TAG, "car mode bypass hooks added");
 		} catch (Throwable e) {
 			XposedBridge.rethrowFrameworkError(e);
 			XposedBridge.log("hookCarModeBypass: failed: " + e.getMessage());
@@ -679,14 +561,14 @@ public class MainHook extends XposedModule {
 	}
 
 	private void hookAutoLogicMethods(final Class<?> autoLogicClass, java.util.List<String> bypassMethods) {
-		XposedBridge.log("hookAutoLogicMethods: hooking " + autoLogicClass.getName() + " " + bypassMethods);
+		if (BuildConfig.DEBUG) Log.d(TAG, "hooking " + autoLogicClass.getName() + " " + bypassMethods);
 		for (final String methodName : bypassMethods) {
 			try {
 				XposedHelpers.findAndHookMethod(autoLogicClass, methodName, new XC_MethodHook() {
 					@Override
 					protected void beforeHookedMethod(MethodHookParam param) {
 						param.setResult(true);
-						XposedBridge.log("Bypassed " + autoLogicClass.getSimpleName() + "." + methodName + "() -> true");
+						if (BuildConfig.DEBUG) Log.d(TAG, "Bypassed " + autoLogicClass.getSimpleName() + "." + methodName + "() -> true");
 					}
 				});
 			} catch (Throwable e) {

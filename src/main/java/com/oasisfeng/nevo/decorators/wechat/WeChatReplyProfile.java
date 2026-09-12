@@ -1,6 +1,5 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
-import android.app.RemoteInput;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -179,20 +178,4 @@ public final class WeChatReplyProfile {
 		}
 	}
 
-	/** True when the class exposes the RemoteInput helper used by the receiver. */
-	public static boolean isRemoteInputHelper(Class<?> clazz) {
-		if (clazz == null) return false;
-		try {
-			final Method method = clazz.getDeclaredMethod("b", Intent.class);
-			return Modifier.isStatic(method.getModifiers())
-					&& Bundle.class.isAssignableFrom(method.getReturnType());
-		} catch (Throwable ignored) {
-			return false;
-		}
-	}
-
-	/** Keeps the platform RemoteInput class referenced from one place. */
-	public static void addResultsToIntent(RemoteInput[] inputs, Intent intent, Bundle results) {
-		RemoteInput.addResultsToIntent(inputs, intent, results);
-	}
 }
