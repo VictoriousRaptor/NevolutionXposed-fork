@@ -1,12 +1,9 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
 import android.app.Notification;
-import android.content.Context;
 
 import static android.os.Build.VERSION.SDK_INT;
 import static android.os.Build.VERSION_CODES.O;
-
-import com.oasisfeng.nevo.xposed.R;
 
 /**
  * Tweaks to the voice call on-going notification.
@@ -15,12 +12,17 @@ import com.oasisfeng.nevo.xposed.R;
  */
 class VoiceCall {
 
-	static void tweakIfNeeded(final Context context, final Notification n) {
+	/**
+	 * Module resources are not readable from the host process (package visibility blocks
+	 * {@code createPackageContext}), so the prefixes are kept here instead of in resources.
+	 */
+	private static final String[] PREFIXES = { "语音通话中", "語音通話中", "Tap to continue as voice call in progress" };
+
+	static void tweakIfNeeded(final Notification n) {
 		final CharSequence text_cs = n.extras.getCharSequence(Notification.EXTRA_TEXT);
 		if (text_cs == null) return;
 		final String text = text_cs.toString();
-		final String[] prefixes = context.getResources().getStringArray(R.array.text_prefix_for_voice_call);
-		for (final String prefix : prefixes)
+		for (final String prefix : PREFIXES)
 			if (text.startsWith(prefix)) {
 				tweak(n, text);
 				break;
