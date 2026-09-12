@@ -41,7 +41,7 @@ class ConversationManager {
 		private static final Pattern pattern = Pattern.compile("^[a-zA-Z0-9\\u4e00-\\u9fa5]");
 
 		final int id;
-		@Nullable String key;
+		@Nullable volatile String key;
 		int count;
 		CharSequence title;
 		CharSequence summary;
