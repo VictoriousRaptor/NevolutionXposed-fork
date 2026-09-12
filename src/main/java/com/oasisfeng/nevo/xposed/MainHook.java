@@ -122,6 +122,9 @@ public class MainHook extends XposedModule {
 	public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
 		XposedBridge.attach(this);
 		processName = param.getProcessName();
+		// Single line per process: proves whether the framework injected this module and lets the
+		// device smoke test tell "not injected" apart from "injected but no notification yet".
+		if (BuildConfig.DEBUG) Log.d(TAG, "onModuleLoaded: " + processName);
 		if (!"com.android.systemui".equals(processName) && !"com.tencent.mm".equals(processName)) {
 			detach();
 			return;
