@@ -311,25 +311,16 @@ public class MainHook extends XposedModule {
 					applyLocally(nm, tag, id, n);
 					// 用 Notification.Builder 重建通知，确保 actions 被正确序列化
 					if (BuildConfig.DEBUG) Log.d(TAG, "after apply, actions=" + (n.actions != null ? n.actions.length : "null"));
+					// Rebuilding is only ever needed for free-form RemoteInput actions, and it costs a
+					// full notification teardown/rebuild, so skip it when the notification has none.
 					try {
-						Context ctx = NevoDecoratorService.getAppContext();
-						if (ctx != null && n.actions != null) {
+						final Context ctx = NevoDecoratorService.getAppContext();
+						if (ctx != null && hasFreeFormRemoteInput(n)) {
 							Notification.Builder builder = Notification.Builder.recoverBuilder(ctx, n);
 							Notification rebuilt = builder.build();
-							if (rebuilt.actions != null) {
-								boolean hasRI = false;
-								for (Notification.Action a : rebuilt.actions) {
-									if (a != null && a.getRemoteInputs() != null) {
-										for (android.app.RemoteInput ri : a.getRemoteInputs()) {
-											if (ri != null && ri.getAllowFreeFormInput()) { hasRI = true; break; }
-										}
-									}
-									if (hasRI) break;
-								}
-								if (hasRI) {
-									param.args[2] = rebuilt;
-									if (BuildConfig.DEBUG) Log.d(TAG, "Rebuilt notification with RemoteInput");
-								}
+							if (hasFreeFormRemoteInput(rebuilt)) {
+								param.args[2] = rebuilt;
+								if (BuildConfig.DEBUG) Log.d(TAG, "Rebuilt notification with RemoteInput");
 							}
 						}
 					} catch (Exception e) {
@@ -381,6 +372,20 @@ public class MainHook extends XposedModule {
 		LocalDecorator.setNM(nm);
 		LocalDecorator wechat = this.wechat.getLocalDecorator("com.tencent.mm");
 		if (!wechat.isDisabled()) wechat.apply(nm, tag, id, n);
+	}
+
+	/** True when the notification carries an inline reply input, i.e. the rebuild workaround is needed. */
+	private static boolean hasFreeFormRemoteInput(Notification n) {
+		final Notification.Action[] actions = n.actions;
+		if (actions == null) return false;
+		for (final Notification.Action action : actions) {
+			if (action == null) continue;
+			final android.app.RemoteInput[] inputs = action.getRemoteInputs();
+			if (inputs == null) continue;
+			for (final android.app.RemoteInput input : inputs)
+				if (input != null && input.getAllowFreeFormInput()) return true;
+		}
+		return false;
 	}
 
 

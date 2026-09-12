@@ -6,7 +6,6 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
-import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -22,7 +21,7 @@ import java.util.Collections;
 public class ImgUtils {
 
 
-    private static int NUM_256 = 256;
+    private static final int NUM_256 = 256;
 
     private static Bitmap trimImgToCircle(Bitmap bitmap, int color) {
         int width = bitmap.getWidth();
