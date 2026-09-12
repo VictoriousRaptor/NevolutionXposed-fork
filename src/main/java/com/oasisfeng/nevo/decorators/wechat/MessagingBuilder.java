@@ -4,7 +4,6 @@ import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.Notification.Action;
 import android.app.Notification.CarExtender;
-import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.RemoteInput;
 import android.content.BroadcastReceiver;
@@ -18,13 +17,9 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.ContactsContract.Contacts;
-import android.provider.ContactsContract.Profile;
-import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
 import android.util.ArrayMap;
 import android.util.Log;
-import java.util.Map;
 import android.util.LongSparseArray;
 
 import com.oasisfeng.nevo.decorators.wechat.ConversationManager.Conversation;
@@ -34,7 +29,6 @@ import com.oasisfeng.nevo.xposed.MainHook;
 import java.io.File;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.Set;
 import java.util.Arrays;
 import java.util.List;
@@ -58,7 +52,6 @@ import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.S;
-import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static androidx.core.app.NotificationCompat.EXTRA_CONVERSATION_TITLE;
 import static androidx.core.app.NotificationCompat.EXTRA_IS_GROUP_CONVERSATION;
 import static androidx.core.app.NotificationCompat.EXTRA_MESSAGES;
@@ -127,7 +120,7 @@ class MessagingBuilder {
 	@Nullable MessagingStyle buildFromArchive(final Conversation conversation, final Notification n, final CharSequence title, final List<Notification> archive) {
 		// Chat history in big content view
 		if (archive.isEmpty()) {
-			Log.d(TAG, "No history");
+			if (BuildConfig.DEBUG) Log.d(TAG, "No history");
 			return null;
 		}
 
@@ -141,7 +134,8 @@ class MessagingBuilder {
 			final Bundle its_extras = notification.extras;
 			final CharSequence its_title = EmojiTranslator.translate(its_extras.getCharSequence(Notification.EXTRA_TITLE));
 			if (! title.equals(its_title)) {
-				Log.d(TAG, "Skip other conversation with the same key in archive: " + its_title);	// ID reset by WeChat due to notification removal in previous evolving
+				// ID reset by WeChat due to notification removal in previous evolving
+				if (BuildConfig.DEBUG) Log.d(TAG, "Skip other conversation with the same key in archive");
 				continue;
 			}
 			final CharSequence its_text = its_extras.getCharSequence(EXTRA_TEXT);
@@ -222,23 +216,8 @@ class MessagingBuilder {
 			}
 		}
 
-		// 从 EXTRA_MESSAGES 保留之前的用户回复（关键！）
-		final Bundle[] existingMessages = n.extras.getParcelableArray(EXTRA_MESSAGES) != null ?
-			(Bundle[]) n.extras.getParcelableArray(EXTRA_MESSAGES) : null;
-		boolean hasUserReplyInMessages = false;
-		if (existingMessages != null) {
-			for (final Bundle msgBundle : existingMessages) {
-				final CharSequence msgText = msgBundle.getCharSequence(KEY_TEXT);
-				final long msgTimestamp = msgBundle.getLong(KEY_TIMESTAMP, 0);
-				final CharSequence msgSender = msgBundle.getCharSequence(KEY_SENDER);
-				// 只保留用户自己的回复（sender 为空字符串或 null 且时间戳较新）
-				if (msgText != null && (msgSender == null || msgSender.length() == 0)) {
-					Log.d(TAG, "Preserving user reply from EXTRA_MESSAGES: " + msgText);
-					messaging.addMessage(new Message(msgText, msgTimestamp, (Person) null));
-					hasUserReplyInMessages = true;
-				}
-			}
-		}
+		// 从 EXTRA_MESSAGES 保留之前的用户回复（关键！其他消息由车载会话提供）
+		final boolean hasUserReplyInMessages = appendUserRepliesFromMessages(messaging, n);
 
 		final PendingIntent on_read = convs.getReadPendingIntent();
 		if (on_read != null) mMarkReadPendingIntents.put(id, on_read);	// Mapped by evolved key,
@@ -280,20 +259,7 @@ class MessagingBuilder {
 			actions.add(zoom_action.build());
 		}
 		// 从 EXTRA_REMOTE_INPUT_HISTORY 补充用户回复（仅当 EXTRA_MESSAGES 中没有时）
-		if (!hasUserReplyInMessages) {
-			final CharSequence[] carInputHistory = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
-			Log.d(TAG, "buildFromExtender: EXTRA_REMOTE_INPUT_HISTORY=" + (carInputHistory != null ? carInputHistory.length + " items" : "null"));
-			if (carInputHistory != null && carInputHistory.length > 0) {
-				for (final CharSequence reply : carInputHistory) {
-					Log.d(TAG, "buildFromExtender: adding user reply: " + reply);
-					if (reply != null && reply.length() > 0) {
-						messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));
-					}
-				}
-			}
-		} else {
-			Log.d(TAG, "buildFromExtender: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
-		}
+		appendRemoteInputHistory(messaging, n, hasUserReplyInMessages);
 
 		setActions(n, actions.toArray(new Action[actions.size()]));
 		return messaging;
@@ -325,6 +291,82 @@ class MessagingBuilder {
 		return pos_colon > 0 ? text.toString().substring(0, pos_colon) : null;
 	}
 
+	/** The person shown for messages sent by the peer(s) of a conversation. */
+	private static Person friendPerson(final Conversation conversation) {
+		return new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build();
+	}
+
+	/** Drops a leading "sender: " prefix from a message text. */
+	private static CharSequence stripSenderPrefix(final CharSequence text) {
+		final String sender = extractSenderFromText(text);
+		return sender != null ? text.subSequence(sender.length() + SENDER_MESSAGE_SEPARATOR.length(), text.length()) : text;
+	}
+
+	/** Keeps the user's own replies from EXTRA_MESSAGES; peers' messages come from the car conversation. */
+	private static boolean appendUserRepliesFromMessages(final MessagingStyle messaging, final Notification n) {
+		final Bundle[] existingMessages = (Bundle[]) n.extras.getParcelableArray(EXTRA_MESSAGES);
+		if (existingMessages == null) return false;
+		boolean hasUserReply = false;
+		for (final Bundle msgBundle : existingMessages) {
+			final CharSequence text = msgBundle.getCharSequence(KEY_TEXT);
+			final CharSequence sender = msgBundle.getCharSequence(KEY_SENDER);
+			if (text == null || (sender != null && sender.length() > 0)) continue;
+			if (BuildConfig.DEBUG) Log.d(TAG, "Preserving user reply from EXTRA_MESSAGES");
+			messaging.addMessage(new Message(text, msgBundle.getLong(KEY_TIMESTAMP, 0), (Person) null));
+			hasUserReply = true;
+		}
+		return hasUserReply;
+	}
+
+	/** Appends the replies recorded in EXTRA_REMOTE_INPUT_HISTORY unless the user's reply is already present. */
+	private static void appendRemoteInputHistory(final MessagingStyle messaging, final Notification n, final boolean hasUserReply) {
+		if (hasUserReply) return;
+		final CharSequence[] history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
+		if (history == null || history.length == 0) return;
+		for (final CharSequence reply : history)
+			if (reply != null && reply.length() > 0)
+				messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));
+	}
+
+	/**
+	 * Rebuilds the message list from what the notification already carries: existing EXTRA_MESSAGES,
+	 * then the archived notifications of the same conversation, then the current text, and finally
+	 * the user's replies from EXTRA_REMOTE_INPUT_HISTORY.
+	 */
+	private static void appendKnownMessages(final MessagingStyle messaging, final Conversation conversation,
+			final Notification n, final List<Notification> archive) {
+		final Bundle[] existingMessages = (Bundle[]) n.extras.getParcelableArray(EXTRA_MESSAGES);
+		boolean hasUserReply = false;
+		if (existingMessages != null && existingMessages.length > 0) {
+			for (final Bundle msgBundle : existingMessages) {
+				final CharSequence text = msgBundle.getCharSequence(KEY_TEXT);
+				if (text == null) continue;
+				final CharSequence sender = msgBundle.getCharSequence(KEY_SENDER);
+				final Person person;
+				if (sender != null && sender.length() == 0) {
+					person = null;	// 自己发的消息（KEY_SENDER 为空字符串）
+					hasUserReply = true;
+				} else if (sender != null) {
+					person = conversation.isGroupChat()
+							? conversation.getGroupParticipant(sender.toString(), sender.toString())
+							: new Person.Builder().setName(sender.toString()).build();
+				} else {
+					person = friendPerson(conversation);	// KEY_SENDER 为 null，按朋友消息处理
+				}
+				messaging.addMessage(new Message(text, msgBundle.getLong(KEY_TIMESTAMP, 0), person));
+			}
+		} else if (archive != null && ! archive.isEmpty()) {
+			for (final Notification archived : archive) {
+				final CharSequence text = archived.extras.getCharSequence(Notification.EXTRA_TEXT);
+				if (text != null) messaging.addMessage(new Message(stripSenderPrefix(text), archived.when, friendPerson(conversation)));
+			}
+		} else {
+			final CharSequence text = n.extras.getCharSequence(Notification.EXTRA_TEXT);
+			if (text != null) messaging.addMessage(new Message(stripSenderPrefix(text), n.when, friendPerson(conversation)));
+		}
+		appendRemoteInputHistory(messaging, n, hasUserReply);
+	}
+
 	/** @return the extracted count in 0xFF range and start position in 0xFF00 range */
 	private static int trimAndExtractLeadingCounter(final CharSequence text) {
 		// Parse and remove the leading "[n]" or [n条/則/…]
@@ -341,7 +383,7 @@ class MessagingBuilder {
 
 			return count < 0xFFFF ? (count & 0xFFFF) | ((text_start << 16) & 0xFFFF0000) : 0xFFFF | ((text_start << 16) & 0xFF00);
 		} catch (final NumberFormatException ignored) {
-			Log.d(TAG, "Failed to parse: " + text);
+			if (BuildConfig.DEBUG) Log.d(TAG, "Failed to parse the leading unread counter");
 			return - 1;
 		}
 	}
@@ -391,68 +433,19 @@ class MessagingBuilder {
 		}
 
 		if (onReply == null || replyRemoteInput == null) {
-			Log.d(TAG, "No reply action found in notification actions");
+			if (BuildConfig.DEBUG) Log.d(TAG, "No reply action found in notification actions");
 			return null;
 		}
 
-		Log.d(TAG, "Found reply action via notification actions fallback");
+		if (BuildConfig.DEBUG) Log.d(TAG, "Found reply action via notification actions fallback");
 
 		final PendingIntent onRead = n.deleteIntent;
 		if (onRead != null) mMarkReadPendingIntents.put(id, onRead);
 
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
 
-		// 检查通知是否已有 EXTRA_MESSAGES（用户回复后重建时）
-		final Bundle[] existingMessages = n.extras.getParcelableArray(EXTRA_MESSAGES) != null ?
-			(Bundle[]) n.extras.getParcelableArray(EXTRA_MESSAGES) : null;
-		boolean hasUserReplyInMessages = false;
-
-		if (existingMessages != null && existingMessages.length > 0) {
-			// 使用已有的消息（包括用户回复）
-			for (final Bundle msgBundle : existingMessages) {
-				final CharSequence text = msgBundle.getCharSequence(KEY_TEXT);
-				final long timestamp = msgBundle.getLong(KEY_TIMESTAMP, 0);
-				final CharSequence sender = msgBundle.getCharSequence(KEY_SENDER);
-				if (text != null) {
-					final Person person;
-					if (sender != null && sender.length() == 0) {
-						person = null;  // 自己发的消息（KEY_SENDER 为空字符串）
-						hasUserReplyInMessages = true;
-					} else if (sender != null && sender.length() > 0) {
-						// 有明确的发送者名称
-						if (conversation.isGroupChat()) {
-							person = conversation.getGroupParticipant(sender.toString(), sender.toString());
-						} else {
-							person = new Person.Builder().setName(sender.toString()).build();
-						}
-					} else {
-						// KEY_SENDER 为 null，判断是否是朋友发的
-						person = new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build();
-					}
-					messaging.addMessage(new Message(text, timestamp, person));
-				}
-			}
-		} else if (archive != null && ! archive.isEmpty()) {
-			for (final Notification archived : archive) {
-				final CharSequence text = archived.extras.getCharSequence(Notification.EXTRA_TEXT);
-				if (text != null) {
-					final String sender = extractSenderFromText(text);
-					final CharSequence msgText = sender != null ? text.subSequence(sender.length() + SENDER_MESSAGE_SEPARATOR.length(), text.length()) : text;
-					// 始终用 conversation.title 作为发送者（朋友名字），不返回 null
-				final Person person = new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build();
-					messaging.addMessage(new Message(msgText, archived.when, person));
-				}
-			}
-		} else {
-			final CharSequence text = n.extras.getCharSequence(Notification.EXTRA_TEXT);
-			if (text != null) {
-				final String sender = extractSenderFromText(text);
-				final CharSequence msgText = sender != null ? text.subSequence(sender.length() + SENDER_MESSAGE_SEPARATOR.length(), text.length()) : text;
-				// 始终用 conversation.title 作为发送者（朋友名字），不返回 null
-				final Person person = new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build();
-				messaging.addMessage(new Message(msgText, n.when, person));
-			}
-		}
+		// 用通知里已有的消息、归档通知或当前文本重建消息列表，并补上输入历史里的用户回复
+		appendKnownMessages(messaging, conversation, n, archive);
 
 		final List<Action> newActions = new ArrayList<>();
 		final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
@@ -463,17 +456,6 @@ class MessagingBuilder {
 					PendingIntent.getBroadcast(mContext, 0, intent.setPackage(mContext.getPackageName()), pendingIntentFlags()));
 			newActions.add(zoom_action.build());
 		}
-		// 从 EXTRA_REMOTE_INPUT_HISTORY 获取用户回复并添加到 MessagingStyle（仅当 EXTRA_MESSAGES 中没有时）
-		if (!hasUserReplyInMessages && input_history != null && input_history.length > 0) {
-			for (final CharSequence reply : input_history) {
-				if (reply != null && reply.length() > 0) {
-					messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));  // null person = 自己发的
-				}
-			}
-		} else if (hasUserReplyInMessages) {
-			Log.d(TAG, "buildFromActions: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
-		}
-
 		// 回复：使用 RemoteInput 内联回复（修改版 HyperIsland 已保留 RemoteInput）
 		if (onReply != null && replyRemoteInput != null) {
 			final PendingIntent proxy = proxyDirectReply(id, n, onReply, replyRemoteInput, input_history, null);
@@ -499,6 +481,50 @@ class MessagingBuilder {
 		if (SDK_INT >= N && input_history != null)
 			proxy.putCharSequenceArrayListExtra(EXTRA_REMOTE_INPUT_HISTORY, new ArrayList<>(Arrays.asList(input_history)));
 		return PendingIntent.getBroadcast(mContext, 0, proxy.setPackage(mContext.getPackageName()), pendingIntentFlags());
+	}
+
+	/**
+	 * Appends only the inline reply action from WeChat's car conversation, leaving the rest of the
+	 * notification untouched. Used for message types whose original layout is kept on purpose
+	 * (stickers, video, files, links, …) but which should still be replyable from the notification.
+	 */
+	boolean attachReplyAction(final int id, final Notification n) {
+		final Notification.CarExtender.UnreadConversation convs = new Notification.CarExtender(n).getUnreadConversation();
+		if (convs == null) {
+			logReply("action_media_reply_skipped", "notificationId=" + id + " reason=no_car_conversation");
+			return false;
+		}
+		final PendingIntent onReply = convs.getReplyPendingIntent();
+		if (onReply == null || SDK_INT < N) {
+			logReply("action_media_reply_skipped", "notificationId=" + id + " reason=no_reply_intent");
+			return false;
+		}
+		final RemoteInput remoteInput = convs.getRemoteInput();
+		final RemoteInput replyInput;
+		if (remoteInput != null) {
+			final RemoteInput.Builder builder = new RemoteInput.Builder(remoteInput.getResultKey())
+					.addExtras(remoteInput.getExtras()).setAllowFreeFormInput(true);
+			final String participant = convs.getParticipant();
+			if (participant != null) builder.setLabel(participant);
+			replyInput = builder.build();
+		} else {
+			replyInput = new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY)
+					.setAllowFreeFormInput(true).setLabel(actionReply).build();
+		}
+		final PendingIntent proxy = proxyDirectReply(id, n, onReply, replyInput,
+				n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY), null);
+		final Action.Builder replyAction = new Action.Builder(null, actionReply, proxy)
+				.addRemoteInput(replyInput).setAllowGeneratedReplies(true);
+		if (SDK_INT >= P) replyAction.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
+
+		final Action[] existing = n.actions;
+		final Action[] merged = new Action[existing == null ? 1 : existing.length + 1];
+		if (existing != null) System.arraycopy(existing, 0, merged, 0, existing.length);
+		merged[merged.length - 1] = replyAction.build();
+		setActions(n, merged);
+		logReply("action_media_reply_attached", "notificationId=" + id + " resultKey=" + replyInput.getResultKey()
+				+ " existingActions=" + (existing == null ? 0 : existing.length));
+		return true;
 	}
 
 	private final Set<String> mPendingReplies = new java.util.HashSet<>();
@@ -681,7 +707,7 @@ class MessagingBuilder {
 			Log.w(TAG, "Failed to create module context: " + e.getMessage());
 		}
 		final Context pkgCtx = moduleContext != null ? moduleContext : context;
-		Log.d(TAG, "pkgCtx=" + pkgCtx + " moduleContext=" + moduleContext);
+		if (BuildConfig.DEBUG) Log.d(TAG, "pkgCtx=" + pkgCtx + " moduleContext=" + moduleContext);
 		actionReply = "回复";
 		actionZoom = "缩放";
 		mController = controller;
@@ -711,10 +737,8 @@ class MessagingBuilder {
 		return new Person.Builder().setName(selfDisplayName).setIcon(loadSelfIcon()).build();
 	}
 
-	// M5: 头像缓存，定期刷新
+	// M5: 头像缓存（进程内只解析一次；像素可复用，无需定时刷新）
 	private static IconCompat sCachedSelfIcon = null;
-	private static long sSelfIconLoadTime = 0;
-	private static final long SELF_ICON_REFRESH_INTERVAL = 5 * 60 * 1000L; // 5分钟刷新一次
 
 	/**
 	 * 动态加载自己的微信头像
@@ -724,11 +748,7 @@ class MessagingBuilder {
 	 */
 	@Nullable
 	private static IconCompat loadSelfIcon() {
-		// M5: 使用缓存，定期刷新
-		final long now = System.currentTimeMillis();
-		if (sCachedSelfIcon != null && (now - sSelfIconLoadTime) < SELF_ICON_REFRESH_INTERVAL) {
-			return sCachedSelfIcon;
-		}
+		if (sCachedSelfIcon != null) return sCachedSelfIcon;
 		try {
 			// 获取微信应用的 Context
 			Context wechatContext = NevoDecoratorService.getAppContext();
@@ -763,7 +783,6 @@ class MessagingBuilder {
 				Log.w(TAG, "loadSelfIcon: wxid not found");
 				return null;
 			}
-			Log.d(TAG, "loadSelfIcon: found wxid=" + wxid);
 
 			// 计算 MD5
 			MessageDigest md = MessageDigest.getInstance("MD5");
@@ -773,15 +792,11 @@ class MessagingBuilder {
 				sb.append(String.format("%02x", b));
 			}
 			String md5 = sb.toString();
-			Log.d(TAG, "loadSelfIcon: md5=" + md5);
 
 			// 构建头像路径: /data/data/com.tencent.mm/MicroMsg/{user_hash}/avatar/{md5[0:2]}/{md5[2:4]}/user_{md5}.png
 			// L4: 使用动态路径
 			File wechatDataDir = null;
-			try {
-				Context wechatCtx = wechatContext.createPackageContext("com.tencent.mm", Context.CONTEXT_IGNORE_SECURITY);
-				wechatDataDir = wechatCtx.getFilesDir().getParentFile();
-			} catch (Exception ignored) {}
+			try { wechatDataDir = wechatPkgCtx.getFilesDir().getParentFile(); } catch (Exception ignored) {}
 			if (wechatDataDir == null) wechatDataDir = new File("/data/data/com.tencent.mm");
 			File microMsgDir = new File(wechatDataDir, "MicroMsg/");
 			if (!microMsgDir.exists()) {
@@ -813,11 +828,11 @@ class MessagingBuilder {
 
 			File avatarFile = new File(avatarPath);
 			if (!avatarFile.exists()) {
-				Log.w(TAG, "loadSelfIcon: avatar file not found: " + avatarPath);
+				Log.w(TAG, "loadSelfIcon: avatar file not found");
 				return null;
 			}
 
-			Log.d(TAG, "loadSelfIcon: loading avatar from " + avatarPath);
+			if (BuildConfig.DEBUG) Log.d(TAG, "loadSelfIcon: loading avatar");
 
 			// 加载并缩放头像
 			BitmapFactory.Options options = new BitmapFactory.Options();
@@ -831,11 +846,9 @@ class MessagingBuilder {
 			// 缩放到 48dp
 			int size = (int) (48 * wechatContext.getResources().getDisplayMetrics().density);
 			Bitmap scaled = Bitmap.createScaledBitmap(bitmap, size, size, true);
-			Log.d(TAG, "loadSelfIcon: success, size=" + scaled.getWidth() + "x" + scaled.getHeight());
+			if (BuildConfig.DEBUG) Log.d(TAG, "loadSelfIcon: success, size=" + scaled.getWidth() + "x" + scaled.getHeight());
 			IconCompat icon = IconCompat.createWithBitmap(scaled);
-			// M5: 更新缓存
 			sCachedSelfIcon = icon;
-			sSelfIconLoadTime = System.currentTimeMillis();
 			return icon;
 
 		} catch (Exception e) {
@@ -847,76 +860,14 @@ class MessagingBuilder {
 	@Nullable private MessagingStyle buildWithSyntheticReply(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
 		final PendingIntent contentIntent = n.contentIntent;
 		if (contentIntent == null) {
-			Log.d(TAG, "No contentIntent for synthetic reply");
+			if (BuildConfig.DEBUG) Log.d(TAG, "No contentIntent for synthetic reply");
 			return null;
 		}
-		Log.d(TAG, "Building synthetic reply action for notification " + id);
+		if (BuildConfig.DEBUG) Log.d(TAG, "Building synthetic reply action for notification " + id);
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
 
-		// 检查通知是否已有 EXTRA_MESSAGES（用户回复后重建时）
-		final Bundle[] existingMessages = n.extras.getParcelableArray(EXTRA_MESSAGES) != null ?
-			(Bundle[]) n.extras.getParcelableArray(EXTRA_MESSAGES) : null;
-		boolean hasUserReplyInMessages = false;
-
-		if (existingMessages != null && existingMessages.length > 0) {
-			// 使用已有的消息（包括用户回复）
-			for (final Bundle msgBundle : existingMessages) {
-				final CharSequence text = msgBundle.getCharSequence(KEY_TEXT);
-				final long timestamp = msgBundle.getLong(KEY_TIMESTAMP, 0);
-				final CharSequence sender = msgBundle.getCharSequence(KEY_SENDER);
-				if (text != null) {
-					final Person person;
-					if (sender != null && sender.length() == 0) {
-						person = null;  // 自己发的消息（KEY_SENDER 为空字符串）
-						hasUserReplyInMessages = true;
-					} else if (sender != null && sender.length() > 0) {
-						// 有明确的发送者名称
-						if (conversation.isGroupChat()) {
-							person = conversation.getGroupParticipant(sender.toString(), sender.toString());
-						} else {
-							person = new Person.Builder().setName(sender.toString()).build();
-						}
-					} else {
-						// KEY_SENDER 为 null，判断是否是朋友发的
-						person = new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build();
-					}
-					messaging.addMessage(new Message(text, timestamp, person));
-				}
-			}
-		} else if (archive != null && ! archive.isEmpty()) {
-			for (final Notification archived : archive) {
-				final CharSequence text = archived.extras.getCharSequence(Notification.EXTRA_TEXT);
-				if (text != null) {
-					final String sender = extractSenderFromText(text);
-					final CharSequence msgText = sender != null ? text.subSequence(sender.length() + SENDER_MESSAGE_SEPARATOR.length(), text.length()) : text;
-					// 始终用 conversation.title 作为发送者（朋友名字），不返回 null
-				final Person person = new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build();
-					messaging.addMessage(new Message(msgText, archived.when, person));
-				}
-			}
-		} else {
-			final CharSequence text = n.extras.getCharSequence(Notification.EXTRA_TEXT);
-			if (text != null) {
-				final String sender = extractSenderFromText(text);
-				final CharSequence msgText = sender != null ? text.subSequence(sender.length() + SENDER_MESSAGE_SEPARATOR.length(), text.length()) : text;
-				// 始终用 conversation.title 作为发送者（朋友名字），不返回 null
-				final Person person = new Person.Builder().setName(conversation.title != null ? conversation.title.toString() : " ").build();
-				messaging.addMessage(new Message(msgText, n.when, person));
-			}
-		}
-		// 从 EXTRA_REMOTE_INPUT_HISTORY 获取用户回复并添加到 MessagingStyle（仅当 EXTRA_MESSAGES 中没有时）
-		if (!hasUserReplyInMessages) {
-			final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
-			if (input_history != null && input_history.length > 0) {
-				for (final CharSequence reply : input_history) {
-					if (reply != null && reply.length() > 0) {
-						messaging.addMessage(new Message(reply, System.currentTimeMillis(), (Person) null));  // null person = 自己发的
-					}
-				}
-			}
-		} else {
-			Log.d(TAG, "buildWithSyntheticReply: skipping EXTRA_REMOTE_INPUT_HISTORY, already have user reply from EXTRA_MESSAGES");
-		}
+		// 用通知里已有的消息、归档通知或当前文本重建消息列表，并补上输入历史里的用户回复
+		appendKnownMessages(messaging, conversation, n, archive);
 
 		if (!MainHook.isSyntheticReplyAvailable()) {
 			logReply("action_synthetic_skipped", "notificationId=" + id + " reason=wechat_receiver_unavailable");

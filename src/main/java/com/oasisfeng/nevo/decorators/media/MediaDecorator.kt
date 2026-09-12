@@ -36,6 +36,12 @@ class MediaDecorator : NevoDecoratorService() {
 		/** not working */
 		return object : NevoDecoratorService.SystemUIDecorator(this.prefKey), HookSupport {
 			override fun hook(loadPackageParam: PackageHookContext) {
+				// View.setOutlineAmbientShadowColor only exists from API 28, while the module still
+				// supports API 26; without this guard the hook installation throws NoSuchMethodError.
+				if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+					Log.w(TAG, "Skipping media hooks: requires API 28+")
+					return
+				}
 				val remotable = XposedHelpers.findClass("android.view.RemotableViewMethod", loadPackageParam.classLoader)
 				val target = XposedHelpers.findMethodExact(View::class.java, "setOutlineAmbientShadowColor", Int::class.java)
 				val isAnnotationPresent = XposedHelpers.findMethodBestMatch(Method::class.java, "isAnnotationPresent", Class::class.java)
@@ -139,7 +145,7 @@ class MediaDecorator : NevoDecoratorService() {
 						if (n.actions.size > 2)
 							bindAction(n.contentView, R.id.ic_2, n.actions[compacts[2]])
 					} else {
-						Log.d(TAG, "no action")
+						if (BuildConfig.DEBUG) Log.d(TAG, "no action")
 					}
 					if (NevoDecoratorService.LocalDecorator.overridedBigContentView(n) == null) {
 						n.bigContentView = NevoDecoratorService.LocalDecorator.overrideBigContentView(n, RemoteViews(BuildConfig.APPLICATION_ID, R.layout.media_notifition_layout_big))
@@ -160,10 +166,10 @@ class MediaDecorator : NevoDecoratorService() {
 					}
 					else
 					{
-						Log.d(TAG, "no action")
+						if (BuildConfig.DEBUG) Log.d(TAG, "no action")
 					}
 				} catch (ex:PackageManager.NameNotFoundException) {
-					Log.d(TAG, "package " + packageName + "not found")
+					if (BuildConfig.DEBUG) Log.d(TAG, "package " + packageName + " not found")
 				}
 				// Log.d(TAG, "notification " + n);
 				return Decorating.Processed

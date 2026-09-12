@@ -17,7 +17,7 @@
 
 <resources>
 	<string name="app_name">女娲石Xposed</string>
-	<string name="xposed_description">基于现代 libxposed API 102 增强微信、MIUI 与媒体通知。</string>
+	<string name="xposed_description">基于现代 libxposed API 102 增强微信与媒体通知。</string>
 
 	<string name="settings_title">女娲石 Xposed 设置</string>
 	<string name="settings_core_category">核心功能</string>
@@ -57,30 +57,11 @@
 	<string name="channel_group_message">新群组消息通知</string>
 	<string name="channel_misc">其它通知</string>
 
-	<!-- decorator-miui -->
 
-	<string name="decorator_miui_title">MIUI通知增强</string>
-	<string name="decorator_miui_description">为小米通知框架（MiPushFramework）产生小图标。</string>
 
 	<!-- decorator-media -->
 
 	<string name="decorator_media_title">媒体通知增强</string>
 	<string name="decorator_media_description">为媒体通知产生Android O样式的外观。</string>
-
-	<!-- Settings -->
-
-	<string name="pref_activate_title">启用</string>
-	<string name="pref_activate_summary_wechat_not_installed">“微信”未安装</string>
-	<string name="pref_activate_summary_nevo_not_installed">“女娲石”尚未安装</string>
-	<string name="pref_activate_summary_already_activated">已启用</string>
-	<string name="pref_extension_title">扩展包</string>
-	<string name="pref_extension_summary">添加更多特性（快捷回复、划掉标记已读 等）</string>
-	<string name="pref_extension_summary_auto">需要安装“Android Auto”以支持更多特性（快捷回复、划掉标记已读 等）</string>
-	<string name="pref_extension_summary_installed">已安装</string>
-	<string name="pref_mention_action_title">添加 @提及 式快捷回复</string>
-	<string name="pref_mention_action_summary">额外的快捷回复操作，提及群聊中的最后发言者。\n注意，受接口限制，这 *不会* 像在聊天界面中的提及动作那样触发对方的提醒。</string>
-	<string name="pref_wear_title">Wear OS (实验性)</string>
-	<string name="pref_wear_summary">同步通知至 Wear OS 设备</string>
-	<string name="pref_version_title">版本</string>
 
 </resources>
