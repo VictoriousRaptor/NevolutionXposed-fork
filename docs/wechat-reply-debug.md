@@ -1,19 +1,19 @@
 # WeChat notification reply compatibility
 
-## Supported targets
+The full procedure lives in
+[微信版本适配手册](wechat-version-adaptation-playbook.md). Read that playbook
+first; this file only keeps the rules that must never be broken.
 
-- WeChat 8.0.72 from Google Play: under investigation on the connected test device.
-- WeChat 8.0.76: preserve the existing notification reply path.
+## Redlines
 
-## Local toolchain
-
-- JDK 17
-- Android SDK platform 34 and Build Tools 34.0.0
-- Android Platform Tools (`adb`)
-- JADX 1.5.6 or newer
-
-Do not commit device APKs, LSPosed logs, logcat captures, or decompiled sources.
-They belong under `.debug-artifacts/`, which is ignored by Git.
+- Any obfuscated class or method in a compatibility profile must be validated by
+  its full parameter and return types at runtime. An unknown profile must never
+  expose a reply action that cannot dispatch successfully.
+- Do not commit device APKs, LSPosed logs, logcat captures, or decompiled
+  sources. They belong under `.debug-artifacts/`, which is ignored by Git.
+- Diagnostic logs must contain stage names, class and method signatures,
+  notification IDs, result keys, and input lengths only. They must not contain
+  message text, contact names, account IDs, or other notification contents.
 
 ## Reply stages
 
@@ -26,26 +26,10 @@ The reply path is diagnosed in this order:
 5. WeChat's receiver and RemoteInput helper are invoked without an exception.
 6. The message is visible in the conversation.
 
-Diagnostic logs must contain stage names, class and method signatures, notification
-IDs, result keys, and input lengths only. They must not contain message text,
-contact names, account IDs, or other notification contents.
+## Currently verified targets
 
-## Device collection
-
-Record the exact Android build, ABI, WeChat version name/code, installer, LSPosed
-version, module scope, and every path returned by `pm path com.tencent.mm` before
-changing the module. Pull base/split APKs read-only, calculate SHA-256 hashes, and
-decompile only the local copies.
-
-Search the installed WeChat APK for these stable semantic anchors before adding a
-version profile:
-
-- `MM_AUTO_REPLY_MESSAGE`
-- `key_voice_reply_text`
-- `RemoteInput.getResultsFromIntent`
-- `android.car.EXTENSIONS`
-- `MMAutoMessageReplyReceiver`
-
-Any obfuscated class or method included in a compatibility profile must be
-validated by its full parameter and return types at runtime. An unknown profile
-must never expose a synthetic reply action that cannot dispatch successfully.
+- WeChat 8.0.72 (Google Play, versionCode 3085): verified, see
+  `wechat-8.0.72-findings.md`.
+- WeChat 8.0.78 (China build, versionCode 3180): verified and delivered, see
+  `wechat-8.0.78-findings.md`.
+- WeChat 8.0.76 legacy profile: mapping preserved but not live-tested.
