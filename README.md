@@ -93,6 +93,13 @@ src/main/java/com/oasisfeng/nevo/
 
 ## 版本记录
 
+### v3.1.1
+
+- 修复微信 8.0.78（中国版 3180）通知栏回复：新增 `wechat-8.0.78` 版本画像（门禁 `bs1.a[c,g,b]`），真机验证回复可达。
+- 新增 [微信版本适配手册](docs/wechat-version-adaptation-playbook.md)：历史提交适配记录、版本敏感点总表、一次性适配 Runbook 与验收矩阵。
+- `tools/collect-device-info.ps1` 支持 `-ProbeProfile` / `-RunTests`：一条命令产出候选画像、可粘贴代码片段与测试结果。
+- 新增 `WeChatReplyProfileTest`，锁定版本映射与 8.0.78 / 8.0.72 描述符。
+
 ### v3.1.0
 
 - 微信通知：移除每次进程启动的方法枚举扫描与逐方法追踪，热路径日志改为仅调试构建输出，且不再写消息正文、联系人与账号信息。
