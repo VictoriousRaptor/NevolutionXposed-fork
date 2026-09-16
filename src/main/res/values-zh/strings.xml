@@ -48,6 +48,8 @@
 	<string name="decorator_wechat_description">符合当代 Android 的最佳通知体验：可展开的会话样式、直接回复、划除即已读等高级特性。</string>
 	<string name="decorator_wechat_image_preview_title">通知内显示图片</string>
 	<string name="decorator_wechat_image_preview_description">收到图片时在通知里直接显示图片，而不是 [图片]。开启或关闭后需要重启微信进程；关闭时保持微信原始的 [图片] 提示。</string>
+	<string name="decorator_wechat_image_preview_large_title">主动获取普通大图</string>
+	<string name="decorator_wechat_image_preview_large_description">向微信请求压缩后的普通大图，最多等待 5 秒；不会请求原图，但微信下载任务提交后可能继续在后台完成。修改后需要重启微信进程。</string>
 	<string name="self_display_name">我</string>
 	<string name="action_reply">回复</string>
 	<string name="action_zoom">缩放</string>

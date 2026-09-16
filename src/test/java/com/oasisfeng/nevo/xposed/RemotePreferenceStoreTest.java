@@ -31,6 +31,7 @@ public class RemotePreferenceStoreTest {
 		assertEquals(RemotePreferenceStore.BOOLEAN_KEYS.length, merged.size());
 		assertEquals(Boolean.TRUE, merged.get("WeChatDecorator.enabled"));
 		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
+		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW_LARGE));
 		assertEquals(Boolean.FALSE, merged.get("MediaDecorator.enabled"));
 		assertFalse(merged.containsKey("MIUIDecorator.enabled"));
 	}

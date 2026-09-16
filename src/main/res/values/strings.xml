@@ -33,6 +33,8 @@
 	<string name="decorator_wechat_description">Better notification for WeChat: Messaging Style, Direct Reply and Clear to Mark Read.</string>
 	<string name="decorator_wechat_image_preview_title">Image preview in notifications</string>
 	<string name="decorator_wechat_image_preview_description">Show the received picture instead of [图片] in the notification. Requires a WeChat process restart after changing; with this off, notifications keep the original [图片] text.</string>
+	<string name="decorator_wechat_image_preview_large_title">Fetch normal-size preview</string>
+	<string name="decorator_wechat_image_preview_large_description">Ask WeChat for the normal compressed image, waiting up to 5 seconds. It never requests the original image, but the WeChat download task may continue in the background after timeout. Requires a WeChat process restart.</string>
 	<string name="self_display_name">我</string>
 	<string name="action_reply">Reply</string>
 	<string name="action_zoom">Zoom</string>
