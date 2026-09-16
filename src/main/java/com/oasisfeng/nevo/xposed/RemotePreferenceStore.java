@@ -14,13 +14,15 @@ import io.github.libxposed.service.XposedService;
 final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenceChangeListener {
 	static final String GROUP = "settings";
 	private static final String SCHEMA_VERSION_KEY = "settings_schema_version";
-	static final int CURRENT_SCHEMA_VERSION = 3;
+	static final int CURRENT_SCHEMA_VERSION = 4;
 	/** Key of the removed MIUI decorator; purged from local and remote storage on migration. */
 	private static final String OBSOLETE_MIUI_KEY = "MIUIDecorator.enabled";
 	static final String KEY_IMAGE_PREVIEW = "WeChatDecorator.image_preview";
+	static final String KEY_IMAGE_PREVIEW_LARGE = "WeChatDecorator.image_preview_large";
 	static final String[] BOOLEAN_KEYS = {
 			"WeChatDecorator.enabled",
 			KEY_IMAGE_PREVIEW,
+			KEY_IMAGE_PREVIEW_LARGE,
 			"MediaDecorator.enabled"
 	};
 
@@ -43,6 +45,9 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 		}
 		if (!local.contains(KEY_IMAGE_PREVIEW)) {
 			editor.putBoolean(KEY_IMAGE_PREVIEW, false);
+		}
+		if (!local.contains(KEY_IMAGE_PREVIEW_LARGE)) {
+			editor.putBoolean(KEY_IMAGE_PREVIEW_LARGE, false);
 		}
 		editor.putBoolean("MediaDecorator.enabled", false);
 		editor.remove("WeChatDecorator.miui_fix");
@@ -108,6 +113,7 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 		if (schemaVersion < 1) values.put("MediaDecorator.enabled", false);
 		if (schemaVersion < 2) values.put(KEY_IMAGE_PREVIEW, false);
 		if (schemaVersion < 3) values.remove(OBSOLETE_MIUI_KEY);
+		if (schemaVersion < 4) values.put(KEY_IMAGE_PREVIEW_LARGE, false);
 	}
 
 	private static Map<String, Boolean> readKnownBooleans(SharedPreferences preferences) {

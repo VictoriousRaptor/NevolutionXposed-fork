@@ -110,8 +110,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private final WeChatImageEvents imageEvents = new WeChatImageEvents();
 		private final ImagePreviewLoader imagePreviews = new ImagePreviewLoader(imageEvents);
 		private static final String PREF_IMAGE_PREVIEW = "WeChatDecorator.image_preview";
+		private static final String PREF_IMAGE_PREVIEW_LARGE = "WeChatDecorator.image_preview_large";
 		/** Opt-in: without the setting, notifications keep WeChat's original [图片] text. */
 		private boolean mImagePreviewEnabled;
+		private boolean mImagePreviewLargeEnabled;
 		private static void imageLog(String stage, String details) {
 			if (BuildConfig.DEBUG) Log.i(TAG, "NX_IMAGE stage=" + stage + " " + details);
 		}
@@ -130,6 +132,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 				return;
 			}
 			imageEvents.install(getAppContext(), loadPackageParam.classLoader);
+			imagePreviews.installLargePreview(getAppContext(), loadPackageParam.classLoader);
 		}
 
 		private MessagingBuilder mMessagingBuilder;
@@ -139,15 +142,18 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private final ConversationManager mConversationManager = new ConversationManager();
 
 		@Override public void onCreate(SharedPreferences pref) {
-			imageLog("process_init", "revision=image-events-7");
+			imageLog("process_init", "revision=image-events-9");
 			super.onCreate(pref);
 			mImagePreviewEnabled = pref.getBoolean(PREF_IMAGE_PREVIEW, false);
+			mImagePreviewLargeEnabled = pref.getBoolean(PREF_IMAGE_PREVIEW_LARGE, false);
+			imagePreviews.setLargePreviewEnabled(mImagePreviewLargeEnabled);
 
 			mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);		// Must be called after loadPreferences().
 			channelGroupMessage = moduleString(R.string.channel_group_message, "群聊消息");
 			channelMessage = moduleString(R.string.channel_message, "新消息");
 			channelMisc = moduleString(R.string.channel_misc, "其他通知");
-			imageLog("decorator_ready", "disabled=" + isDisabled() + " image_preview=" + mImagePreviewEnabled);
+			imageLog("decorator_ready", "disabled=" + isDisabled() + " image_preview=" + mImagePreviewEnabled
+					+ " image_large=" + mImagePreviewLargeEnabled);
 		}
 
 		private String moduleString(int resource, String fallback) {
@@ -338,7 +344,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (mImagePreviewEnabled) {
 				if (content != null && content.endsWith("[图片]")) {
 					// The car conversation resolves the talker (key_username) while rebuilding; queue on that identity.
-					imagePreviews.request(getAppContext(), nm, tag, id, n, () -> conversation.key);
+					imagePreviews.request(getAppContext(), nm, tag, id, n, () -> conversation.key, messages);
 				} else {
 					// A later message replaces the notification; keep the image while it is still part of the conversation.
 					imagePreviews.keepPreview(getAppContext(), nm, tag, id, n, conversation.key, messages);

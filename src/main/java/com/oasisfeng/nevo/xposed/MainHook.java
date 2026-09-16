@@ -279,6 +279,12 @@ public class MainHook extends XposedModule {
 		if (!media.isDisabled()) media.onNotificationRemoved(sbn, reason);
 	}
 
+	private static void imageNotificationTrace(String stage, int id, Notification notification) {
+		if (BuildConfig.DEBUG) Log.i("WeChatDecorator", "NX_IMAGE stage=" + stage + " id=" + id
+				+ " token=" + notification.extras.getLong("nevo.wechat.imageRequest")
+				+ " ready=" + notification.extras.getBoolean("nevo.wechat.imageReady"));
+	}
+
 	private void hookWeChat(PackageHookContext loadPackageParam) {
 		if (!"com.tencent.mm".equals(loadPackageParam.processName)) return;
 		try {
@@ -292,8 +298,10 @@ public class MainHook extends XposedModule {
 					String tag = (String)param.args[0];
 					int id = (int)param.args[1];
 					Notification n = (Notification)param.args[2];
+					imageNotificationTrace("notify_before", id, n);
 					if (BuildConfig.DEBUG) Log.d(TAG, "before apply " + nm + " " + tag + " " + id);
 					applyLocally(nm, tag, id, n);
+					imageNotificationTrace("notify_decorated", id, n);
 					// 用 Notification.Builder 重建通知，确保 actions 被正确序列化
 					if (BuildConfig.DEBUG) Log.d(TAG, "after apply, actions=" + (n.actions != null ? n.actions.length : "null"));
 					// Rebuilding is only ever needed for free-form RemoteInput actions, and it costs a
@@ -313,6 +321,7 @@ public class MainHook extends XposedModule {
 					} catch (Exception e) {
 						Log.w(TAG, "Failed to rebuild: " + e.getMessage());
 					}
+					imageNotificationTrace("notify_outgoing", id, (Notification) param.args[2]);
 				}
 			});
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log(this.wechat + " NotificationManager hook failed"); }
