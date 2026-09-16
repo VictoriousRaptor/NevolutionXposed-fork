@@ -46,6 +46,15 @@ final class WeChatImageEvents {
 			}
 			if (resolved == null || resolved.getType() != int.class) throw new IllegalStateException("Invalid simple-message base");
 			final Field base = resolved;
+			Field resolvedMsgSvrId = null;
+			for (Class<?> current = msg; current != null && resolvedMsgSvrId == null; current = current.getSuperclass()) {
+				try { resolvedMsgSvrId = current.getDeclaredField("field_msgSvrId"); }
+				catch (NoSuchFieldException ignored) {}
+			}
+			if (resolvedMsgSvrId == null || resolvedMsgSvrId.getType() != long.class)
+				throw new IllegalStateException("Invalid msgSvrId field");
+			resolvedMsgSvrId.setAccessible(true);
+			final Field msgSvrId = resolvedMsgSvrId;
 			stage = "message_accessors";
 			Method stringAt = method(simple, "getString", String.class, int.class);
 			Method longAt = method(simple, "getLong", long.class, int.class);
@@ -56,6 +65,7 @@ final class WeChatImageEvents {
 			Method created = method(msg, "getCreateTime", long.class);
 			Method type = method(msg, "getType", int.class);
 			Method sender = method(msg, "C0", int.class);
+			Method serverId = method(msg, "I0", long.class);
 			stage = "path_methods";
 			Method pathMethod = method(Class.forName("m90.b", false, loader), "oi", String.class, msg, String.class, boolean.class);
 			realPath = method(Class.forName("com.tencent.mm.vfs.w6", false, loader), "i", String.class, String.class, boolean.class);
@@ -74,15 +84,18 @@ final class WeChatImageEvents {
 						int offset = base.getInt(data);
 						if (offset < 0 || offset > 256 || ((Number) intAt.invoke(data, offset + 9)).intValue() != 0
 								|| ((Number) intAt.invoke(data, offset + 4)).intValue() != 3) return;
-						List<String> paths = new ArrayList<>();
-						for (String key : new String[]{"key_write_thumb_path", "key_thumb_path", "key_write_hd_thumb_path", "key_hd_thumb_path"}) {
+						List<ImageEventIndex.Path> paths = new ArrayList<>();
+						for (String key : new String[]{"key_write_hd_thumb_path", "key_hd_thumb_path", "key_write_thumb_path", "key_thumb_path"}) {
 							Object value = stateGet.invoke(param.args[0], key);
-							if (value instanceof String) paths.add((String) value);
+							if (BuildConfig.DEBUG) log("path_field", "field=" + key + " present=" + (value instanceof String)
+									+ " empty=" + (value instanceof String && ((String) value).isEmpty()));
+							if (value instanceof String) paths.add(new ImageEventIndex.Path((String) value,
+									key.indexOf("hd_thumb") >= 0 ? ImagePreviewPolicy.QUALITY_HD : ImagePreviewPolicy.QUALITY_THUMBNAIL));
 						}
 						// Empirically millisecond-based in 8.0.72/3085, matching Notification.when.
 						long createdMillis = ((Number) longAt.invoke(data, offset + 2)).longValue();
-						index.put((String) stringAt.invoke(data, offset + 3), ((Number) longAt.invoke(data, offset)).longValue(),
-								createdMillis, paths, SystemClock.elapsedRealtime());
+						index.putRanked((String) stringAt.invoke(data, offset + 3), ((Number) longAt.invoke(data, offset)).longValue(),
+								0, createdMillis, paths, SystemClock.elapsedRealtime());
 						log("event", "source=pipeline paths=" + paths.size() + " createdMs=" + createdMillis);
 					} catch (Exception failure) { log("event_error", "type=" + failure.getClass().getSimpleName()); }
 				}
@@ -90,6 +103,20 @@ final class WeChatImageEvents {
 			XposedBridge.hookMethod(initial, pipeline);
 			XposedBridge.hookMethod(remote, pipeline);
 			XposedBridge.hookMethod(local, pipeline);
+			XposedBridge.hookMethod(serverId, new XC_MethodHook() {
+				@Override protected void afterHookedMethod(MethodHookParam param) {
+					if (!available || param.hasThrowable() || !(param.getResult() instanceof Number)) return;
+					try {
+						Object data = param.thisObject;
+						long value = ((Number) param.getResult()).longValue();
+						if (value <= 0 || ((Number) type.invoke(data)).intValue() != 3
+								|| ((Number) sender.invoke(data)).intValue() != 0) return;
+						index.putIdentity((String) talker.invoke(data), ((Number) id.invoke(data)).longValue(),
+								value, ((Number) created.invoke(data)).longValue(), SystemClock.elapsedRealtime());
+						log("identity", "serverId=true");
+					} catch (Exception failure) { log("identity_error", "type=" + failure.getClass().getSimpleName()); }
+				}
+			});
 			XposedBridge.hookMethod(pathMethod, new XC_MethodHook() {
 				@Override protected void afterHookedMethod(MethodHookParam param) {
 					if (!available || param.hasThrowable() || param.args[0] == null || !(param.getResult() instanceof String)) return;
@@ -97,13 +124,14 @@ final class WeChatImageEvents {
 						Object data = param.args[0];
 						if (((Number) type.invoke(data)).intValue() != 3 || ((Number) sender.invoke(data)).intValue() != 0) return;
 						index.put((String) talker.invoke(data), ((Number) id.invoke(data)).longValue(),
+								((Number) id.invoke(data)).longValue() > 0 ? msgSvrId.getLong(data) : 0,
 								((Number) created.invoke(data)).longValue(), Arrays.asList((String) param.getResult()), SystemClock.elapsedRealtime());
-						log("event", "source=message_path");
+						log("event", "source=message_path serverId=" + (msgSvrId.getLong(data) > 0));
 					} catch (Exception failure) { log("event_error", "type=" + failure.getClass().getSimpleName()); }
 				}
 			});
 			available = true;
-			log("events_ready", "profile=8.0.72/3085 revision=image-events-7 scans=0 base="
+			log("events_ready", "profile=8.0.72/3085 revision=image-events-9 scans=0 base="
 					+ base.getDeclaringClass().getSimpleName() + "." + base.getName());
 		} catch (Throwable failure) {
 			XposedBridge.rethrowFrameworkError(failure);

@@ -5,6 +5,15 @@ import java.util.Arrays;
 import static org.junit.Assert.*;
 
 public class ImageEventIndexTest {
+	@Test public void keepsOlderHdWhenNewPathsFillCapacity() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.putRanked("a", 1, 10000, Arrays.asList(new ImageEventIndex.Path("/hd", 2)), 1);
+		index.put("a", 1, 10000, Arrays.asList("/a", "/b", "/c", "/d"), 2);
+		ImageEventIndex.Entry entry = index.get("a:1", 3);
+		assertEquals(4, entry.paths.size());
+		assertEquals("/hd", entry.paths.get(0).value);
+		assertNull(index.get("a:1", 30002));
+	}
 	@Test public void neverMatchesAnotherConversation() {
 		ImageEventIndex index = new ImageEventIndex();
 		index.put("a", 1, 10000, Arrays.asList("/thumb"), 1);
@@ -24,6 +33,34 @@ public class ImageEventIndexTest {
 		index.put("a", 1, 10000, Arrays.asList("/thumb", "/hd"), 2);
 		assertEquals(1, index.size(3));
 		assertEquals(2, index.select("a", 10000, 2, 3).paths.size());
+	}
+	@Test public void repeatedEventUpgradesCandidateQuality() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("a", 1, 10000, Arrays.asList("/same"), 1);
+		index.putRanked("a", 1, 10000, Arrays.asList(
+				new ImageEventIndex.Path("/same", ImagePreviewPolicy.QUALITY_HD)), 2);
+		ImageEventIndex.Entry entry = index.select("a", 10000, 2, 3);
+		assertNotNull(entry);
+		assertEquals(1, entry.paths.size());
+		assertEquals(ImagePreviewPolicy.QUALITY_HD, entry.paths.get(0).quality);
+	}
+	@Test public void keepsVerifiedServerMessageIdAcrossRepeatedEvents() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.putRanked("a", 1, 9001, 10000, Arrays.asList(
+				new ImageEventIndex.Path("/thumb", ImagePreviewPolicy.QUALITY_THUMBNAIL)), 1);
+		index.putRanked("a", 1, 0, 10000, Arrays.asList(
+				new ImageEventIndex.Path("/hd", ImagePreviewPolicy.QUALITY_HD)), 2);
+		assertEquals(9001, index.get("a:1", 3).msgSvrId);
+	}
+	@Test public void identityArrivingBeforePathsIsMerged() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.putIdentity("a", 1, 9001, 10, 1);
+		index.putRanked("a", 1, 0, 10000, Arrays.asList(
+				new ImageEventIndex.Path("/thumb", ImagePreviewPolicy.QUALITY_THUMBNAIL)), 2);
+		ImageEventIndex.Entry entry = index.get("a:1", 3);
+		assertEquals(9001, entry.msgSvrId);
+		assertEquals(10000, entry.created);
+		assertEquals("/thumb", entry.paths.get(0).value);
 	}
 	@Test public void evictsOldAndExpiredEvents() {
 		ImageEventIndex index = new ImageEventIndex();
