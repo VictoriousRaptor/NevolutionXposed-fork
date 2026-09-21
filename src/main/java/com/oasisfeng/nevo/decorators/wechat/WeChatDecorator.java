@@ -20,7 +20,10 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.Icon;
@@ -41,6 +44,7 @@ import androidx.annotation.ColorInt;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat.MessagingStyle;
+import androidx.core.content.ContextCompat;
 import androidx.core.graphics.drawable.IconCompat;
 
 import static android.os.Build.VERSION.SDK_INT;
@@ -137,9 +141,25 @@ public class WeChatDecorator extends NevoDecoratorService {
 
 		private MessagingBuilder mMessagingBuilder;
 		private String channelGroupMessage, channelMessage, channelMisc;
+		private boolean mRoundResetReceiverRegistered;
 		/** Resolved once per process; the installed WeChat build never changes while it runs. */
 		private Boolean mWeChatTargetingO;
 		private final ConversationManager mConversationManager = new ConversationManager();
+		private final BroadcastReceiver mRoundResetReceiver = new BroadcastReceiver() {
+			@Override public void onReceive(final Context context, final Intent intent) {
+				if (!WeChatNotificationRemoval.ACTION_RESET_ROUND.equals(intent.getAction())
+						|| !intent.hasExtra(WeChatNotificationRemoval.EXTRA_NOTIFICATION_ID)) return;
+				final int id = intent.getIntExtra(WeChatNotificationRemoval.EXTRA_NOTIFICATION_ID, 0);
+				final long removed = intent.getLongExtra(WeChatNotificationRemoval.EXTRA_ROUND_TOKEN, 0);
+				final Notification latest = hasArchivedNotifications(id) ? getArchivedNotification(id) : null;
+				final long current = latest == null ? 0
+						: latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
+				final boolean matched = WeChatNotificationRemoval.tokenMatches(current, removed);
+				if (matched) clearArchivedNotifications(id);
+				if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=removal_receiver id=" + id
+						+ " matched=" + matched + " tokenPresent=" + (removed != 0));
+			}
+		};
 
 		@Override public void onCreate(SharedPreferences pref) {
 			imageLog("process_init", "revision=image-events-9");
@@ -149,6 +169,11 @@ public class WeChatDecorator extends NevoDecoratorService {
 			imagePreviews.setLargePreviewEnabled(mImagePreviewLargeEnabled);
 
 			mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);		// Must be called after loadPreferences().
+			if (!mRoundResetReceiverRegistered) {
+				ContextCompat.registerReceiver(getAppContext(), mRoundResetReceiver,
+						new IntentFilter(WeChatNotificationRemoval.ACTION_RESET_ROUND), ContextCompat.RECEIVER_EXPORTED);
+				mRoundResetReceiverRegistered = true;
+			}
 			channelGroupMessage = moduleString(R.string.channel_group_message, "群聊消息");
 			channelMessage = moduleString(R.string.channel_message, "新消息");
 			channelMisc = moduleString(R.string.channel_misc, "其他通知");
@@ -193,8 +218,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 				}
 			}
 
-			cache(id, n);
-
 			// Log.d(TAG, "deleteIntent " + n.deleteIntent);
 			final Bundle extras = n.extras,
 				extensions = extras.getBundle("android.car.EXTENSIONS");
@@ -206,11 +229,38 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 			// Log.d(TAG, "deleteIntent " + n.deleteIntent);
 			CharSequence title = extras.getCharSequence(Notification.EXTRA_TITLE);
+			if (extras.getBoolean(NotificationMessages.STORED) && extras.getString(NotificationMessages.TITLE) != null)
+				title = extras.getString(NotificationMessages.TITLE);
 			if (title == null || title.length() == 0) {
 				Log.w(TAG, "Title is missing; leaving notification untouched");
 				return Decorating.Unprocessed;
 			}
 			if (title != (title = EmojiTranslator.translate(title))) extras.putCharSequence(Notification.EXTRA_TITLE, title);
+			final Conversation previous = mConversationManager.getConversation(id);
+			final String storedKey = extras.getBoolean(NotificationMessages.STORED) ? extras.getString(NotificationMessages.KEY) : null;
+			final boolean sameTalker = ConversationTypePolicy.sameKnownTalker(previous.knownKey(), storedKey);
+			final Notification.CarExtender.UnreadConversation originalCar = new Notification.CarExtender(n).getUnreadConversation();
+			final android.app.PendingIntent replyTarget = originalCar == null ? null : originalCar.getReplyPendingIntent();
+			// An unchanged native reply target whose talker was resolved is stronger than a refreshed click target.
+			final boolean sameResolvedReply = previous.knownKey() != null && previous.replyIntent != null
+					&& previous.replyIntent.equals(replyTarget);
+			final boolean replyTargetChanged = !extras.getBoolean(NotificationMessages.STORED) && previous.replyIntent != null
+					&& replyTarget != null && !previous.replyIntent.equals(replyTarget) && !sameTalker;
+			final boolean targetChanged = !extras.getBoolean(NotificationMessages.STORED) && previous.contentIntent != null
+					&& n.contentIntent != null && !previous.contentIntent.equals(n.contentIntent) && !sameTalker && !sameResolvedReply;
+			if (previous.title != null && (targetChanged || replyTargetChanged || !MessageIdentityPolicy.sameConversation(previous.title.toString(), previous.knownKey(),
+					title.toString(), storedKey))) {
+				mConversationManager.resetConversation(id);
+				clearArchivedNotifications(id);
+			}
+			mConversationManager.getConversation(id).title = title;
+			mConversationManager.getConversation(id).contentIntent = n.contentIntent;
+			if (replyTarget != null) mConversationManager.getConversation(id).replyIntent = replyTarget;
+			if (!extras.getBoolean(NotificationMessages.STORED)
+					|| extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN) == 0)
+				extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN,
+						WeChatNotificationRemoval.nextToken());
+			cache(id, n);
 			n.color = PRIMARY_COLOR;        // Tint the small icon
 
 			String channel_id = SDK_INT >= O ? n.getChannelId() : null;
@@ -266,7 +316,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 				}
 			}
 			// 撤回...
-			int type = Conversation.TYPE_UNKNOWN;
 			String recaller = null;
 			boolean is_recall = false;
 			if (content != null && content.contains("撤回")) {
@@ -290,38 +339,31 @@ public class WeChatDecorator extends NevoDecoratorService {
 						return Decorating.Unprocessed;
 					}
 				}
-				if (is_recall) type = (recaller == null) ? Conversation.TYPE_DM_RECALL : Conversation.TYPE_GC_RECALL;
 			}
 			if (content == null || content.isEmpty()) return Decorating.Unprocessed;
 
 			extras.putCharSequence(Notification.EXTRA_TEXT, content);
 
-			if (type == Conversation.TYPE_UNKNOWN) type = WeChatMessage.guessConversationType(content, n.tickerText != null ? n.tickerText != null ? n.tickerText.toString().trim() : "" : "", title);
-			final boolean is_group_chat = Conversation.isGroupChat(type);
+			final Conversation cached = mConversationManager.getConversation(id);
+			final Icon icon = n.getLargeIcon();
+			if (icon != null) cached.icon = IconCompat.createFromIcon(getAppContext(), icon);
+			cached.title = title;
+			cached.summary = content;
+			cached.ticker = n.tickerText;
+			cached.timestamp = n.when;
+			final Conversation conversation = mConversationManager.snapshot(cached, n);
+			if (is_recall) conversation.setType(conversation.isGroupChat()
+					? Conversation.TYPE_GC_RECALL : Conversation.TYPE_DM_RECALL);
+			final boolean is_group_chat = conversation.isGroupChat();
 			if (SDK_INT >= O) {
 				if (extras.containsKey(KEY_SILENT_REVIVAL)) {
-					setGroup(n, "nevo.group.auto");	// Special group name to let Nevolution auto-group it as if not yet grouped. (To be standardized in SDK)
-					setGroupAlertBehavior(n, Notification.GROUP_ALERT_SUMMARY);		// This trick makes notification silent
+					setGroup(n, "nevo.group.auto");
+					setGroupAlertBehavior(n, Notification.GROUP_ALERT_SUMMARY);
 				}
-				if (is_group_chat && ! CHANNEL_DND.equals(channel_id)) setChannelId(n, CHANNEL_GROUP_CONVERSATION);
-				else if (channel_id == null) setChannelId(n, CHANNEL_MESSAGE);		// WeChat versions targeting O+ have its own channel for message
+				if (is_group_chat && !CHANNEL_DND.equals(channel_id)) setChannelId(n, CHANNEL_GROUP_CONVERSATION);
+				else if (channel_id == null || (!is_group_chat && CHANNEL_GROUP_CONVERSATION.equals(channel_id)))
+					setChannelId(n, CHANNEL_MESSAGE);
 			}
-
-			// WeChat previously uses dynamic counter starting from 4097 as notification ID, which is reused after cancelled by WeChat itself,
-			//   causing conversation duplicate or overwritten notifications.
-			final Conversation conversation = mConversationManager.getConversation(id);
-
-			final Icon icon = n.getLargeIcon();
-			conversation.icon = icon != null ? IconCompat.createFromIcon(getAppContext(), icon) : null;
-			conversation.title = title;
-			conversation.summary = content;
-			conversation.ticker = n.tickerText;
-			conversation.timestamp = n.when;
-			if (is_recall)
-				conversation.setType((recaller == null) ? Conversation.TYPE_DM_RECALL : Conversation.TYPE_GC_RECALL);
-			else if (conversation.getType() == Conversation.TYPE_UNKNOWN)
-				conversation.setType(WeChatMessage.guessConversationType(conversation));
-
 			extras.putBoolean(Notification.EXTRA_SHOW_WHEN, true);
 			// if (mPreferences.getBoolean(mPrefKeyWear, false)) n.flags &= ~ Notification.FLAG_LOCAL_ONLY; // TODO
 			setSortKey(n, String.valueOf(Long.MAX_VALUE - n.when + (is_group_chat ? GROUP_CHAT_SORT_KEY_SHIFT : 0))); // Place group chat below other messages
@@ -340,17 +382,18 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (messaging == null) return Decorating.Unprocessed;
 			final List<MessagingStyle.Message> messages = messaging.getMessages();
 			if (messages.isEmpty()) return Decorating.Unprocessed;
+			NotificationMessages.stamp(conversation, n);
 
 			if (mImagePreviewEnabled) {
 				if (content != null && content.endsWith("[图片]")) {
 					// The car conversation resolves the talker (key_username) while rebuilding; queue on that identity.
-					imagePreviews.request(getAppContext(), nm, tag, id, n, () -> conversation.key, messages);
+					imagePreviews.request(getAppContext(), nm, tag, id, n, () -> cached.knownKey(), messages);
 				} else {
 					// A later message replaces the notification; keep the image while it is still part of the conversation.
 					imagePreviews.keepPreview(getAppContext(), nm, tag, id, n, conversation.key, messages);
 				}
 			}
-			if (is_group_chat) messaging.setGroupConversation(true).setConversationTitle(title);
+			messaging.setGroupConversation(is_group_chat).setConversationTitle(is_group_chat ? title : null);
 			MessagingBuilder.flatIntoExtras(messaging, extras);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
 
@@ -456,6 +499,15 @@ public class WeChatDecorator extends NevoDecoratorService {
 				if (BuildConfig.DEBUG) Log.d(TAG, "can not recast " + id + ", so cancel it");
 				cancelNotification(id);
 			}
+		}
+
+		@Override public void onDestroy() {
+			if (mRoundResetReceiverRegistered) {
+				try { getAppContext().unregisterReceiver(mRoundResetReceiver); }
+				catch (final RuntimeException ignored) {}
+				mRoundResetReceiverRegistered = false;
+			}
+			super.onDestroy();
 		}
 
 	}

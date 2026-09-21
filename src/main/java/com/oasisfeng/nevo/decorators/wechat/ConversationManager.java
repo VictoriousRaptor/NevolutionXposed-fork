@@ -1,5 +1,6 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
+import android.app.PendingIntent;
 import android.text.TextUtils;
 import android.util.ArrayMap;
 import android.util.Log;
@@ -42,12 +43,20 @@ class ConversationManager {
 
 		final int id;
 		@Nullable volatile String key;
+		@Nullable volatile String resolvedKey;
+		ConversationTypePolicy.Decision typeEvidence;
+		long resolutionGeneration;
+		java.util.function.Consumer<String> onTalkerResolved = ignored -> {};
+		String knownKey() { return resolvedKey != null ? resolvedKey : key; }
 		int count;
 		CharSequence title;
 		CharSequence summary;
 		CharSequence ticker;
 		long timestamp;
 		IconCompat icon;
+		PendingIntent contentIntent;
+		PendingIntent replyIntent;
+		String notificationPeerId;
 		private @Nullable Person.Builder sender;
 
 		int getType() { return mType; }
@@ -116,10 +125,50 @@ class ConversationManager {
 		private final Map<String, Person> mParticipants = new ArrayMap<>();
 	}
 
-	Conversation getConversation(final int id) {
+	synchronized Conversation getConversation(final int id) {
 		Conversation conversation = mConversations.get(id);
 		if (conversation == null) mConversations.put(id, conversation = new Conversation(id));
 		return conversation;
+	}
+
+	synchronized void resetConversation(final int id) { mConversations.remove(id); }
+
+	synchronized boolean acceptTalker(Conversation expected, String key) {
+		if (key == null || key.trim().isEmpty() || mConversations.get(expected.id) != expected) return false;
+		String known = expected.knownKey();
+		if (known != null && !known.equals(key)) return false;
+		expected.resolvedKey = key;
+		return true;
+	}
+
+	/** Render-local fields cannot be changed by the asynchronous identity callback. */
+	synchronized Conversation snapshot(Conversation cached, android.app.Notification notification) {
+		ConversationTypePolicy.Decision decision = ConversationClassification.resolve(cached, notification);
+		if (cached.notificationPeerId == null) {
+			cached.notificationPeerId = notification.extras.getBoolean(NotificationMessages.STORED)
+					? notification.extras.getString(NotificationMessages.PEER_ID) : null;
+			if (cached.notificationPeerId == null) cached.notificationPeerId = "nevo:peer:" + java.util.UUID.randomUUID();
+		}
+		Conversation view = new Conversation(cached.id);
+		view.key = cached.knownKey();
+		view.title = cached.title;
+		view.summary = cached.summary;
+		view.ticker = cached.ticker;
+		view.timestamp = cached.timestamp;
+		view.icon = cached.icon;
+		view.count = cached.count;
+		view.contentIntent = cached.contentIntent;
+		view.notificationPeerId = cached.notificationPeerId;
+		view.typeEvidence = decision;
+		view.setType(decision.type);
+		final long generation = ++cached.resolutionGeneration;
+		view.onTalkerResolved = key -> acceptTalker(cached, generation, key);
+		return view;
+	}
+
+	private synchronized void acceptTalker(Conversation expected, long generation, String key) {
+		boolean accepted = expected.resolutionGeneration == generation && acceptTalker(expected, key);
+		if (com.oasisfeng.nevo.xposed.BuildConfig.DEBUG) android.util.Log.d("WeChat.Identity", "source=talker_callback accepted=" + accepted);
 	}
 
 	private final SparseArray<Conversation> mConversations = new SparseArray<>();

@@ -478,6 +478,7 @@ final class ImagePreviewLoader {
 			builder.setStyle(new Notification.BigPictureStyle().bigPicture(bitmap))
 					.setOnlyAlertOnce(true);
 			Notification result = builder.build();
+			NotificationMessages.copyIdentityExtras(current, result);
 			result.extras.putBoolean(READY, true);
 			result.extras.putLong(TOKEN, request.token);
 			// recoverBuilder() already parceled the actions, so the notify hook may skip its own rebuild.
@@ -512,6 +513,7 @@ final class ImagePreviewLoader {
 					.setStyle(new Notification.BigPictureStyle().bigPicture(preview.bitmap))
 					.setOnlyAlertOnce(true);
 			Notification result = builder.build();
+			NotificationMessages.copyIdentityExtras(current, result);
 			result.extras.putBoolean(READY, true);
 			result.extras.putLong(TOKEN, preview.token);
 			NevoDecoratorService.LocalDecorator.markActionsSerialized(result);
