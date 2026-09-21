@@ -16,6 +16,15 @@ repositories {
 	mavenCentral()
 }
 
+def releaseSigningKeys = ['RELEASE_STORE_FILE', 'RELEASE_STORE_PASSWORD', 'RELEASE_KEY_ALIAS', 'RELEASE_KEY_PASSWORD']
+def releaseSigningConfigured = releaseSigningKeys.every { providers.gradleProperty(it).isPresent() }
+if (providers.gradleProperty('requireReleaseSigning').orNull == 'true' && !releaseSigningConfigured) {
+	throw new GradleException('Release signing is required. Configure RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS and RELEASE_KEY_PASSWORD.')
+}
+if (!releaseSigningConfigured) {
+	logger.warn('Release signing is not configured: debug uses the default debug key and cannot replace a release-signed installation.')
+}
+
 if (! project.plugins.hasPlugin("com.android.feature")) apply plugin: 'com.android.application'
 
 android {
@@ -28,7 +37,7 @@ android {
 		targetSdk 34
 		versionCode 9
 		versionName "3.1.1"
-		testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+		testInstrumentationRunner "com.oasisfeng.nevo.decorators.wechat.MessageIdentityInstrumentation"
 	}
 
 	compileOptions {
@@ -42,13 +51,11 @@ android {
 
 	signingConfigs {
 		release {
-			try {
-				storeFile file(RELEASE_STORE_FILE)
-				storePassword RELEASE_STORE_PASSWORD
-				keyAlias RELEASE_KEY_ALIAS
-				keyPassword RELEASE_KEY_PASSWORD
-			} catch (Exception e) {
-				logger.warn('Signing config not available: ' + e.getMessage())
+			if (releaseSigningConfigured) {
+				storeFile file(providers.gradleProperty('RELEASE_STORE_FILE').get())
+				storePassword providers.gradleProperty('RELEASE_STORE_PASSWORD').get()
+				keyAlias providers.gradleProperty('RELEASE_KEY_ALIAS').get()
+				keyPassword providers.gradleProperty('RELEASE_KEY_PASSWORD').get()
 			}
 		}
 	}
@@ -58,6 +65,7 @@ android {
 			signingConfig signingConfigs.release
 		}
 		debug {
+			if (releaseSigningConfigured) signingConfig signingConfigs.release
 			debuggable true
 			minifyEnabled false
 		}

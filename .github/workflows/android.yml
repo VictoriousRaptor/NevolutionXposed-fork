@@ -27,10 +27,32 @@ jobs:
       - name: Install Android SDK packages
         run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
       - name: Build debug APK and run unit tests
+        if: github.event_name == 'pull_request'
         run: bash gradlew --no-daemon assembleDebug testDebugUnitTest
+      - name: Build release-signed debug APK and run unit tests
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?Configure RELEASE_KEYSTORE_BASE64 in repository secrets}"
+          : "${ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD:?Missing RELEASE_STORE_PASSWORD}"
+          : "${ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS:?Missing RELEASE_KEY_ALIAS}"
+          : "${ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD:?Missing RELEASE_KEY_PASSWORD}"
+          export ORG_GRADLE_PROJECT_RELEASE_STORE_FILE="$RUNNER_TEMP/release.jks"
+          trap 'rm -f "$ORG_GRADLE_PROJECT_RELEASE_STORE_FILE"' EXIT
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ORG_GRADLE_PROJECT_RELEASE_STORE_FILE"
+          bash gradlew --no-daemon -PrequireReleaseSigning=true assembleDebug testDebugUnitTest
+          for apk in build/outputs/apk/debug/*.apk; do
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
+          done
       - uses: actions/upload-artifact@v4
         with:
-          name: debug-apk
+          name: ${{ github.event_name == 'pull_request' && 'debug-apk' || 'debug-apk-release-signed' }}
           path: build/outputs/apk/debug/*.apk
           if-no-files-found: error
 

@@ -3,6 +3,21 @@
 The Android workflow builds debug APKs and runs unit tests for pull requests to
 master and pushes to master, fix/** and codex/**. Manual runs on master also
 publish a signed release; manual runs on other branches build only.
+
+Push and manual builds sign the debug APK with the same release keystore and
+alias as release builds. Download the `debug-apk-release-signed` artifact to
+switch between debug and release without a signature conflict (Android's version
+code downgrade restrictions still apply). Both variants retain the same package
+ID. PR builds do not receive signing secrets and keep the default debug key in
+the `debug-apk` artifact; that APK cannot replace a release-signed installation.
+
+Local debug builds also reuse the release signing config when all four Gradle
+properties are configured: `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`,
+`RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`. Keep credentials in the user's
+Gradle properties or `ORG_GRADLE_PROJECT_*` environment variables, not in the
+repository or command-line arguments. Without this config, local debug builds
+warn and use the default debug key. Pass `-PrequireReleaseSigning=true` to fail
+instead of producing a default-debug-signed APK; trusted CI builds require it.
 Merging this workflow into master enables automatic releases on subsequent
 master pushes, including the merge itself. Adding it to a feature branch alone
 does not enable publishing from master.

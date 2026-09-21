@@ -20,6 +20,8 @@ import com.oasisfeng.nevo.sdk.HookSupport;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService.SystemUIDecorator;
+import com.oasisfeng.nevo.decorators.wechat.WeChatDecorator;
+import com.oasisfeng.nevo.decorators.wechat.WeChatNotificationRemoval;
 import com.oasisfeng.nevo.xposed.compat.PackageHookContext;
 import com.oasisfeng.nevo.xposed.compat.XC_MethodHook;
 import com.oasisfeng.nevo.xposed.compat.XposedBridge;
@@ -275,8 +277,31 @@ public class MainHook extends XposedModule {
 	}
 
 	private void onNotificationRemoved(StatusBarNotification sbn, int reason) {
+		notifyWeChatRoundRemoved(sbn, reason);
 		final SystemUIDecorator media = this.media.getSystemUIDecorator();
 		if (!media.isDisabled()) media.onNotificationRemoved(sbn, reason);
+	}
+
+	private static void notifyWeChatRoundRemoved(final StatusBarNotification sbn, final int reason) {
+		if (sbn == null || !WeChatDecorator.WECHAT_PACKAGE.equals(sbn.getPackageName())
+				|| !WeChatNotificationRemoval.shouldResetRound(reason)) return;
+		final Notification notification = sbn.getNotification();
+		if (notification == null) return;
+		final long token = notification.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
+		if (token == 0) return;
+		final Context context = NevoDecoratorService.getAppContext();
+		if (context == null) return;
+		final Intent reset = new Intent(WeChatNotificationRemoval.ACTION_RESET_ROUND)
+				.setPackage(WeChatDecorator.WECHAT_PACKAGE)
+				.putExtra(WeChatNotificationRemoval.EXTRA_NOTIFICATION_ID, sbn.getId())
+				.putExtra(WeChatNotificationRemoval.EXTRA_ROUND_TOKEN, token);
+		try {
+			context.sendBroadcastAsUser(reset, sbn.getUser());
+			if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=removal_broadcast id=" + sbn.getId()
+					+ " reason=" + reason + " tokenPresent=true");
+		} catch (final RuntimeException failure) {
+			Log.w(TAG, "Unable to broadcast WeChat notification removal, reason=" + reason, failure);
+		}
 	}
 
 	private static void imageNotificationTrace(String stage, int id, Notification notification) {
