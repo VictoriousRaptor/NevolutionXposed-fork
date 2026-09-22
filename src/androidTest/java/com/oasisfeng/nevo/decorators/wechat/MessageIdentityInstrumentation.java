@@ -25,6 +25,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
     @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); start(); }
 
     @Override public void onStart() {
+        com.oasisfeng.nevo.sdk.NevoDecoratorService.setAppContext(getTargetContext());
         String[] names = { "personAndAttachmentRoundTrip", "staleTickerAndCarHistory", "unknownAndGroupNames",
                 "replyThenIncoming", "repeatedRebuildAndPreview", "untrustedMissingSender", "reusedNotificationId",
                 "rawPersonOnlyNotification", "nativeMessagingSelf", "rawColonText", "undatedSnapshots",
@@ -63,6 +64,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
 
     private void personAndAttachmentRoundTrip() {
         Person peer = new Person.Builder().setName("Alice").setKey("alice-key").setUri("peer:alice")
+                .setBot(true).setImportant(true)
                 .setIcon(IconCompat.createWithBitmap(Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888))).build();
         Message original = new Message("photo", 123, peer).setData("image/jpeg", android.net.Uri.parse("content://test/photo"));
         original.getExtras().putString("custom", "kept");
@@ -72,6 +74,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         check(restored != null && restored.getPerson() != null, "person-only message became self");
         check("alice-key".equals(restored.getPerson().getKey()), "key lost");
         check("peer:alice".equals(restored.getPerson().getUri()), "URI lost");
+        check(restored.getPerson().isBot() && restored.getPerson().isImportant(), "person flags lost");
         check(restored.getPerson().getIcon() != null, "avatar lost");
         check(original.getDataUri().equals(restored.getDataUri()), "attachment lost");
         check("image/jpeg".equals(restored.getDataMimeType()), "MIME lost");

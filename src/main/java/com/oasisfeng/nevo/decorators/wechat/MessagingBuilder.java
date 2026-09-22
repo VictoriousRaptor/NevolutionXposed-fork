@@ -560,11 +560,9 @@ class MessagingBuilder {
 			}
 			String md5 = sb.toString();
 
-			// 构建头像路径: /data/data/com.tencent.mm/MicroMsg/{user_hash}/avatar/{md5[0:2]}/{md5[2:4]}/user_{md5}.png
-			// L4: 使用动态路径
-			File wechatDataDir = null;
-			try { wechatDataDir = wechatPkgCtx.getFilesDir().getParentFile(); } catch (Exception ignored) {}
-			if (wechatDataDir == null) wechatDataDir = new File("/data/data/com.tencent.mm");
+			// Respect the host user's data directory (including work profiles).
+			File wechatDataDir = wechatPkgCtx.getDataDir();
+			if (wechatDataDir == null) return null;
 			File microMsgDir = new File(wechatDataDir, "MicroMsg/");
 			if (!microMsgDir.exists()) {
 				Log.w(TAG, "loadSelfIcon: MicroMsg dir not found");
