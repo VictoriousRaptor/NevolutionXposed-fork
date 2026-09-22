@@ -475,8 +475,8 @@ class MessagingBuilder {
 		}
 		final Context pkgCtx = moduleContext != null ? moduleContext : context;
 		if (BuildConfig.DEBUG) Log.d(TAG, "pkgCtx=" + pkgCtx + " moduleContext=" + moduleContext);
-		actionReply = "回复";
-		actionZoom = "缩放";
+		actionReply = moduleString(moduleContext, R.string.action_reply, "回复");
+		actionZoom = moduleString(moduleContext, R.string.action_zoom, "缩放");
 		mController = controller;
 		String selfName = "我";
 		if (moduleContext != null) {
@@ -497,6 +497,16 @@ class MessagingBuilder {
 		{
 			final IntentFilter filter = new IntentFilter(ACTION_ZOOM); filter.addDataScheme(SCHEME_ID);
 			ContextCompat.registerReceiver(context, mZoomReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
+		}
+	}
+
+	private static String moduleString(@Nullable Context context, int resource, String fallback) {
+		if (context == null) return fallback;
+		try {
+			String value = context.getString(resource);
+			return value.isEmpty() ? fallback : value;
+		} catch (android.content.res.Resources.NotFoundException ignored) {
+			return fallback;
 		}
 	}
 

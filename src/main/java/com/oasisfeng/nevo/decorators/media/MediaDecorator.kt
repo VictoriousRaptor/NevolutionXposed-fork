@@ -128,6 +128,7 @@ class MediaDecorator : NevoDecoratorService() {
 							else
 								Icon.createWithResource(target, action.icon)
 							remoteViews.setImageViewIcon(id, icon)
+							remoteViews.setContentDescription(id, action.title ?: appLabel0)
 							remoteViews.setOnClickPendingIntent(id, action.actionIntent)
 							remoteViews.setInt(id, "setColorFilter", textColor)
 							remoteViews.setInt(id, "setBackgroundResource", selectableItemBackground) }
