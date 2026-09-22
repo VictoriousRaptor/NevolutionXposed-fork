@@ -150,9 +150,7 @@ class MessagingBuilder {
 			final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
 			final PendingIntent proxy = proxyDirectReply(id, n, on_reply, remote_input, input_history, null);
 			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(remote_input.getResultKey()).addExtras(remote_input.getExtras())
-					.setAllowFreeFormInput(true);
-			final String participant = convs.getParticipant();
-			if (participant != null) reply_remote_input.setLabel(participant);
+					.setAllowFreeFormInput(true).setLabel(actionReply);
 
 			final Action.Builder reply_action = new Action.Builder(null, actionReply, proxy)
 					.addRemoteInput(reply_remote_input.build()).setAllowGeneratedReplies(true);
@@ -244,7 +242,7 @@ class MessagingBuilder {
 		if (onReply != null && replyRemoteInput != null) {
 			final PendingIntent proxy = proxyDirectReply(id, n, onReply, replyRemoteInput, input_history, null);
 			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(replyRemoteInput.getResultKey())
-					.addExtras(replyRemoteInput.getExtras()).setAllowFreeFormInput(true);
+					.addExtras(replyRemoteInput.getExtras()).setAllowFreeFormInput(true).setLabel(actionReply);
 			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, proxy)
 					.addRemoteInput(reply_remote_input.build()).setAllowGeneratedReplies(true);
 			if (SDK_INT >= P) reply_action_builder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
@@ -287,9 +285,7 @@ class MessagingBuilder {
 		final RemoteInput replyInput;
 		if (remoteInput != null) {
 			final RemoteInput.Builder builder = new RemoteInput.Builder(remoteInput.getResultKey())
-					.addExtras(remoteInput.getExtras()).setAllowFreeFormInput(true);
-			final String participant = convs.getParticipant();
-			if (participant != null) builder.setLabel(participant);
+					.addExtras(remoteInput.getExtras()).setAllowFreeFormInput(true).setLabel(actionReply);
 			replyInput = builder.build();
 		} else {
 			replyInput = new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY)

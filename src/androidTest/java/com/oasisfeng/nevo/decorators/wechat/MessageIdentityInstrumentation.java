@@ -3,6 +3,10 @@ package com.oasisfeng.nevo.decorators.wechat;
 import android.app.Activity;
 import android.app.Instrumentation;
 import android.app.Notification;
+import android.app.PendingIntent;
+import android.app.RemoteInput;
+import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.Bundle;
@@ -32,7 +36,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "stablePeerAcrossTalkerAndAvatar", "twoRoundsAndReplay", "groupRound", "roundPreviewAndUndated",
                 "removedRoundStartsFresh",
                 "classifiesRawFirstMessages", "classificationSurvivesNextMessage", "lateTalkerIsIsolated",
-                "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyActionSurvivesArchiveRemoval" };
+                "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyInputsUseLocalizedReplyLabel",
+                "replyActionSurvivesArchiveRemoval" };
         Runnable[] tests = { this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
                 this::replyThenIncoming, this::repeatedRebuildAndPreview, this::untrustedMissingSender, this::reusedNotificationId,
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
@@ -40,6 +45,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 this::removedRoundStartsFresh,
                 this::classifiesRawFirstMessages, this::classificationSurvivesNextMessage, this::lateTalkerIsIsolated,
                 this::legacyGroupGuessIsRepaired, this::nativeGroupEvidence,
+                this::replyInputsUseLocalizedReplyLabel,
                 () -> com.oasisfeng.nevo.sdk.NotificationArchiveInstrumentation.replyActionSurvivesRemovalAndRebuild(getTargetContext()) };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
@@ -405,6 +411,77 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         noFlag.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle");
         check(classified(manager, noFlag).isGroupChat(), "missing flag treated as explicit direct");
     }
+
+    private void replyInputsUseLocalizedReplyLabel() {
+        Context context = getTargetContext();
+        int replyResource = context.getResources().getIdentifier("action_reply", "string", context.getPackageName());
+        check(replyResource != 0, "action_reply resource not found");
+        String expected = context.getString(replyResource);
+        MessagingBuilder builder = new MessagingBuilder(context, context, (id, modifies) -> {});
+        try {
+            PendingIntent reply = PendingIntent.getBroadcast(context, 501,
+                    new Intent("com.oasisfeng.nevo.test.REPLY").setPackage(context.getPackageName()),
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            RemoteInput original = new RemoteInput.Builder("reply")
+                    .setAllowFreeFormInput(true).setLabel("Alice").build();
+            Notification.CarExtender.UnreadConversation carConversation =
+                    new Notification.CarExtender.Builder("Alice")
+                            .addMessage("hello").setLatestTimestamp(100).setReplyAction(reply, original).build();
+
+            Notification fromCar = carNotification(carConversation);
+            Conversation carPeer = conversation(false); carPeer.key = "alice";
+            check(builder.buildFromExtender(carPeer, 1, fromCar, "Alice", Collections.emptyList()) != null,
+                    "car reply action was not built");
+            checkReplyLabel(fromCar, expected);
+
+            Notification fromActions = notification("hello", 100);
+            fromActions.actions = new Notification.Action[]{ new Notification.Action.Builder(null, "Reply", reply)
+                    .addRemoteInput(original).build() };
+            Conversation actionPeer = conversation(false); actionPeer.key = "alice";
+            check(builder.buildFromExtender(actionPeer, 2, fromActions, "Alice", Collections.emptyList()) != null,
+                    "actions reply was not built");
+            checkReplyLabel(fromActions, expected);
+
+            Notification.CarExtender.UnreadConversation fallbackConversation =
+                    new Notification.CarExtender.Builder("Alice")
+                            .addMessage("hello").setLatestTimestamp(100).setReplyAction(reply, null).build();
+            Notification fromFallback = carNotification(fallbackConversation);
+            Conversation fallbackPeer = conversation(false); fallbackPeer.key = "alice";
+            check(builder.buildFromExtender(fallbackPeer, 3, fromFallback, "Alice", Collections.emptyList()) != null,
+                    "fallback reply action was not built");
+            checkReplyLabel(fromFallback, expected);
+
+            Notification media = carNotification(carConversation);
+            check(builder.attachReplyAction(4, media), "media reply action was not attached");
+            checkReplyLabel(media, expected);
+        } finally {
+            builder.close();
+        }
+    }
+
+    private Notification carNotification(Notification.CarExtender.UnreadConversation conversation) {
+        return new Notification.Builder(getTargetContext(), "identity-test")
+                .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Alice").setContentText("hello")
+                .extend(new Notification.CarExtender().setUnreadConversation(conversation)).build();
+    }
+
+    private static void checkReplyLabel(Notification notification, String expected) {
+        boolean found = false;
+        if (notification.actions != null) {
+            for (Notification.Action action : notification.actions) {
+                RemoteInput[] inputs = action.getRemoteInputs();
+                if (inputs == null) continue;
+                for (RemoteInput input : inputs) {
+                    if (!input.getAllowFreeFormInput()) continue;
+                    found = true;
+                    check(input.getLabel() != null && expected.contentEquals(input.getLabel()),
+                            "reply label was " + input.getLabel() + ", expected " + expected);
+                }
+            }
+        }
+        check(found, "no free-form reply input found");
+    }
+
     private static Bundle parcel(Bundle bundle) {
         Parcel p = Parcel.obtain();
         try { p.writeBundle(bundle); p.setDataPosition(0); return p.readBundle(MessageIdentityInstrumentation.class.getClassLoader()); }
