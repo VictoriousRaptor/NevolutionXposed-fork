@@ -38,7 +38,6 @@
 	<string name="self_display_name">我</string>
 	<string name="action_reply">Reply</string>
 	<string name="action_zoom">Zoom</string>
-	<string name="action_preview_image">Preview</string>
 
 	<string name="channel_message">New Message</string>
 	<string name="channel_group_message">New Group Message</string>

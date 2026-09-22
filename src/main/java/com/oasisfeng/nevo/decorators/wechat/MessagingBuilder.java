@@ -150,9 +150,7 @@ class MessagingBuilder {
 			final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
 			final PendingIntent proxy = proxyDirectReply(id, n, on_reply, remote_input, input_history, null);
 			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(remote_input.getResultKey()).addExtras(remote_input.getExtras())
-					.setAllowFreeFormInput(true);
-			final String participant = convs.getParticipant();
-			if (participant != null) reply_remote_input.setLabel(participant);
+					.setAllowFreeFormInput(true).setLabel(actionReply);
 
 			final Action.Builder reply_action = new Action.Builder(null, actionReply, proxy)
 					.addRemoteInput(reply_remote_input.build()).setAllowGeneratedReplies(true);
@@ -244,7 +242,7 @@ class MessagingBuilder {
 		if (onReply != null && replyRemoteInput != null) {
 			final PendingIntent proxy = proxyDirectReply(id, n, onReply, replyRemoteInput, input_history, null);
 			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(replyRemoteInput.getResultKey())
-					.addExtras(replyRemoteInput.getExtras()).setAllowFreeFormInput(true);
+					.addExtras(replyRemoteInput.getExtras()).setAllowFreeFormInput(true).setLabel(actionReply);
 			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, proxy)
 					.addRemoteInput(reply_remote_input.build()).setAllowGeneratedReplies(true);
 			if (SDK_INT >= P) reply_action_builder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
@@ -287,9 +285,7 @@ class MessagingBuilder {
 		final RemoteInput replyInput;
 		if (remoteInput != null) {
 			final RemoteInput.Builder builder = new RemoteInput.Builder(remoteInput.getResultKey())
-					.addExtras(remoteInput.getExtras()).setAllowFreeFormInput(true);
-			final String participant = convs.getParticipant();
-			if (participant != null) builder.setLabel(participant);
+					.addExtras(remoteInput.getExtras()).setAllowFreeFormInput(true).setLabel(actionReply);
 			replyInput = builder.build();
 		} else {
 			replyInput = new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY)
@@ -475,8 +471,8 @@ class MessagingBuilder {
 		}
 		final Context pkgCtx = moduleContext != null ? moduleContext : context;
 		if (BuildConfig.DEBUG) Log.d(TAG, "pkgCtx=" + pkgCtx + " moduleContext=" + moduleContext);
-		actionReply = "回复";
-		actionZoom = "缩放";
+		actionReply = moduleString(moduleContext, R.string.action_reply, "回复");
+		actionZoom = moduleString(moduleContext, R.string.action_zoom, "缩放");
 		mController = controller;
 		String selfName = "我";
 		if (moduleContext != null) {
@@ -497,6 +493,16 @@ class MessagingBuilder {
 		{
 			final IntentFilter filter = new IntentFilter(ACTION_ZOOM); filter.addDataScheme(SCHEME_ID);
 			ContextCompat.registerReceiver(context, mZoomReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
+		}
+	}
+
+	private static String moduleString(@Nullable Context context, int resource, String fallback) {
+		if (context == null) return fallback;
+		try {
+			String value = context.getString(resource);
+			return value.isEmpty() ? fallback : value;
+		} catch (android.content.res.Resources.NotFoundException ignored) {
+			return fallback;
 		}
 	}
 
@@ -560,11 +566,9 @@ class MessagingBuilder {
 			}
 			String md5 = sb.toString();
 
-			// 构建头像路径: /data/data/com.tencent.mm/MicroMsg/{user_hash}/avatar/{md5[0:2]}/{md5[2:4]}/user_{md5}.png
-			// L4: 使用动态路径
-			File wechatDataDir = null;
-			try { wechatDataDir = wechatPkgCtx.getFilesDir().getParentFile(); } catch (Exception ignored) {}
-			if (wechatDataDir == null) wechatDataDir = new File("/data/data/com.tencent.mm");
+			// Respect the host user's data directory (including work profiles).
+			File wechatDataDir = wechatPkgCtx.getDataDir();
+			if (wechatDataDir == null) return null;
 			File microMsgDir = new File(wechatDataDir, "MicroMsg/");
 			if (!microMsgDir.exists()) {
 				Log.w(TAG, "loadSelfIcon: MicroMsg dir not found");

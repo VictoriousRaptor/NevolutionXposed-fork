@@ -1,5 +1,6 @@
 package com.oasisfeng.nevo.xposed;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -153,7 +154,6 @@ public class MainHook extends XposedModule {
 	}
 
 	private void hookSystemUI(PackageHookContext loadPackageParam) {
-		AtomicReference<NotificationListenerService> nlsRef = new AtomicReference<>();
 		final XC_MethodHook onNotificationPosted = new XC_MethodHook() { // 捕获通知到达
 			@Override
 			protected void beforeHookedMethod(MethodHookParam param) {
@@ -187,9 +187,7 @@ public class MainHook extends XposedModule {
 			protected void afterHookedMethod(MethodHookParam param) {
 				// XposedBridge.log("nls constructor " + param.thisObject);
 				NotificationListenerService nls = (NotificationListenerService)param.thisObject;
-				if (nlsRef.compareAndSet(null, nls)) {
-					SystemUIDecorator.setNLS(nls);
-				}
+				SystemUIDecorator.setNLS(nls);
 				try {
 					final Class<?> clazz = nls.getClass();
 					if (BuildConfig.DEBUG) Log.d(TAG, "NL clazz: " + clazz + " " + loadPackageParam.packageName);
@@ -282,6 +280,9 @@ public class MainHook extends XposedModule {
 		if (!media.isDisabled()) media.onNotificationRemoved(sbn, reason);
 	}
 
+	// This runs in the SystemUI host process, whose manifest grants INTERACT_ACROSS_USERS_FULL.
+	// The module manifest is not the runtime permission source for this call.
+	@SuppressLint("MissingPermission")
 	private static void notifyWeChatRoundRemoved(final StatusBarNotification sbn, final int reason) {
 		if (sbn == null || !WeChatDecorator.WECHAT_PACKAGE.equals(sbn.getPackageName())
 				|| !WeChatNotificationRemoval.shouldResetRound(reason)) return;

@@ -53,7 +53,6 @@
 	<string name="self_display_name">我</string>
 	<string name="action_reply">回复</string>
 	<string name="action_zoom">缩放</string>
-	<string name="action_preview_image">预览图片</string>
 
 	<string name="channel_message">新消息通知</string>
 	<string name="channel_group_message">新群组消息通知</string>

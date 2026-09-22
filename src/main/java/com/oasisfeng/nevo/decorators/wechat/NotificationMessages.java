@@ -1,6 +1,7 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
 import android.app.Notification;
+import android.content.Context;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Parcelable;
@@ -10,8 +11,10 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationCompat.MessagingStyle.Message;
 import androidx.core.app.Person;
+import androidx.core.graphics.drawable.IconCompat;
 
 import com.oasisfeng.nevo.decorators.wechat.ConversationManager.Conversation;
+import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.xposed.BuildConfig;
 
 import java.util.ArrayList;
@@ -67,7 +70,16 @@ final class NotificationMessages {
         Person person = null;
         if (Build.VERSION.SDK_INT >= 28) {
             Parcelable value = bundle.getParcelable("sender_person");
-            if (value instanceof android.app.Person) person = Person.fromAndroidPerson((android.app.Person) value);
+            if (value instanceof android.app.Person) {
+                android.app.Person nativePerson = (android.app.Person) value;
+                Context context = NevoDecoratorService.getAppContext();
+                IconCompat icon = nativePerson.getIcon() == null || context == null ? null
+                        : IconCompat.createFromIcon(context, nativePerson.getIcon());
+                person = new Person.Builder().setName(nativePerson.getName())
+                        .setKey(nativePerson.getKey()).setUri(nativePerson.getUri())
+                        .setBot(nativePerson.isBot()).setImportant(nativePerson.isImportant())
+                        .setIcon(icon).build();
+            }
         }
         if (person == null && bundle.getBundle("person") != null) person = Person.fromBundle(bundle.getBundle("person"));
         CharSequence sender = bundle.getCharSequence("sender");

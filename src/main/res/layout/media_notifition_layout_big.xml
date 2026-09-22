@@ -18,6 +18,8 @@
 			android:layout_height="match_parent"
 			android:layout_alignParentEnd="true"
 			android:adjustViewBounds="true"
+			android:contentDescription="@null"
+			android:importantForAccessibility="no"
 			android:scaleType="fitCenter" />
 
 
@@ -26,6 +28,8 @@
 			android:layout_width="96dp"
 			android:layout_height="match_parent"
 			android:layout_alignStart="@id/largeIcon"
+			android:contentDescription="@null"
+			android:importantForAccessibility="no"
 			android:src="@drawable/background_image" />
 
 	</RelativeLayout>
@@ -52,6 +56,8 @@
 				android:id="@+id/smallIcon"
 				android:layout_width="18dp"
 				android:layout_height="18dp"
+				android:contentDescription="@null"
+				android:importantForAccessibility="no"
 				android:scaleType="centerInside" />
 
 			<TextView
@@ -97,6 +103,7 @@
 				android:id="@+id/ic_0"
 				android:layout_width="42dp"
 				android:layout_height="42dp"
+				android:contentDescription="@null"
 				android:foregroundTint="@color/colorAccent"
 				android:scaleType="centerInside"
 				android:visibility="gone" />
@@ -105,6 +112,7 @@
 				android:id="@+id/ic_1"
 				android:layout_width="42dp"
 				android:layout_height="42dp"
+				android:contentDescription="@null"
 				android:scaleType="centerInside"
 				android:visibility="gone" />
 
@@ -112,6 +120,7 @@
 				android:id="@+id/ic_2"
 				android:layout_width="42dp"
 				android:layout_height="42dp"
+				android:contentDescription="@null"
 				android:scaleType="centerInside"
 				android:visibility="gone" />
 
@@ -119,6 +128,7 @@
 				android:id="@+id/ic_3"
 				android:layout_width="42dp"
 				android:layout_height="42dp"
+				android:contentDescription="@null"
 				android:scaleType="centerInside"
 				android:visibility="gone" />
 
@@ -126,6 +136,7 @@
 				android:id="@+id/ic_4"
 				android:layout_width="42dp"
 				android:layout_height="42dp"
+				android:contentDescription="@null"
 				android:scaleType="centerInside"
 				android:visibility="gone" />
 
