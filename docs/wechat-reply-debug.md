@@ -33,3 +33,18 @@ The reply path is diagnosed in this order:
 - WeChat 8.0.78 (China build, versionCode 3180): verified and delivered, see
   `wechat-8.0.78-findings.md`.
 - WeChat 8.0.76 legacy profile: mapping preserved but not live-tested.
+
+## Reply button disappears after notifications accumulate
+
+If ordinary notifications still appear but inline replies stop until WeChat restarts,
+search LSPosed logs for `before hook failed`, `LruCache`, and
+`sizeOf() is reporting inconsistent results!`. On 2026-09-22 this exception occurred
+in `LocalDecorator.cache()` before reply actions were added. Mutating a cached list
+in place had undercounted its size; removing history then corrupted the total.
+
+Both decorators now share `NotificationArchive`: it counts notifications explicitly,
+retains at most 120 notifications and 20 per conversation, and publishes stable list
+snapshots. Token matching and history removal run atomically. Regression coverage
+includes repeated reply recasts/removal, LRU eviction, concurrent updates, and an
+Android instrumentation case preserving a RemoteInput action through rebuild and
+parceling. Building the instrumentation APK does not mean the device test was run.
