@@ -10,14 +10,12 @@ import android.content.pm.PackageManager;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
-import android.util.LruCache;
 import android.widget.RemoteViews;
 
 import androidx.annotation.Keep;
 
-import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.function.Predicate;
 
 import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 
@@ -82,45 +80,31 @@ public abstract class NevoDecoratorService {
 
 		// M2: 按通知条数计费，避免每个会话都保留 MAX_NUM_ARCHIVED 条而总量失控
 		private static final int MAX_CACHED_NOTIFICATIONS = 120;
-		private static final LruCache<Integer, LinkedList<Notification>> cache = new LruCache<Integer, LinkedList<Notification>>(MAX_CACHED_NOTIFICATIONS) {
-			protected int sizeOf(Integer key, LinkedList<Notification> value) {
-				return value != null ? value.size() : 0;
-			}
-
-			protected void entryRemoved(boolean evicted, Integer key, LinkedList<Notification> oldValue, LinkedList<Notification> newValue) {
-				if (evicted && oldValue != null) {
-					oldValue.clear();
-				}
-			}
-		};
+		private static final NotificationArchive<Integer, Notification> cache =
+				new NotificationArchive<>(MAX_CACHED_NOTIFICATIONS, MAX_NUM_ARCHIVED);
 	
 		protected static void cache(final int id, final Notification n) {
 			if (BuildConfig.DEBUG) Log.d(TAG, "cache id " + id);
-			LinkedList<Notification> queue = cache.get(id);
-			if (queue == null) {
-				queue = new LinkedList<>();
-			}
-			queue.add(n);
-			if (BuildConfig.DEBUG) Log.d(TAG, "cache queue " + queue);
-			if (queue.size() > MAX_NUM_ARCHIVED) queue.remove();
-			cache.put(id, queue);		// Re-put so the LRU accounts for the added notification.
+			cache.add(id, n);
 		}
 	
 		protected static List<Notification> getArchivedNotifications(int key) {
-			LinkedList<Notification> queue = cache.get(key);
-			return queue != null ? Collections.unmodifiableList(queue) : Collections.<Notification>emptyList();
+			return cache.snapshot(key);
 		}
 	
 		protected static Notification getArchivedNotification(int key) {
-			LinkedList<Notification> queue = cache.get(key);
-			return queue.getLast();
+			return cache.latest(key);
 		}
 	
 		protected static boolean hasArchivedNotifications(int key) {
-			return cache.get(key) != null;
+			return cache.latest(key) != null;
 		}
 
 		protected static void clearArchivedNotifications(int key) { cache.remove(key); }
+
+		protected static boolean clearArchivedNotificationsIf(int key, Predicate<Notification> matches) {
+			return cache.removeIfLatest(key, matches);
+		}
 
 		private static final String KEY_ACTIONS_SERIALIZED = "nevo.actionsSerialized";
 
@@ -139,10 +123,7 @@ public abstract class NevoDecoratorService {
 		 * recasts reuse the notification whose actions are already properly serialized.
 		 */
 		public static void replaceCachedNotification(final int id, final Notification original, final Notification replacement) {
-			final LinkedList<Notification> queue = cache.get(id);
-			if (queue == null) return;
-			final int index = queue.lastIndexOf(original);
-			if (index >= 0) queue.set(index, replacement);
+			cache.replace(id, original, replacement);
 		}
 	
 		public static RemoteViews overrideBigContentView(Notification n, RemoteViews remoteViews) {
@@ -248,41 +229,23 @@ public abstract class NevoDecoratorService {
 
 		// M2: 同样按条数计费，避免缓存总量随会话数线性增长
 		private static final int MAX_CACHED_SBN = 120;
-		private static final LruCache<String, LinkedList<StatusBarNotification>> cache = new LruCache<String, LinkedList<StatusBarNotification>>(MAX_CACHED_SBN) {
-			protected int sizeOf(String key, LinkedList<StatusBarNotification> value) {
-				return value != null ? value.size() : 0;
-			}
-
-			protected void entryRemoved(boolean evicted, String key, LinkedList<StatusBarNotification> oldValue, LinkedList<StatusBarNotification> newValue) {
-				if (evicted && oldValue != null) {
-					oldValue.clear();
-				}
-			}
-		};
+		private static final NotificationArchive<String, StatusBarNotification> cache =
+				new NotificationArchive<>(MAX_CACHED_SBN, MAX_NUM_ARCHIVED);
 	
 		protected static void cache(StatusBarNotification sbn) {
-			final String key = sbn.getKey();
-			LinkedList<StatusBarNotification> queue = cache.get(key);
-			if (queue == null) {
-				queue = new LinkedList<>();
-			}
-			queue.add(sbn);
-			if (queue.size() > MAX_NUM_ARCHIVED) queue.remove();
-			cache.put(key, queue);		// Re-put so the LRU accounts for the added notification.
+			cache.add(sbn.getKey(), sbn);
 		}
 	
 		protected static List<StatusBarNotification> getArchivedNotifications(String key) {
-			LinkedList<StatusBarNotification> queue = cache.get(key);
-			return queue != null ? Collections.unmodifiableList(queue) : Collections.<StatusBarNotification>emptyList();
+			return cache.snapshot(key);
 		}
 	
 		protected static StatusBarNotification getArchivedNotification(String key) {
-			LinkedList<StatusBarNotification> queue = cache.get(key);
-			return queue.getLast();
+			return cache.latest(key);
 		}
 	
 		protected static boolean hasArchivedNotifications(String key) {
-			return cache.get(key) != null;
+			return cache.latest(key) != null;
 		}
 	
 		protected final String prefKey;

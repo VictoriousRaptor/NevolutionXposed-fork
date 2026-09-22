@@ -151,11 +151,9 @@ public class WeChatDecorator extends NevoDecoratorService {
 						|| !intent.hasExtra(WeChatNotificationRemoval.EXTRA_NOTIFICATION_ID)) return;
 				final int id = intent.getIntExtra(WeChatNotificationRemoval.EXTRA_NOTIFICATION_ID, 0);
 				final long removed = intent.getLongExtra(WeChatNotificationRemoval.EXTRA_ROUND_TOKEN, 0);
-				final Notification latest = hasArchivedNotifications(id) ? getArchivedNotification(id) : null;
-				final long current = latest == null ? 0
-						: latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
-				final boolean matched = WeChatNotificationRemoval.tokenMatches(current, removed);
-				if (matched) clearArchivedNotifications(id);
+				final boolean matched = clearArchivedNotificationsIf(id, latest ->
+						WeChatNotificationRemoval.tokenMatches(
+								latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), removed));
 				if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=removal_receiver id=" + id
 						+ " matched=" + matched + " tokenPresent=" + (removed != 0));
 			}
@@ -490,8 +488,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 		}
 
 		private void modifyNotification(final int id, final ModifyNotification... modifies) {
-			if (hasArchivedNotifications(id)) {
-				Notification n = getArchivedNotification(id);
+			final Notification n = getArchivedNotification(id);
+			if (n != null) {
 				for (ModifyNotification modify : modifies) modify.modify(n);
 				if (BuildConfig.DEBUG) Log.d(TAG, "recast " + id);
 				recastNotification(id, n);
