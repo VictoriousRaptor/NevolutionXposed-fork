@@ -31,14 +31,15 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "stablePeerAcrossTalkerAndAvatar", "twoRoundsAndReplay", "groupRound", "roundPreviewAndUndated",
                 "removedRoundStartsFresh",
                 "classifiesRawFirstMessages", "classificationSurvivesNextMessage", "lateTalkerIsIsolated",
-                "legacyGroupGuessIsRepaired", "nativeGroupEvidence" };
+                "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyActionSurvivesArchiveRemoval" };
         Runnable[] tests = { this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
                 this::replyThenIncoming, this::repeatedRebuildAndPreview, this::untrustedMissingSender, this::reusedNotificationId,
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
                 this::stablePeerAcrossTalkerAndAvatar, this::twoRoundsAndReplay, this::groupRound, this::roundPreviewAndUndated,
                 this::removedRoundStartsFresh,
                 this::classifiesRawFirstMessages, this::classificationSurvivesNextMessage, this::lateTalkerIsIsolated,
-                this::legacyGroupGuessIsRepaired, this::nativeGroupEvidence };
+                this::legacyGroupGuessIsRepaired, this::nativeGroupEvidence,
+                () -> com.oasisfeng.nevo.sdk.NotificationArchiveInstrumentation.replyActionSurvivesRemovalAndRebuild(getTargetContext()) };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();
