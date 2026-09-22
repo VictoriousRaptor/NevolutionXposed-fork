@@ -1,5 +1,6 @@
 package com.oasisfeng.nevo.sdk;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.Notification.Action;
 import android.app.NotificationChannel;
@@ -15,6 +16,7 @@ import android.widget.RemoteViews;
 import androidx.annotation.Keep;
 
 import java.util.List;
+import java.lang.ref.WeakReference;
 import java.util.function.Predicate;
 
 import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
@@ -36,6 +38,8 @@ public abstract class NevoDecoratorService {
 
 	private static final String TAG = "NevoDecoratorService";
 
+	// Application/package contexts are process-scoped and never point to an Activity.
+	@SuppressLint("StaticFieldLeak")
 	private static volatile Context appContext, packageContext;
 
 	public static Context getAppContext() {
@@ -217,14 +221,14 @@ public abstract class NevoDecoratorService {
 	 * 在系统UI（SystemUI）中执行的通知处理。
 	 */
 	public static class SystemUIDecorator {
-		private static volatile NotificationListenerService mNLS;
+		private static volatile WeakReference<NotificationListenerService> mNLS = new WeakReference<>(null);
 
 		public static void setNLS(NotificationListenerService nls) {
-			mNLS = nls;
+			mNLS = new WeakReference<>(nls);
 		}
 
 		public static NotificationListenerService getNLS() {
-			return mNLS;
+			return mNLS.get();
 		}
 
 		// M2: 同样按条数计费，避免缓存总量随会话数线性增长
@@ -273,7 +277,8 @@ public abstract class NevoDecoratorService {
 
 		protected final void cancelNotification(String key) {
 			if (BuildConfig.DEBUG) Log.d(TAG, "cancelNotification " + key);
-			if (mNLS != null) mNLS.cancelNotification(key);
+			final NotificationListenerService listener = getNLS();
+			if (listener != null) listener.cancelNotification(key);
 		}
 	}
 
