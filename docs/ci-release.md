@@ -25,7 +25,7 @@ does not enable publishing from master.
 After the build job passes, master pushes and manual master runs build and verify a signed release APK
 and publish it with SHA256SUMS.txt. Tags use v<versionName>-build.<run number> so multiple
 master updates at the same app version have distinct releases. Reruns preserve
-an already published release. Android versionCode is 10 for v3.1.2; bump it for the next app
+an already published release. Android versionCode is 11 for v3.1.3; bump it for the next app
 version. CI run numbers do not alter Android versionCode.
 
 Configure these Actions repository secrets separately in each publishing repo:
