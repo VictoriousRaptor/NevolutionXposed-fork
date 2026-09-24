@@ -3,6 +3,13 @@ package com.oasisfeng.nevo.xposed.compat;
 import static org.junit.Assert.assertEquals;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
 
@@ -30,6 +37,34 @@ public class XposedHelpersTest {
 		assertEquals(null, XposedHelpers.getAdditionalInstanceField(second, "key"));
 		assertEquals("value", XposedHelpers.setAdditionalInstanceField(first, "key", null));
 		assertEquals(null, XposedHelpers.getAdditionalInstanceField(first, "key"));
+	}
+
+	@Test public void additionalFieldsRemainIsolatedAcrossNotificationThreads() throws Exception {
+		ExecutorService threads = Executors.newFixedThreadPool(8);
+		CountDownLatch start = new CountDownLatch(1);
+		List<Future<?>> tasks = new ArrayList<>();
+		try {
+			for (int thread = 0; thread < 8; thread++) {
+				final int value = thread;
+				tasks.add(threads.submit(() -> {
+					start.await();
+					List<Object> receivers = new ArrayList<>();
+					for (int i = 0; i < 200; i++) {
+						Object receiver = new Object();
+						receivers.add(receiver);
+						XposedHelpers.setAdditionalInstanceField(receiver, "thread", value);
+						assertEquals(value, XposedHelpers.getAdditionalInstanceField(receiver, "thread"));
+					}
+					for (Object receiver : receivers)
+						assertEquals(value, XposedHelpers.getAdditionalInstanceField(receiver, "thread"));
+					return null;
+				}));
+			}
+			start.countDown();
+			for (Future<?> task : tasks) task.get(30, TimeUnit.SECONDS);
+		} finally {
+			threads.shutdownNow();
+		}
 	}
 
 	private static class Parent {

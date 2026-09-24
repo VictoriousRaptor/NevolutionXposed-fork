@@ -79,6 +79,19 @@ public class RemotePreferenceStoreTest {
 		assertEquals(Boolean.TRUE, values.get("MediaDecorator.enabled"));
 	}
 
+	@Test public void schemaThreeUpgradeKeepsMediaChoice() {
+		Map<String, Boolean> stored = new LinkedHashMap<>();
+		stored.put("WeChatDecorator.enabled", false);
+		stored.put("WeChatDecorator.image_preview", true);
+		stored.put("MediaDecorator.enabled", true);
+		Map<String, Boolean> values = RemotePreferenceStore.migratedLocalValues(stored, 3);
+
+		assertEquals(Boolean.FALSE, values.get("WeChatDecorator.enabled"));
+		assertEquals(Boolean.TRUE, values.get("WeChatDecorator.image_preview"));
+		assertEquals(Boolean.TRUE, values.get("MediaDecorator.enabled"));
+		assertEquals(Boolean.FALSE, values.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW_LARGE));
+	}
+
 	@Test public void mergeReturnsOnlyKnownKeysInStableOrder() {
 		Map<String, Boolean> local = new LinkedHashMap<>();
 		local.put("unknown", false);

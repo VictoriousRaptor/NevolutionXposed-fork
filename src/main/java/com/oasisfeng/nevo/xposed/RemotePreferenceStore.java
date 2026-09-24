@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
 import android.util.Log;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -38,18 +39,12 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 	}
 
 	private void initializeLocalDefaults() {
-		if (local.getInt(SCHEMA_VERSION_KEY, 0) >= CURRENT_SCHEMA_VERSION) return;
+		int schemaVersion = local.getInt(SCHEMA_VERSION_KEY, 0);
+		if (schemaVersion >= CURRENT_SCHEMA_VERSION) return;
+		Map<String, Boolean> values = migratedLocalValues(readKnownBooleans(local), schemaVersion);
 		SharedPreferences.Editor editor = local.edit();
-		if (!local.contains("WeChatDecorator.enabled")) {
-			editor.putBoolean("WeChatDecorator.enabled", true);
-		}
-		if (!local.contains(KEY_IMAGE_PREVIEW)) {
-			editor.putBoolean(KEY_IMAGE_PREVIEW, false);
-		}
-		if (!local.contains(KEY_IMAGE_PREVIEW_LARGE)) {
-			editor.putBoolean(KEY_IMAGE_PREVIEW_LARGE, false);
-		}
-		editor.putBoolean("MediaDecorator.enabled", false);
+		for (Map.Entry<String, Boolean> entry : values.entrySet())
+			editor.putBoolean(entry.getKey(), entry.getValue());
 		editor.remove("WeChatDecorator.miui_fix");
 		editor.remove(OBSOLETE_MIUI_KEY);
 		editor.putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
@@ -88,6 +83,12 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 			merged.put(key, value != null ? value : defaultValue(key));
 		}
 		return merged;
+	}
+
+	static Map<String, Boolean> migratedLocalValues(Map<String, Boolean> stored, int schemaVersion) {
+		Map<String, Boolean> values = merge(stored, Collections.emptyMap());
+		applySchemaMigration(values, schemaVersion);
+		return values;
 	}
 
 	private static void synchronize(SharedPreferences local, SharedPreferences remote) {
