@@ -8,17 +8,20 @@ import java.util.Map;
 import java.util.WeakHashMap;
 
 public final class XposedHelpers {
-	private static final Map<Object, Map<String, Object>> ADDITIONAL_FIELDS = new WeakHashMap<>();
-	/** Striped monitors so notification threads do not serialize on a single global lock. */
-	private static final Object[] FIELD_LOCKS = new Object[16];
+	/** Each monitor owns its own weak map, so unrelated notification threads can run concurrently. */
+	private static final FieldStripe[] FIELD_STRIPES = new FieldStripe[16];
 	static {
-		for (int i = 0; i < FIELD_LOCKS.length; i++) FIELD_LOCKS[i] = new Object();
+		for (int i = 0; i < FIELD_STRIPES.length; i++) FIELD_STRIPES[i] = new FieldStripe();
+	}
+
+	private static final class FieldStripe {
+		final Map<Object, Map<String, Object>> fields = new WeakHashMap<>();
 	}
 
 	private XposedHelpers() {}
 
-	private static Object fieldLock(Object receiver) {
-		return FIELD_LOCKS[(System.identityHashCode(receiver) >>> 1) % FIELD_LOCKS.length];
+	private static FieldStripe fieldStripe(Object receiver) {
+		return FIELD_STRIPES[(System.identityHashCode(receiver) >>> 1) % FIELD_STRIPES.length];
 	}
 
 	public static Class<?> findClass(String className, ClassLoader classLoader) {
@@ -111,26 +114,28 @@ public final class XposedHelpers {
 	}
 
 	public static Object getAdditionalInstanceField(Object receiver, String key) {
-		synchronized (fieldLock(receiver)) {
-			Map<String, Object> fields = ADDITIONAL_FIELDS.get(receiver);
+		FieldStripe stripe = fieldStripe(receiver);
+		synchronized (stripe) {
+			Map<String, Object> fields = stripe.fields.get(receiver);
 			return fields == null ? null : fields.get(key);
 		}
 	}
 
 	public static Object setAdditionalInstanceField(Object receiver, String key, Object value) {
-		synchronized (fieldLock(receiver)) {
-			Map<String, Object> fields = ADDITIONAL_FIELDS.get(receiver);
+		FieldStripe stripe = fieldStripe(receiver);
+		synchronized (stripe) {
+			Map<String, Object> fields = stripe.fields.get(receiver);
 			Object previous = fields == null ? null : fields.get(key);
 			if (value == null) {
 				if (fields != null) {
 					fields.remove(key);
-					if (fields.isEmpty()) ADDITIONAL_FIELDS.remove(receiver);
+					if (fields.isEmpty()) stripe.fields.remove(receiver);
 				}
 				return previous;
 			}
 			if (fields == null) {
 				fields = new HashMap<>();
-				ADDITIONAL_FIELDS.put(receiver, fields);
+				stripe.fields.put(receiver, fields);
 			}
 			fields.put(key, value);
 			return previous;
