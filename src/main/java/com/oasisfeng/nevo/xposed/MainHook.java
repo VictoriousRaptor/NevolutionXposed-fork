@@ -326,7 +326,10 @@ public class MainHook extends XposedModule {
 					Notification n = (Notification)param.args[2];
 					imageNotificationTrace("notify_before", id, n);
 					if (BuildConfig.DEBUG) Log.d(TAG, "before apply " + nm + " " + tag + " " + id);
-					applyLocally(nm, tag, id, n);
+					if (applyLocally(nm, tag, id, n) == com.oasisfeng.nevo.sdk.Decorating.StopPost) {
+						param.setResult(null);
+						return;
+					}
 					imageNotificationTrace("notify_decorated", id, n);
 					// 用 Notification.Builder 重建通知，确保 actions 被正确序列化
 					if (BuildConfig.DEBUG) Log.d(TAG, "after apply, actions=" + (n.actions != null ? n.actions.length : "null"));
@@ -381,19 +384,21 @@ public class MainHook extends XposedModule {
 	}
 
 	// TODO
-	private void applyLocally(NotificationManager nm, String tag, int id, Notification n) {
+	private com.oasisfeng.nevo.sdk.Decorating applyLocally(NotificationManager nm, String tag, int id, Notification n) {
+		if (n.extras.getBoolean(WeChatDecorator.EXTRA_SUPPRESSED_RECALL))
+			return com.oasisfeng.nevo.sdk.Decorating.StopPost;
 		if (NevoDecoratorService.getAppContext() == null) {
 			if (BuildConfig.DEBUG) Log.d(TAG, "applyLocally: application context is not ready; skipping notification");
-			return;
+			return com.oasisfeng.nevo.sdk.Decorating.Unprocessed;
 		}
 		if (XposedHelpers.getAdditionalInstanceField(n, "pre-applied") != null) {
 			if (BuildConfig.DEBUG) Log.d(TAG, "skip " + n);
-			return;
+			return com.oasisfeng.nevo.sdk.Decorating.Unprocessed;
 		}
 		XposedHelpers.setAdditionalInstanceField(n, "pre-applied", true);
 		LocalDecorator.setNM(nm);
 		LocalDecorator wechat = this.wechat.getLocalDecorator("com.tencent.mm");
-		if (!wechat.isDisabled()) wechat.apply(nm, tag, id, n);
+		return wechat.isDisabled() ? com.oasisfeng.nevo.sdk.Decorating.Unprocessed : wechat.apply(nm, tag, id, n);
 	}
 
 	/** True when the notification carries an inline reply input, i.e. the rebuild workaround is needed. */

@@ -111,3 +111,35 @@ NX_REPLY stage=native_pending_intent_callback notificationId=-1149184867 resultC
 The repeatable, one-pass procedure for the next WeChat release (device
 collection, profile probe, install, verification and recording) lives in
 `docs/wechat-version-adaptation-playbook.md`.
+
+## 应用内回复轮次的离线映射（2026-09-27）
+
+以下是新增轮次功能的**离线源码证据**，不属于上文已经实测送达的通知栏回复结果。源 APK 是本文开头记录的中国版 8.0.78/3180 `base.apk`（SHA-256 `ff507d8ca93d735342a5e29d374beadce166e1c3cba8302f655f0c194331fb3b`）；本地 JADX 摘录位于 `.debug-artifacts/device/20260913-wechat-8078-3180/e9.java:936`。
+
+| 依赖点 | 离线核对结果 |
+| --- | --- |
+| 状态更新入口 | `com.tencent.mm.storage.e9.t1(int): void`，先调用父类状态更新方法 |
+| 发送成功分支 | `z0(): int == 1`、未命中 `Z2()/L2()/E2(): boolean` 且 `M0(): int == 2` 时构造 `SendMsgSuccessEvent` |
+| 发送失败分支 | 同一方向与排除条件下，`M0(): int == 5` 时构造 `SendMsgFailEvent` |
+| 会话与匿名身份 | `N0(): String`、`getMsgId(): long`、`getCreateTime(): long` |
+
+`WeChatAppReplyEvents` 仅在版本名为 8.0.78 **且**版本号为 3180、完整方法签名校验通过时安装该钩子；回调不读取回复正文。钩子安装、成功/失败事件时序与下一条来信后的轮次切换均**尚未在真实微信上验证**。详见[版本适配手册](wechat-version-adaptation-playbook.md)。
+
+## 撤回 hook 与回复资格变更（2026-09-30）
+
+源 APK 仍为上述中国版 8.0.78/3180，SHA-256 `ff507d8ca93d735342a5e29d374beadce166e1c3cba8302f655f0c194331fb3b`。以下位置相对于 `.debug-artifacts/`，记录运行时原名，不能采用 JADX 生成别名：
+
+| 依赖/证据 | 运行时完整映射与核对位置 |
+| --- | --- |
+| 通知发布 BEFORE hook | `com.tencent.mm.booter.notification.NotificationItem.a(android.content.Context): void`；原始字段 `f: android.app.Notification`、`h: java.lang.String`、`i: long`；`recall-8078/sources/com/tencent/mm/booter/notification/NotificationItem.java` |
+| 服务端 ID 来源 | `recall-map-8078/sources/com/tencent/mm/booter/notification/x.java` 将 `com.tencent.mm.storage.e9.F0(): long` 传入 `m0.a(...)`，同目录 `m0.java` 写入 `NotificationItem.i`；不能与本地 `getMsgId()` 混用 |
+| 撤回事件 BEFORE hook | `com.tencent.mm.sdk.event.IEvent.e(): boolean`，仅处理直接继承 `IEvent` 的 `com.tencent.mm.autogen.events.RevokeMsgEvent`；见 `recall-map-8078/sources/` 下对应类 |
+| 原始字段与 accessor | `RevokeMsgEvent.g: fm.ks`、`fm.ks.c: com.tencent.mm.storage.e9`、`e9.N0(): String`、`e9.F0(): long`；payload 见 `recall-data-8078/sources/fm/ks.java`，消息类另见已有 `device/20260913-wechat-8078-3180/e9.java` 摘录 |
+
+版本名 **且** 版本号匹配并通过全部字段/方法/父类校验后才安装。钩子在微信主进程 `Application.onCreate` 后、图片预览开关判断前安装；模块禁用时不安装，8.0.78 图片事件不支持也不影响撤回门禁。`source=recall_ready` 仅证明安装；未知版本、签名失败、其他通知入口或异步事件路径不承诺精确裁剪。
+
+此次回复资格统一为 ticker 含位置至少为 1 的英文冒号，不依赖原生回复对象存在。原生回复优先；合成回退还要求点击目标、已知会话 key 和可用接收器画像，并转发 `key_username`。这修正了“模块合成路径无法提供用户名”的旧结论，不代表新合成路径已实测。SystemUI 的轮次重置仅接受点击、手动清除、全部清除；微信本地 notify hook 遵守 `StopPost`。
+
+首次构建时的证据为离线源码核对、本地 106 项单元测试及签名 Debug/仪器 APK 构建；当时 33 项仪器用例只编译未执行，未安装或操作真机。本次撤回、合成回复与 SystemUI 清理的真实微信行为**尚未验收**，不能沿用本文历史原生回复的通过结果。无精确服务端 ID 的消息（含只有模块 UUID 的本人通知回复）保留，通知清除后不复活和图片文字回退仍待微信端设备验证。详见[适配手册](wechat-version-adaptation-playbook.md)、[撤回专题](wechat-recall-history.md)及[项目修改计划](project-modification-plan.md)。
+
+同日后续验证：按用户授权在 PJZ110 / Android 16 安装同 release 证书的 Debug 与测试 APK，模块 framework 仪器结果为 **33/33 通过**，微信和 SystemUI 未重启。测试发现普通进程缺少 Xposed API 时合成资格检查会抛出 `NoClassDefFoundError`，现已保守关闭合成入口并保留原生路径；本测试进程使用 `--no-hidden-api-checks` 访问 framework 隐藏字段，不修改全局设置。版本映射和微信 hook 签名未改变。本结果取代上段“仪器仅编译”的执行状态，仍不代表 8.0.78 真实微信 hook/收发/撤回已验收，详见[项目执行记录](project-modification-plan.md)。

@@ -29,7 +29,6 @@ import java.io.File;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Set;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -42,7 +41,6 @@ import androidx.core.app.Person;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.drawable.IconCompat;
 
-import static android.app.Notification.EXTRA_REMOTE_INPUT_HISTORY;
 import static android.app.Notification.EXTRA_TEXT;
 import static android.app.PendingIntent.FLAG_MUTABLE;
 import static android.app.PendingIntent.FLAG_UPDATE_CURRENT;
@@ -108,12 +106,14 @@ class MessagingBuilder {
 	@Nullable MessagingStyle buildFromArchive(final Conversation conversation, final Notification n, final CharSequence title, final List<Notification> archive) {
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
 		appendKnownMessages(messaging, conversation, n, archive);
-		return messaging.getMessages().isEmpty() ? null : messaging;
+		return messaging.getMessages().isEmpty() && !n.extras.getBoolean(NotificationMessages.RECALL_PROMPT)
+				? null : messaging;
 	}
 	/**
 	 * 从车载扩展信息重建会话
 	 */
 	@Nullable MessagingStyle buildFromExtender(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
+		if (!WeChatMessage.isChat(n.tickerText)) return buildFromArchive(conversation, n, title, archive);
 		final Notification.CarExtender extender = new Notification.CarExtender(n);
 		final CarExtender.UnreadConversation convs = extender.getUnreadConversation();
 		if (convs == null) {
@@ -125,6 +125,11 @@ class MessagingBuilder {
 		if (n.when <= 0 && latest_timestamp > 0) n.when = conversation.timestamp = latest_timestamp;
 
 		final PendingIntent on_reply = convs.getReplyPendingIntent();
+		if (on_reply == null) {
+			if (convs.getReadPendingIntent() != null) mMarkReadPendingIntents.put(id, convs.getReadPendingIntent());
+			MessagingStyle fromActions = buildFromActions(conversation, id, n, title, archive);
+			return fromActions != null ? fromActions : buildWithSyntheticReply(conversation, id, n, title, archive);
+		}
 		if (conversation.key == null) {
 			try {
 				if (on_reply != null) on_reply.send(mContext, 0, null, (p, intent, r, d, b) -> {
@@ -144,11 +149,10 @@ class MessagingBuilder {
 		if (on_read != null) mMarkReadPendingIntents.put(id, on_read);	// Mapped by evolved key,
 
 		final List<Action> actions = new ArrayList<>();
-		// 回复：使用 RemoteInput 内联回复（修改版 HyperIsland 已保留 RemoteInput）
+		// Forward standard notification RemoteInput results through WeChat's original action.
 		final RemoteInput remote_input;
 		if (SDK_INT >= N && on_reply != null && (remote_input = convs.getRemoteInput()) != null) {
-			final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
-			final PendingIntent proxy = proxyDirectReply(id, n, on_reply, remote_input, input_history, null);
+			final PendingIntent proxy = proxyDirectReply(id, on_reply, remote_input, null);
 			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(remote_input.getResultKey()).addExtras(remote_input.getExtras())
 					.setAllowFreeFormInput(true).setLabel(actionReply);
 
@@ -162,8 +166,7 @@ class MessagingBuilder {
 			// inventing a broadcast to an obfuscated receiver.
 			final RemoteInput fallbackRemoteInput = new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY)
 					.setAllowFreeFormInput(true).setLabel(actionReply).build();
-			final PendingIntent proxy = proxyDirectReply(id, n, on_reply, fallbackRemoteInput,
-					n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY), null);
+			final PendingIntent proxy = proxyDirectReply(id, on_reply, fallbackRemoteInput, null);
 			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, proxy)
 					.addRemoteInput(fallbackRemoteInput)
 					.setAllowGeneratedReplies(true);
@@ -191,6 +194,7 @@ class MessagingBuilder {
 	}
 
 	@Nullable private MessagingStyle buildFromActions(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
+		if (!WeChatMessage.isChat(n.tickerText)) return null;
 		final Action[] actions = n.actions;
 		if (actions == null) return null;
 
@@ -230,7 +234,6 @@ class MessagingBuilder {
 		appendKnownMessages(messaging, conversation, n, archive);
 
 		final List<Action> newActions = new ArrayList<>();
-		final CharSequence[] input_history = n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY);
 
 		if (n.extras.containsKey(WeChatDecorator.EXTRA_PICTURE_PATH)) {
 			final Intent intent = new Intent(ACTION_ZOOM).setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null));
@@ -238,9 +241,9 @@ class MessagingBuilder {
 					PendingIntent.getBroadcast(mContext, 0, intent.setPackage(mContext.getPackageName()), pendingIntentFlags()));
 			newActions.add(zoom_action.build());
 		}
-		// 回复：使用 RemoteInput 内联回复（修改版 HyperIsland 已保留 RemoteInput）
+		// Forward standard notification RemoteInput results through WeChat's original action.
 		if (onReply != null && replyRemoteInput != null) {
-			final PendingIntent proxy = proxyDirectReply(id, n, onReply, replyRemoteInput, input_history, null);
+			final PendingIntent proxy = proxyDirectReply(id, onReply, replyRemoteInput, null);
 			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(replyRemoteInput.getResultKey())
 					.addExtras(replyRemoteInput.getExtras()).setAllowFreeFormInput(true).setLabel(actionReply);
 			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, proxy)
@@ -254,14 +257,12 @@ class MessagingBuilder {
 	}
 
 	/** Intercept the PendingIntent in RemoteInput to update the notification with replied message upon success. */
-	private PendingIntent proxyDirectReply(final int id, final Notification notification, final PendingIntent on_reply, final RemoteInput remote_input,
-										   final @Nullable CharSequence[] input_history, final @Nullable String mention_prefix) {
+	private PendingIntent proxyDirectReply(final int id, final PendingIntent on_reply, final RemoteInput remote_input,
+			final @Nullable String mention_prefix) {
 		final Intent proxy = new Intent(mention_prefix != null ? ACTION_MENTION : ACTION_REPLY)		// Separate action to avoid PendingIntent overwrite.
 				.putExtra(EXTRA_REPLY_ACTION, on_reply).putExtra(EXTRA_RESULT_KEY, remote_input.getResultKey())
 				.setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null));
 		if (mention_prefix != null) proxy.putExtra(EXTRA_REPLY_PREFIX, mention_prefix);
-		if (SDK_INT >= N && input_history != null)
-			proxy.putCharSequenceArrayListExtra(EXTRA_REMOTE_INPUT_HISTORY, new ArrayList<>(Arrays.asList(input_history)));
 		return PendingIntent.getBroadcast(mContext, 0, proxy.setPackage(mContext.getPackageName()), pendingIntentFlags());
 	}
 
@@ -271,6 +272,7 @@ class MessagingBuilder {
 	 * (stickers, video, files, links, …) but which should still be replyable from the notification.
 	 */
 	boolean attachReplyAction(final int id, final Notification n) {
+		if (!WeChatMessage.isChat(n.tickerText)) return false;
 		final Notification.CarExtender.UnreadConversation convs = new Notification.CarExtender(n).getUnreadConversation();
 		if (convs == null) {
 			logReply("action_media_reply_skipped", "notificationId=" + id + " reason=no_car_conversation");
@@ -291,8 +293,7 @@ class MessagingBuilder {
 			replyInput = new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY)
 					.setAllowFreeFormInput(true).setLabel(actionReply).build();
 		}
-		final PendingIntent proxy = proxyDirectReply(id, n, onReply, replyInput,
-				n.extras.getCharSequenceArray(EXTRA_REMOTE_INPUT_HISTORY), null);
+		final PendingIntent proxy = proxyDirectReply(id, onReply, replyInput, null);
 		final Action.Builder replyAction = new Action.Builder(null, actionReply, proxy)
 				.addRemoteInput(replyInput).setAllowGeneratedReplies(true);
 		if (SDK_INT >= P) replyAction.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
@@ -331,25 +332,24 @@ class MessagingBuilder {
 		if (reply_prefix != null) {
 			text = reply_prefix + input;
 			results.putCharSequence(result_key, text);
-			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder(result_key).build() }, proxy_intent, results);
 		} else text = input;
 		final String part = data.getSchemeSpecificPart();
 		final long replyTimestamp = System.currentTimeMillis();
 		final String replyId = NotificationMessages.newReplyId();
+		long replyReservation = 0;
 		try {
 			final Intent input_data = addTargetPackageAndWakeUp(reply_action);
-			input_data.setClipData(proxy_intent.getClipData());
-			// 关键修复：将 RemoteInput 结果附加到发送给 WeChat 的 Intent
-			// 标准系统 UI 会自动处理，但 HyperIsland 等第三方灵动岛模块不会
-			if (results != null) {
-				RemoteInput.addResultsToIntent(
-					new RemoteInput[]{ new RemoteInput.Builder(result_key).build() },
-					input_data, results);
-				logReply("native_remote_input_attached", "resultKey=" + result_key + " inputLength=" + text.length());
-			}
+			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder(result_key).build() }, input_data, results);
+			logReply("native_remote_input_attached", "resultKey=" + result_key + " inputLength=" + text.length());
 
+			replyReservation = mController.beginNotificationReply(Integer.parseInt(part));
+			final long reservation = replyReservation;
 			reply_action.send(mContext, 0, input_data, (pendingIntent, intent, _result_code, _result_data, _result_extras) -> {
 				logReply("native_pending_intent_callback", "notificationId=" + part + " resultCode=" + _result_code);
+				if (_result_code != 0) {
+					mController.abortNotificationReply(reservation);
+					return;
+				}
 				if (SDK_INT >= N) {
 					final int id = Integer.parseInt(part);
 					mController.recastNotification(id, n -> {
@@ -362,9 +362,11 @@ class MessagingBuilder {
 				}
 			}, null);
 		} catch (final PendingIntent.CanceledException e) {
+			mController.abortNotificationReply(replyReservation);
 			Log.w(TAG, "NX_REPLY stage=native_dispatch_failed reason=pending_intent_cancelled notificationId=" + part, e);
 			abortBroadcast();
 		} catch (final RuntimeException e) {
+			mController.abortNotificationReply(replyReservation);
 			Log.w(TAG, "NX_REPLY stage=native_dispatch_failed reason=runtime notificationId=" + part, e);
 			abortBroadcast();
 		} finally {
@@ -424,7 +426,7 @@ class MessagingBuilder {
 		else extras.remove(EXTRA_CONVERSATION_TITLE);
 		final List<Message> messages = messaging.getMessages();
 		// Log.d(TAG, "messages " + messages.size());
-		if (! messages.isEmpty()) extras.putParcelableArray(EXTRA_MESSAGES, getBundleArrayForMessages(messages));
+		extras.putParcelableArray(EXTRA_MESSAGES, getBundleArrayForMessages(messages));
 		//if (! mHistoricMessages.isEmpty()) extras.putParcelableArray(Notification.EXTRA_HISTORIC_MESSAGES, MessagingBuilder.getBundleArrayForMessages(mHistoricMessages));
 		extras.putBoolean(EXTRA_IS_GROUP_CONVERSATION, messaging.isGroupConversation());
 	}
@@ -458,7 +460,11 @@ class MessagingBuilder {
 		return user.toAndroidPerson();
 	}
 
-	interface Controller { void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies); }
+	interface Controller {
+		void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies);
+		default long beginNotificationReply(int id) { return 0; }
+		default void abortNotificationReply(long reservation) {}
+	}
 
 	MessagingBuilder(final Context context, final Context packageContext, /* final SharedPreferences preferences,  */final Controller controller) {
 		mContext = context;
@@ -629,6 +635,7 @@ class MessagingBuilder {
 	}
 
 	@Nullable private MessagingStyle buildWithSyntheticReply(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
+		if (!WeChatMessage.isChat(n.tickerText)) return buildFromArchive(conversation, n, title, archive);
 		final PendingIntent contentIntent = n.contentIntent;
 		if (contentIntent == null) {
 			if (BuildConfig.DEBUG) Log.d(TAG, "No contentIntent for synthetic reply");
@@ -640,13 +647,15 @@ class MessagingBuilder {
 		// 用通知里已有的消息、归档通知或当前文本重建消息列表，并补上输入历史里的用户回复
 		appendKnownMessages(messaging, conversation, n, archive);
 
-		if (!MainHook.isSyntheticReplyAvailable()) {
-			logReply("action_synthetic_skipped", "notificationId=" + id + " reason=wechat_receiver_unavailable");
+		if (!WeChatMessage.canUseSyntheticReply(n.tickerText, contentIntent != null && !TextUtils.isEmpty(conversation.key),
+				isSyntheticReplyAvailable())) {
+			logReply("action_synthetic_skipped", "notificationId=" + id + " reason=unverified_dispatch_target");
 			return messaging;
 		}
 
 		// Reply is only exposed when the target receiver was verified in this process.
 		final Intent replyIntent = new Intent(ACTION_SYNTHETIC_REPLY)
+				.putExtra(KEY_USERNAME, conversation.key)
 				.setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null))
 				.setPackage(mContext.getPackageName());
 		final PendingIntent replyPendingIntent = PendingIntent.getBroadcast(mContext, id, replyIntent, pendingIntentFlags());
@@ -665,10 +674,22 @@ class MessagingBuilder {
 		return messaging;
 	}
 
+	private static boolean isSyntheticReplyAvailable() {
+		try {
+			return MainHook.isSyntheticReplyAvailable();
+		} catch (final NoClassDefFoundError unavailable) {
+			// Ordinary module/test processes do not have the compile-only Xposed API.
+			// They can rebuild messages and forward native replies, but cannot dispatch synthetic ones.
+			logReply("action_synthetic_skipped", "reason=xposed_api_unavailable");
+			return false;
+		}
+	}
+
 	private final BroadcastReceiver mSyntheticReplyReceiver = new BroadcastReceiver() { @Override public void onReceive(final Context context, final Intent proxy_intent) {
 		final Uri data = proxy_intent.getData();
 		final Bundle results = RemoteInput.getResultsFromIntent(proxy_intent);
-		if (data == null || results == null) {
+		final String talker = proxy_intent.getStringExtra(KEY_USERNAME);
+		if (data == null || results == null || TextUtils.isEmpty(talker)) {
 			logReply("synthetic_drop", "reason=missing_data_or_results");
 			return;
 		}
@@ -688,10 +709,12 @@ class MessagingBuilder {
 		}
 		logReply("synthetic_receiver", "notificationId=" + notif_id + " inputLength=" + reply_text.length());
 		final boolean dispatched;
+		final long replyReservation = mController.beginNotificationReply(notif_id);
 		try {
 			// 直接调用 MMAutoMessageReplyReceiver.onReceive，绕过广播系统
 			final Intent reply_intent = new Intent(MainHook.WECHAT_AUTO_REPLY_ACTION);
 			reply_intent.setPackage("com.tencent.mm");
+			reply_intent.putExtra(KEY_USERNAME, talker);
 			reply_intent.putExtra("reply_content", reply_text);
 			reply_intent.putExtra("notification_id", notif_id);
 			// 设置 RemoteInput 结果
@@ -700,10 +723,14 @@ class MessagingBuilder {
 			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY).build() }, reply_intent, remoteInputResults);
 			dispatched = MainHook.invokeMMAutoReply(context, reply_intent);
 		} catch (final RuntimeException e) {
+			mController.abortNotificationReply(replyReservation);
 			Log.w(TAG, "NX_REPLY stage=synthetic_dispatch_failed notificationId=" + notif_id, e);
 			return;
 		}
-		if (!dispatched) return;
+		if (!dispatched) {
+			mController.abortNotificationReply(replyReservation);
+			return;
+		}
 		logReply("synthetic_dispatched", "notificationId=" + notif_id);
 		final String finalReplyText = reply_text;
 		mController.recastNotification(notif_id, n -> {
