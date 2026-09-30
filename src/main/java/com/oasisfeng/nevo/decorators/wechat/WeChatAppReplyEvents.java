@@ -37,6 +37,12 @@ final class WeChatAppReplyEvents {
             if ("8.0.78".equals(name) && code == 3180)
                 return new Profile("8.0.78/3180", "com.tencent.mm.storage.e9", "t1", "z0", "M0", "N0",
                         "Z2", "L2", "E2");
+            if ("8.0.77".equals(name) && code == 3160)
+                return new Profile("8.0.77/3160", "com.tencent.mm.storage.e9", "u1", "A0", "P0", "Q0",
+                        "Z2", "L2", "E2");
+            if ("8.0.77".equals(name) && code == 3141)
+                return new Profile("8.0.77/3141", "com.tencent.mm.storage.e9", "r1", "C0", "M0", "N0",
+                        "a3", "M2", "F2");
             return null;
         }
     }

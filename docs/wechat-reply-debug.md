@@ -33,6 +33,10 @@ The reply path is diagnosed in this order:
 - WeChat 8.0.78 (China build, versionCode 3180): verified and delivered, see
   `wechat-8.0.78-findings.md`.
 - WeChat 8.0.76 legacy profile: mapping preserved but not live-tested.
+- WeChat 8.0.77: exact 3141 and 3160 profiles have distinct reply gates, image,
+  app-send and recall descriptors. The installed 3141 APK passed 40 descriptor
+  checks and all five hook paths reported ready. Actual message behavior and
+  3160 device acceptance are pending; see `wechat-8.0.77-findings.md`.
 
 ## Reply button disappears after notifications accumulate
 

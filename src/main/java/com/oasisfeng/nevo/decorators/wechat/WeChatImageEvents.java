@@ -28,14 +28,15 @@ final class WeChatImageEvents {
 		String stage = "version";
 		try {
 			PackageInfo info = context.getPackageManager().getPackageInfo("com.tencent.mm", 0);
-			if (!"8.0.72".equals(info.versionName) || info.versionCode != 3085) {
+			WeChatImageProfile profile = WeChatImageProfile.forVersion(info.versionName, info.versionCode);
+			if (profile == null) {
 				log("events_unavailable", "reason=unsupported_version"); return;
 			}
 			stage = "classes";
-			Class<?> state = Class.forName("v65.z", false, loader);
-			Class<?> simple = Class.forName("yh3.f", false, loader);
-			Class<?> msg = Class.forName("com.tencent.mm.storage.f9", false, loader);
-			Class<?> flow = Class.forName("b80.m", false, loader);
+			Class<?> state = Class.forName(profile.state, false, loader);
+			Class<?> simple = Class.forName(profile.simple, false, loader);
+			Class<?> msg = Class.forName(profile.message, false, loader);
+			Class<?> flow = Class.forName(profile.flow, false, loader);
 			stage = "state_accessor";
 			Method stateGet = method(state, "d", Object.class, String.class);
 			stage = "message_base";
@@ -60,20 +61,20 @@ final class WeChatImageEvents {
 			Method longAt = method(simple, "getLong", long.class, int.class);
 			Method intAt = method(simple, "getInteger", int.class, int.class);
 			stage = "message_methods";
-			Method talker = method(msg, "O0", String.class);
+			Method talker = method(msg, profile.talker, String.class);
 			Method id = method(msg, "getMsgId", long.class);
 			Method created = method(msg, "getCreateTime", long.class);
 			Method type = method(msg, "getType", int.class);
-			Method sender = method(msg, "C0", int.class);
-			Method serverId = method(msg, "I0", long.class);
+			Method sender = method(msg, profile.sender, int.class);
+			Method serverId = method(msg, profile.serverId, long.class);
 			stage = "path_methods";
-			Method pathMethod = method(Class.forName("m90.b", false, loader), "oi", String.class, msg, String.class, boolean.class);
-			realPath = method(Class.forName("com.tencent.mm.vfs.w6", false, loader), "i", String.class, String.class, boolean.class);
+			Method pathMethod = method(Class.forName(profile.pathOwner, false, loader), profile.pathMethod, String.class, msg, String.class, boolean.class);
+			realPath = method(Class.forName(profile.vfs, false, loader), "i", String.class, String.class, boolean.class);
 			stage = "pipeline_methods";
-			Class<?> action = Class.forName("y65.b", false, loader);
+			Class<?> action = Class.forName(profile.result, false, loader);
 			Method initial = method(flow, "l", action, state);
-			Method remote = method(flow, "handleDataFromRemote", action, state, Class.forName("x01.e", false, loader));
-			Method local = method(flow, "handleDataFromFile", action, state, Class.forName("p70.d", false, loader));
+			Method remote = method(flow, "handleDataFromRemote", action, state, Class.forName(profile.remote, false, loader));
+			Method local = method(flow, "handleDataFromFile", action, state, Class.forName(profile.local, false, loader));
 			stage = "hooks";
 			XC_MethodHook pipeline = new XC_MethodHook() {
 				@Override protected void afterHookedMethod(MethodHookParam param) {
@@ -92,7 +93,7 @@ final class WeChatImageEvents {
 							if (value instanceof String) paths.add(new ImageEventIndex.Path((String) value,
 									key.indexOf("hd_thumb") >= 0 ? ImagePreviewPolicy.QUALITY_HD : ImagePreviewPolicy.QUALITY_THUMBNAIL));
 						}
-						// Empirically millisecond-based in 8.0.72/3085, matching Notification.when.
+						// simplemsginfo createTime is copied from message.getCreateTime(), in milliseconds.
 						long createdMillis = ((Number) longAt.invoke(data, offset + 2)).longValue();
 						index.putRanked((String) stringAt.invoke(data, offset + 3), ((Number) longAt.invoke(data, offset)).longValue(),
 								0, createdMillis, paths, SystemClock.elapsedRealtime());
@@ -131,7 +132,7 @@ final class WeChatImageEvents {
 				}
 			});
 			available = true;
-			log("events_ready", "profile=8.0.72/3085 revision=image-events-9 scans=0 base="
+			log("events_ready", "profile=" + profile.label + " revision=image-events-10 scans=0 base="
 					+ base.getDeclaringClass().getSimpleName() + "." + base.getName());
 		} catch (Throwable failure) {
 			XposedBridge.rethrowFrameworkError(failure);

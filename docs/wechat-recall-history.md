@@ -2,6 +2,11 @@
 
 更新日期：2026-09-30。源码实现及离线映射已完成；真实微信运行验证待执行。
 
+8.0.77 新增两组精确画像：3141 为 `RevokeMsgEvent.g: en.gs`、`en.gs.c: storage.e9`，
+会话/服务端 ID 为 `N0(): String` / `J0(): long`；3160 为 `fm.fs`，对应 `Q0()` / `K0()`。
+通知发布字段、BEFORE hook 与精确 ID 语义沿用并逐项核对；3141 已确认 `recall_ready`，
+33 项框架回归通过，真实消息撤回裁剪待验收。完整证据见 [8.0.77 记录](wechat-8.0.77-findings.md)。
+
 ## 精确关联依据
 
 微信通知正文、ticker、CarExtender 消息列表没有稳定的逐条消息 ID。仅解析“撤回了一条消息”不能确定撤回目标；旧实现把提示作为当前来信，经 `NotificationMessages.rebuild()` 与旧规范化快照合并，因而保留 B 并追加 C。

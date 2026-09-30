@@ -17,18 +17,35 @@ final class WeChatRecallEvents {
     static final String VERIFIED_KEY = "nevo.wechat.verifiedNotificationKey";
     private final RecallIndex index = new RecallIndex();
 
+    static final class Profile {
+        final String message, payload, serverId, talker;
+        Profile(String message, String payload, String serverId, String talker) {
+            this.message = message; this.payload = payload; this.serverId = serverId; this.talker = talker;
+        }
+        static Profile forVersion(String name, long code) {
+            if ("8.0.72".equals(name) && code == 3085)
+                return new Profile("com.tencent.mm.storage.f9", "pm.ds", "I0", "O0");
+            if ("8.0.78".equals(name) && code == 3180)
+                return new Profile("com.tencent.mm.storage.e9", "fm.ks", "F0", "N0");
+            if ("8.0.77".equals(name) && code == 3160)
+                return new Profile("com.tencent.mm.storage.e9", "fm.fs", "K0", "Q0");
+            if ("8.0.77".equals(name) && code == 3141)
+                return new Profile("com.tencent.mm.storage.e9", "en.gs", "J0", "N0");
+            return null;
+        }
+    }
+
     static String messageClass(String name, long code) {
-        if ("8.0.72".equals(name) && code == 3085) return "com.tencent.mm.storage.f9";
-        if ("8.0.78".equals(name) && code == 3180) return "com.tencent.mm.storage.e9";
-        return null;
+        Profile profile = Profile.forVersion(name, code);
+        return profile == null ? null : profile.message;
     }
 
     void install(Context context, ClassLoader loader, Listener listener) {
         String stage = "version";
         try {
             PackageInfo info = context.getPackageManager().getPackageInfo(WeChatDecorator.WECHAT_PACKAGE, 0);
-            String messageName = messageClass(info.versionName, info.versionCode);
-            if (messageName == null) { log("unavailable", "reason=unsupported_version"); return; }
+            Profile profile = Profile.forVersion(info.versionName, info.versionCode);
+            if (profile == null) { log("unavailable", "reason=unsupported_version"); return; }
             stage = "signature";
             Class<?> item = Class.forName("com.tencent.mm.booter.notification.NotificationItem", false, loader);
             Field notification = field(item, "f", Notification.class);
@@ -37,13 +54,13 @@ final class WeChatRecallEvents {
             Field itemServerId = field(item, "i", long.class);
             Method publishNotification = method(item, "a", void.class, Context.class);
             Class<?> event = Class.forName("com.tencent.mm.autogen.events.RevokeMsgEvent", false, loader);
-            Class<?> payload = Class.forName("8.0.72".equals(info.versionName) ? "pm.ds" : "fm.ks", false, loader);
+            Class<?> payload = Class.forName(profile.payload, false, loader);
             Field eventData = field(event, "g", payload);
-            Class<?> message = Class.forName(messageName, false, loader);
+            Class<?> message = Class.forName(profile.message, false, loader);
             Field recalledMessage = field(payload, "c", message);
             // Read the very same accessor passed to NotificationTools, not a guessed field.
-            Method serverId = method(message, "8.0.72".equals(info.versionName) ? "I0" : "F0", long.class);
-            Method talker = method(message, "8.0.72".equals(info.versionName) ? "O0" : "N0", String.class);
+            Method serverId = method(message, profile.serverId, long.class);
+            Method talker = method(message, profile.talker, String.class);
             Class<?> eventBase = Class.forName("com.tencent.mm.sdk.event.IEvent", false, loader);
             if (event.getSuperclass() != eventBase) throw new IllegalStateException("Unexpected event base");
             Method publishEvent = method(eventBase, "e", boolean.class);
