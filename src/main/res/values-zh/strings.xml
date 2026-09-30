@@ -49,7 +49,7 @@
 	<string name="decorator_wechat_image_preview_title">通知内显示图片</string>
 	<string name="decorator_wechat_image_preview_description">收到图片时在通知里直接显示图片，而不是 [图片]。开启或关闭后需要重启微信进程；关闭时保持微信原始的 [图片] 提示。</string>
 	<string name="decorator_wechat_image_preview_large_title">主动获取普通大图</string>
-	<string name="decorator_wechat_image_preview_large_description">向微信请求压缩后的普通大图，最多等待 5 秒；不会请求原图，但微信下载任务提交后可能继续在后台完成。修改后需要重启微信进程。</string>
+	<string name="decorator_wechat_image_preview_large_description">仅在“通知内显示图片”也已开启、微信版本受支持且本地图片未达到预览要求时，才请求微信下载普通压缩图。最多等待 5 秒获取更清晰图片；超时后使用当前最佳图片，无可用图片时保留原通知。不会请求原图；已提交的微信下载任务可能继续在后台完成。修改后需要重启微信进程。</string>
 	<string name="self_display_name">我</string>
 	<string name="action_reply">回复</string>
 	<string name="action_zoom">缩放</string>
