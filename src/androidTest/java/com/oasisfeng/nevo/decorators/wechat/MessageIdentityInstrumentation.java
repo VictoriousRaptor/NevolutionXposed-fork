@@ -26,9 +26,26 @@ import java.util.List;
 
 /** Framework-only instrumentation runner: no test-library download or host WeChat is required. */
 public final class MessageIdentityInstrumentation extends Instrumentation {
-    @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); start(); }
+    private boolean verifyWeChat;
+    @Override public void onCreate(Bundle arguments) {
+        super.onCreate(arguments);
+        verifyWeChat = arguments != null && "true".equals(arguments.getString("verify_wechat_profiles"));
+        start();
+    }
 
     @Override public void onStart() {
+        if (verifyWeChat) {
+            Bundle result = new Bundle();
+            try {
+                int checks = WeChatDescriptorChecks.verify(getTargetContext());
+                result.putString("stream", "PASS installed WeChat descriptors: " + checks + " checks\n");
+                finish(Activity.RESULT_OK, result);
+            } catch (Throwable failure) {
+                result.putString("stream", "FAIL installed WeChat descriptors: " + failure + "\n");
+                finish(Activity.RESULT_CANCELED, result);
+            }
+            return;
+        }
         com.oasisfeng.nevo.sdk.NevoDecoratorService.setAppContext(getTargetContext());
         String[] names = { "personAndAttachmentRoundTrip", "staleTickerAndCarHistory", "unknownAndGroupNames",
                 "replyThenIncoming", "repeatedRebuildAndPreview", "untrustedMissingSender", "reusedNotificationId",
