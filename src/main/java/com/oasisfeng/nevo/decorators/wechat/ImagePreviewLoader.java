@@ -72,6 +72,21 @@ final class ImagePreviewLoader {
 
 	static boolean isPreview(Notification n) { return n.extras.getBoolean(READY); }
 
+	/** A recalled message must not leave a picture or allow its pending worker to publish again. */
+	synchronized void discard(String tag, int id, Notification notification) {
+		String key = id + ":" + tag;
+		Request request = pending.remove(key);
+		if (request != null) {
+			if (request.future != null) request.future.cancel(false);
+			largePreview.cancel(request.token);
+		}
+		previews.remove(key);
+		notification.extras.remove(TOKEN);
+		notification.extras.remove(READY);
+		notification.extras.remove(Notification.EXTRA_PICTURE);
+		notification.extras.putString(Notification.EXTRA_TEMPLATE, NevoDecoratorService.TEMPLATE_MESSAGING);
+	}
+
 	/** Resolved lazily: WeChat answers the reply-intent probe asynchronously, shortly after the notification is rebuilt. */
 	interface TalkerSource { String talker(); }
 

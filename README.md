@@ -87,6 +87,7 @@ src/main/java/com/oasisfeng/nevo/
 
 ## 文档
 
+- [项目全局修改计划](docs/project-modification-plan.md)：当前后续工作的顺序、范围与验收条件。
 - [微信版本适配手册](docs/wechat-version-adaptation-playbook.md)：微信新版本的一次性适配 Runbook、版本敏感点总表与验收矩阵。
 - [微信通知回复调试说明](docs/wechat-reply-debug.md)：回复链路的诊断阶段、日志规范与隐私红线。
 - [CI 与发布配置](docs/ci-release.md)：签名密钥与 Release 流程。

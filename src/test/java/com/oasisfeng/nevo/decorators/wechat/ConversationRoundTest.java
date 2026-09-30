@@ -4,6 +4,19 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class ConversationRoundTest {
+
+    @Test public void recalledReplyLeavesNoStaleRoundId() {
+        ConversationRound round = new ConversationRound();
+        round.incoming(100);
+        round.reply("before"); round.appReply(7, 150); round.reply("after");
+        round.forgetReply("before");
+        assertEquals(0, round.repliesBeforeAppReply);
+        round.incoming(200);
+        assertFalse(round.activeReplies.contains("before"));
+        assertTrue(round.activeReplies.contains("after"));
+        round.forgetReply("after");
+        assertTrue(round.activeReplies.isEmpty());
+    }
     @Test public void replyWaitsForNewIncomingBeforeRemovingOldPeers() {
         ConversationRound round = new ConversationRound();
         round.incoming(100);
@@ -60,5 +73,54 @@ public class ConversationRoundTest {
         ConversationRound reset = new ConversationRound();
         assertEquals(0, reset.cutoff);
         assertTrue(reset.pendingReplies.isEmpty());
+    }
+
+    @Test public void appReplyWaitsForNextPeerAndDoesNotKeepOldHistory() {
+        ConversationRound round = new ConversationRound();
+        round.incoming(100);
+        round.reply("old-notification-reply");
+        assertTrue(round.appReply(10, 150));
+        assertFalse(round.appReply(10, 150));
+        assertFalse(round.incoming(100));
+        assertTrue(round.retain(false, null, 100, -1));
+        assertTrue(round.incoming(200));
+        assertFalse(round.retain(false, null, 100, -1));
+        assertFalse(round.retain(true, "old-notification-reply", 120, -1));
+        assertTrue(round.retain(false, null, 200, -1));
+        assertFalse(round.pendingAppReply);
+    }
+
+    @Test public void notificationReplyAfterAppReplyStaysInNewRound() {
+        ConversationRound round = new ConversationRound();
+        round.incoming(100);
+        round.reply("before-app");
+        assertTrue(round.appReply(10, 150));
+        round.reply("after-app");
+        assertTrue(round.incoming(200));
+        assertFalse(round.retain(true, "before-app", 120, -1));
+        assertTrue(round.retain(true, "after-app", 160, -1));
+        assertFalse(round.retain(false, null, 100, -1));
+    }
+
+    @Test public void repeatedAndLateAppEventsCannotResetANewerRound() {
+        ConversationRound round = new ConversationRound();
+        round.incoming(100);
+        assertTrue(round.appReply(10, 150));
+        assertTrue(round.appReply(11, 160));
+        assertTrue(round.incoming(200));
+        assertFalse(round.appReply(10, 150));
+        assertFalse(round.appReply(12, 190));
+        assertFalse(round.incoming(300));
+        assertTrue(round.appReply(13, 310));
+        assertTrue(round.incoming(400));
+    }
+
+    @Test public void appReplyCanEndAnUndatedHistory() {
+        ConversationRound round = new ConversationRound();
+        assertTrue(round.appReply(10, 150));
+        assertTrue(round.incoming(200));
+        assertEquals(1, round.cutoff);
+        assertFalse(round.retain(false, null, 0, -1));
+        assertTrue(round.retain(false, null, 200, -1));
     }
 }

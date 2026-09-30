@@ -238,8 +238,10 @@
 
 ### Lint
 
+项目 `gradle.properties` 已配置 4G 堆；以下命令使用默认并行度。
+
 ```powershell
-.\gradlew.bat -PrequireReleaseSigning=true lintDebug -Dorg.gradle.jvmargs=-Xmx4g --offline --console=plain
+.\gradlew.bat -PrequireReleaseSigning=true lintDebug --offline --console=plain
 ```
 
 ### 签名

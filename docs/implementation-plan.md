@@ -315,6 +315,32 @@ Side effects worth knowing:
 
 ## Reply implementation
 
+### Chat notification eligibility (implemented, all supported WeChat versions)
+
+- The shared `WeChatMessage.isChat()` guard classifies a
+  notification as chat only when its original `tickerText` is non-null and has
+  a `:` after the first character, before adding or proxying a reply action.
+- The same guard covers CarExtender replies, replies found in notification
+  actions, synthetic replies, and the reply action appended to media/sticker
+  notifications. A friend request or other non-chat notification does not gain
+  a module reply action even if it otherwise enters the message processing path.
+- Chat classification must **not** require a WeChat reply `PendingIntent` or
+  `RemoteInput`. Once classified as chat, retain the existing native reply
+  preference and the verified synthetic fallback when those WeChat objects are
+  absent. The synthetic path still requires its separately validated receiver
+  and dispatch prerequisites.
+- Keep the existing miscellaneous-channel and call-notification exclusions.
+  Test direct/group chat, media messages, friend requests, and missing or
+  colon-free tickers across each reply path. In particular, a chat notification
+  without WeChat's reply `PendingIntent` and `RemoteInput` must remain eligible
+  for synthetic reply when its receiver is available and its dispatch target is
+  verified. Synthetic replies require a content intent and a known talker key;
+  that key is carried through the proxy to WeChat's receiver. Native actions
+  retain preference, including the CarExtender fallback result key.
+
+Current verification and deferred device checks are tracked in
+[`project-modification-plan.md`](project-modification-plan.md).
+
 ### Native reply path
 
 - Always prefer WeChat's original reply `PendingIntent` and original

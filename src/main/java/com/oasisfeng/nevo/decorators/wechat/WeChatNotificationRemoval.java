@@ -26,8 +26,6 @@ public final class WeChatNotificationRemoval {
 		case NotificationListenerService.REASON_CLICK:
 		case NotificationListenerService.REASON_CANCEL:
 		case NotificationListenerService.REASON_CANCEL_ALL:
-		case NotificationListenerService.REASON_LISTENER_CANCEL:
-		case NotificationListenerService.REASON_LISTENER_CANCEL_ALL:
 			return true;
 		default:
 			return false;

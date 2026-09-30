@@ -33,20 +33,32 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         String[] names = { "personAndAttachmentRoundTrip", "staleTickerAndCarHistory", "unknownAndGroupNames",
                 "replyThenIncoming", "repeatedRebuildAndPreview", "untrustedMissingSender", "reusedNotificationId",
                 "rawPersonOnlyNotification", "nativeMessagingSelf", "rawColonText", "undatedSnapshots",
-                "stablePeerAcrossTalkerAndAvatar", "twoRoundsAndReplay", "groupRound", "roundPreviewAndUndated",
+                "stablePeerAcrossTalkerAndAvatar", "twoRoundsAndReplay", "appReplyStartsFresh",
+                "appReplyKeepsLaterNotificationReply", "groupRound", "roundPreviewAndUndated",
                 "removedRoundStartsFresh",
                 "classifiesRawFirstMessages", "classificationSurvivesNextMessage", "lateTalkerIsIsolated",
                 "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyInputsUseLocalizedReplyLabel",
-                "replyActionSurvivesArchiveRemoval" };
+                "replyActionSurvivesArchiveRemoval", "recallSequence", "recallWithoutIdentity", "recallSameTextAndTime",
+                "recallSelfAndRoundMetadata", "recallReusedNotificationId", "emptyRecallStaysSuppressed",
+                "replyEligibility", "nativeReplyForwarding" };
         Runnable[] tests = { this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
                 this::replyThenIncoming, this::repeatedRebuildAndPreview, this::untrustedMissingSender, this::reusedNotificationId,
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
-                this::stablePeerAcrossTalkerAndAvatar, this::twoRoundsAndReplay, this::groupRound, this::roundPreviewAndUndated,
+                this::stablePeerAcrossTalkerAndAvatar, this::twoRoundsAndReplay, this::appReplyStartsFresh,
+                this::appReplyKeepsLaterNotificationReply, this::groupRound, this::roundPreviewAndUndated,
                 this::removedRoundStartsFresh,
                 this::classifiesRawFirstMessages, this::classificationSurvivesNextMessage, this::lateTalkerIsIsolated,
                 this::legacyGroupGuessIsRepaired, this::nativeGroupEvidence,
                 this::replyInputsUseLocalizedReplyLabel,
-                () -> com.oasisfeng.nevo.sdk.NotificationArchiveInstrumentation.replyActionSurvivesRemovalAndRebuild(getTargetContext()) };
+                () -> com.oasisfeng.nevo.sdk.NotificationArchiveInstrumentation.replyActionSurvivesRemovalAndRebuild(getTargetContext()),
+                () -> Plan123Instrumentation.recallSequence(getTargetContext()),
+                () -> Plan123Instrumentation.recallWithoutIdentity(getTargetContext()),
+                () -> Plan123Instrumentation.recallSameTextAndTime(getTargetContext()),
+                () -> Plan123Instrumentation.recallSelfAndRoundMetadata(getTargetContext()),
+                () -> Plan123Instrumentation.recallReusedNotificationId(getTargetContext()),
+                () -> Plan123Instrumentation.emptyRecallStaysSuppressed(getTargetContext()),
+                () -> Plan123Instrumentation.replyEligibility(getTargetContext()),
+                () -> Plan123Instrumentation.nativeReplyForwarding(getTargetContext()) };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();
@@ -256,6 +268,31 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         check(history.length == 1 && "E".contentEquals(history[0]), "previous reply history resurrected");
     }
 
+    private void appReplyStartsFresh() {
+        Conversation c = conversation(false);
+        Notification first = normalized(c, notification("A", 100));
+        NotificationMessages.recordReply(first, "old notification reply", 120, "old-reply");
+        check(NotificationMessages.markAppReply(first, 10, 150), "app send was not marked");
+        check(!NotificationMessages.markAppReply(first, 10, 150), "duplicate app send was accepted");
+        Notification refreshed = normalized(c, notification("C", 200), Collections.singletonList(first));
+        checkTexts(c, refreshed, "C");
+        check(refreshed.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                "old reply history survived app reply");
+    }
+
+    private void appReplyKeepsLaterNotificationReply() {
+        Conversation c = conversation(false);
+        Notification first = normalized(c, notification("A", 100));
+        check(NotificationMessages.markAppReply(first, 10, 150), "app send was not marked");
+        NotificationMessages.recordReply(first, "D", 160, "after-app");
+        Notification preview = Notification.Builder.recoverBuilder(getTargetContext(), first)
+                .setStyle(new Notification.BigPictureStyle().bigPicture(Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888))).build();
+        NotificationMessages.copyIdentityExtras(first, preview);
+        preview.extras = parcel(preview.extras);
+        Notification refreshed = normalized(c, notification("E", 200), Collections.singletonList(preview));
+        checkTexts(c, refreshed, "D", "E");
+    }
+
     private void groupRound() {
         Conversation c = conversation(true);
         Notification a = normalized(c, notification("Alice: A", 100));
@@ -435,6 +472,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             checkReplyLabel(fromCar, expected);
 
             Notification fromActions = notification("hello", 100);
+            fromActions.tickerText = "Alice: hello";
             fromActions.actions = new Notification.Action[]{ new Notification.Action.Builder(null, "Reply", reply)
                     .addRemoteInput(original).build() };
             Conversation actionPeer = conversation(false); actionPeer.key = "alice";
@@ -462,6 +500,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
     private Notification carNotification(Notification.CarExtender.UnreadConversation conversation) {
         return new Notification.Builder(getTargetContext(), "identity-test")
                 .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Alice").setContentText("hello")
+                .setTicker("Alice: hello")
                 .extend(new Notification.CarExtender().setUnreadConversation(conversation)).build();
     }
 

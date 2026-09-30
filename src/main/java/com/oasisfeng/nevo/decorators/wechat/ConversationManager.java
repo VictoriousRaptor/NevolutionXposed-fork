@@ -9,6 +9,8 @@ import android.util.SparseArray;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Pattern;
 
 import androidx.annotation.IntDef;
@@ -132,6 +134,19 @@ class ConversationManager {
 	}
 
 	synchronized void resetConversation(final int id) { mConversations.remove(id); }
+
+	synchronized @Nullable String knownKeyForId(final int id) {
+		Conversation conversation = mConversations.get(id);
+		return conversation == null ? null : conversation.knownKey();
+	}
+
+	synchronized List<Integer> idsForTalker(final String talker) {
+		List<Integer> ids = new ArrayList<>();
+		if (talker == null || talker.isEmpty()) return ids;
+		for (int i = 0; i < mConversations.size(); i++)
+			if (talker.equals(mConversations.valueAt(i).knownKey())) ids.add(mConversations.keyAt(i));
+		return ids;
+	}
 
 	synchronized boolean acceptTalker(Conversation expected, String key) {
 		if (key == null || key.trim().isEmpty() || mConversations.get(expected.id) != expected) return false;

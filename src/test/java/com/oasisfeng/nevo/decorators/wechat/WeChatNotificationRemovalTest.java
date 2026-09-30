@@ -14,11 +14,11 @@ public class WeChatNotificationRemovalTest {
 		assertTrue(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_CLICK));
 		assertTrue(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_CANCEL));
 		assertTrue(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_CANCEL_ALL));
-		assertTrue(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_LISTENER_CANCEL));
-		assertTrue(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_LISTENER_CANCEL_ALL));
 	}
 
 	@Test public void systemOrApplicationRemovalDoesNotResetRound() {
+		assertFalse(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_LISTENER_CANCEL));
+		assertFalse(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_LISTENER_CANCEL_ALL));
 		assertFalse(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_APP_CANCEL));
 		assertFalse(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_APP_CANCEL_ALL));
 		assertFalse(WeChatNotificationRemoval.shouldResetRound(NotificationListenerService.REASON_SNOOZED));

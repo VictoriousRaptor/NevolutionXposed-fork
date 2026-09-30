@@ -31,6 +31,7 @@ import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Process;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
 
@@ -93,14 +94,12 @@ public class WeChatDecorator extends NevoDecoratorService {
 	private static final String EXTRA_RECALL = "nevo.wechat.recall";
 	private static final String EXTRA_RECALLER = "nevo.wechat.recaller";
 	public static final String EXTRA_PICTURE_PATH = "nevo.wechat.picturePath";
-	private static final String EXTRA_PICTURE = "nevo.wechat.picture";
-	private static final String STORAGE_PREFIX = "/storage/emulated/0/";
+	public static final String EXTRA_SUPPRESSED_RECALL = "nevo.wechat.suppressedRecall";
 
 	static final String TAG = "WeChatDecorator";
 
 	public static interface ModifyNotification { void modify(Notification n); }
 
-	private static long now() { return System.currentTimeMillis(); }
 
 	@Override public LocalDecorator createLocalDecorator(String packageName) {
 		return new Local(this.prefKey);
@@ -113,6 +112,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 		
 		private final WeChatImageEvents imageEvents = new WeChatImageEvents();
 		private final ImagePreviewLoader imagePreviews = new ImagePreviewLoader(imageEvents);
+		private final WeChatAppReplyEvents appReplyEvents = new WeChatAppReplyEvents();
+		private final WeChatRecallEvents recallEvents = new WeChatRecallEvents();
 		private static final String PREF_IMAGE_PREVIEW = "WeChatDecorator.image_preview";
 		private static final String PREF_IMAGE_PREVIEW_LARGE = "WeChatDecorator.image_preview_large";
 		/** Opt-in: without the setting, notifications keep WeChat's original [图片] text. */
@@ -131,6 +132,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 		 * @param loadPackageParam
 		 */
 		@Override public void hook(PackageHookContext loadPackageParam) {
+			appReplyEvents.install(getAppContext(), loadPackageParam.classLoader, this::onAppSent);
+			recallEvents.install(getAppContext(), loadPackageParam.classLoader, this::onRecalled);
 			if (! mImagePreviewEnabled) {
 				imageLog("hooks_skipped", "reason=preview_disabled scans=0");
 				return;
@@ -140,6 +143,15 @@ public class WeChatDecorator extends NevoDecoratorService {
 		}
 
 		private MessagingBuilder mMessagingBuilder;
+		private final NotificationReplyOrigins mReplyOrigins = new NotificationReplyOrigins();
+		private final MessagingBuilder.Controller mReplyController = new MessagingBuilder.Controller() {
+			@Override public void recastNotification(int id, ModifyNotification... modifies) {
+				modifyNotification(id, modifies);
+			}
+			@Override public long beginNotificationReply(int id) { return Local.this.beginNotificationReply(id); }
+			@Override public void abortNotificationReply(long reservation) { Local.this.abortNotificationReply(reservation); }
+		};
+		private boolean mAppReplyTrackingActive;
 		private String channelGroupMessage, channelMessage, channelMisc;
 		private boolean mRoundResetReceiverRegistered;
 		/** Resolved once per process; the installed WeChat build never changes while it runs. */
@@ -151,9 +163,12 @@ public class WeChatDecorator extends NevoDecoratorService {
 						|| !intent.hasExtra(WeChatNotificationRemoval.EXTRA_NOTIFICATION_ID)) return;
 				final int id = intent.getIntExtra(WeChatNotificationRemoval.EXTRA_NOTIFICATION_ID, 0);
 				final long removed = intent.getLongExtra(WeChatNotificationRemoval.EXTRA_ROUND_TOKEN, 0);
-				final boolean matched = clearArchivedNotificationsIf(id, latest ->
-						WeChatNotificationRemoval.tokenMatches(
-								latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), removed));
+				final boolean matched;
+				synchronized (Local.this) {
+					matched = clearArchivedNotificationsIf(id, latest ->
+							WeChatNotificationRemoval.tokenMatches(
+									latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), removed));
+				}
 				if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=removal_receiver id=" + id
 						+ " matched=" + matched + " tokenPresent=" + (removed != 0));
 			}
@@ -163,10 +178,11 @@ public class WeChatDecorator extends NevoDecoratorService {
 			imageLog("process_init", "revision=image-events-9");
 			super.onCreate(pref);
 			mImagePreviewEnabled = pref.getBoolean(PREF_IMAGE_PREVIEW, false);
+			mAppReplyTrackingActive = true;
 			mImagePreviewLargeEnabled = pref.getBoolean(PREF_IMAGE_PREVIEW_LARGE, false);
 			imagePreviews.setLargePreviewEnabled(mImagePreviewLargeEnabled);
 
-			mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);		// Must be called after loadPreferences().
+			mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), mReplyController);		// Must be called after loadPreferences().
 			if (!mRoundResetReceiverRegistered) {
 				ContextCompat.registerReceiver(getAppContext(), mRoundResetReceiver,
 						new IntentFilter(WeChatNotificationRemoval.ACTION_RESET_ROUND), ContextCompat.RECEIVER_EXPORTED);
@@ -179,6 +195,72 @@ public class WeChatDecorator extends NevoDecoratorService {
 					+ " image_large=" + mImagePreviewLargeEnabled);
 		}
 
+		private synchronized void onAppSent(String talker, long messageId, long created) {
+			if (!mAppReplyTrackingActive || isDisabled()) return;
+			NotificationReplyOrigins.Origin origin = mReplyOrigins.classify(talker, messageId, SystemClock.elapsedRealtime());
+			if (origin == NotificationReplyOrigins.Origin.DUPLICATE) return;
+			if (origin == NotificationReplyOrigins.Origin.NOTIFICATION) {
+				if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=notification_reply_sent");
+				return;
+			}
+			int marked = 0;
+			for (int id : mConversationManager.idsForTalker(talker)) {
+				Notification latest = getArchivedNotification(id);
+				if (latest == null || !latest.extras.getBoolean(NotificationMessages.STORED)) continue;
+				String storedKey = latest.extras.getString(NotificationMessages.KEY);
+				if (storedKey != null && !talker.equals(storedKey)) continue;
+				Conversation conversation = mConversationManager.getConversation(id);
+				if (NotificationMessages.belongsTo(conversation, latest)
+						&& NotificationMessages.markAppReply(latest, messageId, created)) marked++;
+			}
+			if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=app_reply_sent matched=" + marked);
+		}
+
+		private synchronized long beginNotificationReply(int id) {
+			if (!mAppReplyTrackingActive || isDisabled()) return 0;
+			Notification latest = getArchivedNotification(id);
+			String talker = mConversationManager.knownKeyForId(id);
+			if (latest == null || talker == null || !latest.extras.getBoolean(NotificationMessages.STORED)) return 0;
+			String storedKey = latest.extras.getString(NotificationMessages.KEY);
+			if (storedKey != null && !talker.equals(storedKey)) return 0;
+			return mReplyOrigins.reserve(talker, SystemClock.elapsedRealtime());
+		}
+
+		private synchronized void abortNotificationReply(long reservation) {
+			mReplyOrigins.abort(reservation);
+		}
+
+		private synchronized void onRecalled(String talker, long serverId) {
+			if (!mAppReplyTrackingActive || isDisabled()) return;
+			for (int id : mConversationManager.idsForTalker(talker)) {
+				for (Notification archived : getArchivedNotifications(id)) {
+					if (!talker.equals(archived.extras.getString(NotificationMessages.KEY))) continue;
+					NotificationMessages.markRecall(archived, serverId);
+				}
+				Notification latest = getArchivedNotification(id);
+				if (latest == null || !talker.equals(latest.extras.getString(NotificationMessages.KEY))
+						|| !NotificationMessages.containsServerId(latest, serverId)) continue;
+				long token = latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
+				// Recheck the live notification on the main thread; never revive a removed/replaced one.
+				new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+					synchronized (Local.this) {
+						if (!mAppReplyTrackingActive || isDisabled() || getArchivedNotification(id) != latest) return;
+						NotificationManager manager = getAppContext().getSystemService(NotificationManager.class);
+						for (android.service.notification.StatusBarNotification active : manager.getActiveNotifications()) {
+							if (active.getId() != id || !WeChatNotificationRemoval.tokenMatches(token,
+									active.getNotification().extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN))) continue;
+							Notification updated = latest.clone();
+							if (updated.extras.getLong(NotificationMessages.SERVER_ID) == serverId)
+								updated.extras.putBoolean(NotificationMessages.RECALL_PROMPT, true);
+							imagePreviews.discard(active.getTag(), id, updated);
+							manager.notify(active.getTag(), id, updated);
+							break;
+						}
+					}
+				});
+			}
+		}
+
 		private String moduleString(int resource, String fallback) {
 			Context context = getPackageContext();
 			if (context == null) return fallback;
@@ -186,7 +268,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 			catch (android.content.res.Resources.NotFoundException ignored) { return fallback; }
 		}
 
-		@Override public Decorating apply(NotificationManager nm, String tag, int id, Notification n) {
+		@Override public synchronized Decorating apply(NotificationManager nm, String tag, int id, Notification n) {
+			if (n.extras.getBoolean(EXTRA_SUPPRESSED_RECALL)) return Decorating.StopPost;
 			if (ImagePreviewLoader.isPreview(n)) return Decorating.Processed;
 			if (mWeChatTargetingO == null) mWeChatTargetingO = isWeChatTargeting26OrAbove();
 			if (BuildConfig.DEBUG) Log.d(TAG, "apply tag " + tag + " id " + id);
@@ -235,7 +318,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 			if (title != (title = EmojiTranslator.translate(title))) extras.putCharSequence(Notification.EXTRA_TITLE, title);
 			final Conversation previous = mConversationManager.getConversation(id);
-			final String storedKey = extras.getBoolean(NotificationMessages.STORED) ? extras.getString(NotificationMessages.KEY) : null;
+			final String storedKey = extras.getBoolean(NotificationMessages.STORED)
+					|| extras.getBoolean(WeChatRecallEvents.VERIFIED_KEY) ? extras.getString(NotificationMessages.KEY) : null;
 			final boolean sameTalker = ConversationTypePolicy.sameKnownTalker(previous.knownKey(), storedKey);
 			final Notification.CarExtender.UnreadConversation originalCar = new Notification.CarExtender(n).getUnreadConversation();
 			final android.app.PendingIntent replyTarget = originalCar == null ? null : originalCar.getReplyPendingIntent();
@@ -252,6 +336,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 				clearArchivedNotifications(id);
 			}
 			mConversationManager.getConversation(id).title = title;
+			if (extras.getBoolean(WeChatRecallEvents.VERIFIED_KEY))
+				mConversationManager.acceptTalker(mConversationManager.getConversation(id), storedKey);
 			mConversationManager.getConversation(id).contentIntent = n.contentIntent;
 			if (replyTarget != null) mConversationManager.getConversation(id).replyIntent = replyTarget;
 			if (!extras.getBoolean(NotificationMessages.STORED)
@@ -315,7 +401,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 			// 撤回...
 			String recaller = null;
-			boolean is_recall = false;
+			boolean is_recall = extras.getBoolean(NotificationMessages.RECALL_PROMPT);
 			if (content != null && content.contains("撤回")) {
 				if (CHANNEL_MISC.equals(channel_id)) {	// Misc. notifications on Android 8+.
 					return Decorating.Unprocessed;
@@ -323,12 +409,13 @@ public class WeChatDecorator extends NevoDecoratorService {
 					if (SDK_INT >= O && channel_id == null) setChannelId(n, CHANNEL_MISC);
 					Matcher matcher = pattern.matcher(content);
 					if (BuildConfig.DEBUG) Log.d(TAG, "matcher " + matcher.matches());
-					if (matcher.matches()) {
+					if (RecallHistory.isPrompt(content)) {
 						// 撤回
 						// Log.d(TAG, matcher.group(0) + ", " + matcher.group(1) + ", " + matcher.group(2) + ", " + matcher.group(3));
 						is_recall = true;
-						recaller = matcher.group("recaller");
+						recaller = matcher.matches() ? matcher.group("recaller") : null;
 						extras.putBoolean(EXTRA_RECALL, true);
+						extras.putBoolean(NotificationMessages.RECALL_PROMPT, true);
 						extras.putString(EXTRA_RECALLER, recaller);
 						if (BuildConfig.DEBUG) Log.d(TAG, "recall notification detected, recaller=" + (recaller != null));
 					} else {
@@ -379,7 +466,15 @@ public class WeChatDecorator extends NevoDecoratorService {
 				messaging = mMessagingBuilder.buildFromArchive(conversation, n, title, archive);
 			if (messaging == null) return Decorating.Unprocessed;
 			final List<MessagingStyle.Message> messages = messaging.getMessages();
-			if (messages.isEmpty()) return Decorating.Unprocessed;
+			if (messages.isEmpty()) {
+				if (extras.getBoolean(NotificationMessages.RECALL_PROMPT)) {
+					extras.putBoolean(EXTRA_SUPPRESSED_RECALL, true);
+					clearArchivedNotifications(id);
+					nm.cancel(tag, id);
+					return Decorating.StopPost;
+				}
+				return Decorating.Unprocessed;
+			}
 			NotificationMessages.stamp(conversation, n);
 
 			if (mImagePreviewEnabled) {
@@ -437,7 +532,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (getAppContext() == null) return false;
 			try {
 				if (BuildConfig.DEBUG) Log.d(TAG, "mMessagingBuilder is null, initializing...");
-				mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), this::modifyNotification);
+				mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), mReplyController);
 				return true;
 			} catch (final Exception e) {
 				Log.w(TAG, "Failed to init mMessagingBuilder: " + e.getMessage());
@@ -487,7 +582,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 		}
 
-		private void modifyNotification(final int id, final ModifyNotification... modifies) {
+		private synchronized void modifyNotification(final int id, final ModifyNotification... modifies) {
 			final Notification n = getArchivedNotification(id);
 			if (n != null) {
 				for (ModifyNotification modify : modifies) modify.modify(n);
@@ -499,7 +594,13 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 		}
 
-		@Override public void onDestroy() {
+		@Override public synchronized void onDestroy() {
+			if (mMessagingBuilder != null) {
+				mMessagingBuilder.close();
+				mMessagingBuilder = null;
+			}
+			mAppReplyTrackingActive = false;
+			mReplyOrigins.clear();
 			if (mRoundResetReceiverRegistered) {
 				try { getAppContext().unregisterReceiver(mRoundResetReceiver); }
 				catch (final RuntimeException ignored) {}
