@@ -46,6 +46,19 @@ public final class WeChatReplyProfile {
 
 	private static final String RECEIVER_CLASS = "com.tencent.mm.plugin.auto.service.MMAutoMessageReplyReceiver";
 
+	/** Device APK-verified 8.0.77/3141; distinct from the supplied 3160 build. */
+	private static final WeChatReplyProfile RELEASE_8_0_77_3141 = new WeChatReplyProfile(
+			"wechat-8.0.77/3141", new String[] { RECEIVER_CLASS }, new String[] { "z2.s1" },
+			new String[] { "bs1.a" }, new String[] { "e", "g", "c" });
+
+	/** APK-verified WeChat 8.0.77/3160: config, car mode, Android Auto package gates. */
+	private static final WeChatReplyProfile RELEASE_8_0_77 = new WeChatReplyProfile(
+			"wechat-8.0.77",
+			new String[] { RECEIVER_CLASS },
+			new String[] { "z2.s1" },
+			new String[] { "lq1.a" },
+			new String[] { "e", "h", "c" });
+
 	private static final WeChatReplyProfile RELEASE_8_0_78 = new WeChatReplyProfile(
 			"wechat-8.0.78",
 			new String[] { RECEIVER_CLASS },
@@ -84,6 +97,10 @@ public final class WeChatReplyProfile {
 	}
 
 	public static WeChatReplyProfile forPackage(String versionName, long versionCode) {
+		if ("8.0.77".equals(versionName) && versionCode == 3141L) return RELEASE_8_0_77_3141;
+		if ("8.0.77".equals(versionName) && versionCode == 3160L) return RELEASE_8_0_77;
+		// Other 8.0.77 builds must not reuse a different build's obfuscated layout.
+		if ("8.0.77".equals(versionName)) return LEGACY;
 		if ("8.0.78".equals(versionName) || versionCode == 3180L) return RELEASE_8_0_78;
 		if ("8.0.72".equals(versionName) || versionCode == 3085L) return RELEASE_8_0_72;
 		return LEGACY;

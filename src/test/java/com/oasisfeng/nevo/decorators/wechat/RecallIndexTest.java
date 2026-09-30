@@ -21,7 +21,9 @@ public class RecallIndexTest {
     @Test public void profileRequiresExactVersionAndCode() {
         assertNotNull(WeChatRecallEvents.messageClass("8.0.72", 3085));
         assertNotNull(WeChatRecallEvents.messageClass("8.0.78", 3180));
-        assertNull(WeChatRecallEvents.messageClass("8.0.77", 3160));
+        assertNotNull(WeChatRecallEvents.messageClass("8.0.77", 3160));
+        assertNotNull(WeChatRecallEvents.messageClass("8.0.77", 3141));
+        assertNull(WeChatRecallEvents.messageClass("8.0.77", 3180));
         assertNull(WeChatRecallEvents.messageClass("8.0.78", 3181));
     }
 }

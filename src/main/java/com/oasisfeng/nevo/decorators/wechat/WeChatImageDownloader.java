@@ -48,6 +48,7 @@ final class WeChatImageDownloader {
 	private volatile boolean available;
 	private Object downloadService;
 	private Class<?> callbackClass;
+	private Class<?> imageServiceClass;
 	private Class<?> msgIdTalkerClass;
 	private Class<?> downloadServiceClass;
 	private Constructor<?> msgIdTalkerConstructor;
@@ -69,16 +70,17 @@ final class WeChatImageDownloader {
 		String stage = "version";
 		try {
 			android.content.pm.PackageInfo info = context.getPackageManager().getPackageInfo("com.tencent.mm", 0);
-			if (!"8.0.72".equals(info.versionName) || info.versionCode != 3085) {
+			WeChatImageProfile profile = WeChatImageProfile.forVersion(info.versionName, info.versionCode);
+			if (profile == null) {
 				log("large_unavailable", "reason=unsupported_version");
 				return;
 			}
 
 			stage = "core_storage";
-			Class<?> kernel = Class.forName("em0.k1", false, loader);
-			Class<?> coreStorage = Class.forName("em0.c0", false, loader);
-			Class<?> databaseWrapper = Class.forName("s85.a0", false, loader);
-			coreStorageGet = method(kernel, "u", coreStorage);
+			Class<?> kernel = Class.forName(profile.kernel, false, loader);
+			Class<?> coreStorage = Class.forName(profile.core, false, loader);
+			Class<?> databaseWrapper = Class.forName(profile.database, false, loader);
+			coreStorageGet = method(kernel, profile.coreGet, coreStorage);
 			for (Field field : coreStorage.getDeclaredFields()) {
 				if (field.getType() != databaseWrapper) continue;
 				if (databaseField != null) throw new IllegalStateException("Ambiguous database wrapper");
@@ -86,17 +88,17 @@ final class WeChatImageDownloader {
 			}
 			if (databaseField == null) throw new IllegalStateException("Missing database wrapper");
 			databaseField.setAccessible(true);
-			databaseQuery = method(databaseWrapper, "a", Cursor.class, String.class, String[].class, int.class);
+			databaseQuery = method(databaseWrapper, profile.query, Cursor.class, String.class, String[].class, int.class);
 
 			stage = "image_service";
-			Class<?> serviceManager = Class.forName("w85.n0", false, loader);
-			Class<?> imageService = Class.forName("n70.y", false, loader);
-			Class<?> imageServiceImplementation = Class.forName("m70.e", false, loader);
-			downloadServiceClass = Class.forName("l11.j", false, loader);
+			Class<?> serviceManager = Class.forName(profile.manager, false, loader);
+			imageServiceClass = Class.forName(profile.service, false, loader);
+			Class<?> imageServiceImplementation = Class.forName(profile.implementation, false, loader);
+			downloadServiceClass = Class.forName(profile.download, false, loader);
 			msgIdTalkerClass = Class.forName("com.tencent.mm.plugin.msg.MsgIdTalker", false, loader);
-			callbackClass = Class.forName("n70.w", false, loader);
-			serviceGet = method(serviceManager, "c", Class.forName("w85.m", false, loader), Class.class);
-			downloadServiceGet = method(imageServiceImplementation, "Bh", Class.forName("n70.x", false, loader));
+			callbackClass = Class.forName(profile.callback, false, loader);
+			serviceGet = method(serviceManager, "c", Class.forName(profile.serviceBase, false, loader), Class.class);
+			downloadServiceGet = method(imageServiceImplementation, profile.downloadGet, Class.forName(profile.downloadInterface, false, loader));
 			msgIdTalkerConstructor = msgIdTalkerClass.getDeclaredConstructor(long.class, String.class);
 			msgIdTalkerConstructor.setAccessible(true);
 			downloadMethod = XposedHelpers.findMethodExact(downloadServiceClass, "b", long.class, msgIdTalkerClass,
@@ -109,7 +111,7 @@ final class WeChatImageDownloader {
 			wxgfDecode = method(wxgfClass, "wxam2PicBuf", byte[].class, byte[].class, int.class, int.class);
 
 			available = true;
-			log("large_ready", "profile=8.0.72/3085 revision=image-large-1 base_row_only=true");
+			log("large_ready", "profile=" + profile.label + " revision=image-large-2 base_row_only=true");
 		} catch (Throwable failure) {
 			available = false;
 			log("large_unavailable", "stage=" + stage + " type=" + failure.getClass().getSimpleName());
@@ -258,7 +260,7 @@ final class WeChatImageDownloader {
 		if (cached != null) return cached;
 		synchronized (this) {
 			if (downloadService != null) return downloadService;
-			Object implementation = serviceGet.invoke(null, Class.forName("n70.y", false, callbackClass.getClassLoader()));
+			Object implementation = serviceGet.invoke(null, imageServiceClass);
 			if (implementation == null) return null;
 			downloadService = downloadServiceGet.invoke(implementation);
 			return downloadService;

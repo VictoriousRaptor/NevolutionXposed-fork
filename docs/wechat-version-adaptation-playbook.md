@@ -40,6 +40,7 @@
 | 8.0.78 适配（本次） | 中国版 8.0.78/3180：门禁类迁移到 `bs1.a[c,g,b]`，新增 `wechat-8.0.78` 画像；通知栏回复已实测送达 |
 | 2026-09-27 应用内回复轮次 | 新增独立的 `WeChatAppReplyEvents` 精确版本映射：8.0.72/3085 的 `storage.f9.q1(int)` 与 8.0.78/3180 的 `storage.e9.t1(int)`；离线源码已核对，真实微信运行时行为待验证 |
 | 2026-09-30 项目计划 1、2、3 | 统一聊天通知回复资格；合成回复携带已知会话 `key_username`；新增两版撤回精确 ID hook；标准 SystemUI 移除原因和 RemoteInput 清理，微信本地 notify hook 接受 `StopPost`。本地构建及单元测试、真机模块仪器测试通过；真实微信行为待验证 |
+| 8.0.77 适配（2026-09-30） | 基线 `f132a2f`，分支 `codex/wechat-8.0.77`；3141/3160 分别完成通知回复、图片/大图、应用内回复及撤回画像；3141 五条链路 ready，真实消息验收待完成，见 [核对记录](wechat-8.0.77-findings.md) |
 
 ## 3. 版本敏感点总表
 
@@ -56,6 +57,11 @@
 
 补充事实（8.0.78 源码与既有实测）：接收器 `onReceive` 先对 `key_username` 判空，微信自己的车机回复 `PendingIntent` 携带该字段，其原生路径已实测送达。
 
+8.0.77/3160 的本地 APK 核对结果：接收器仍为
+`com.tencent.mm.plugin.auto.service.MMAutoMessageReplyReceiver.onReceive(Context, Intent): void`，
+辅助方法为 `z2.s1.b(Intent): Bundle`，门禁为 `lq1.a.e()/h()/c(): boolean`（均为 static）。
+`key_username`、`key_voice_reply_text` 与两个广播 action 保持不变；消息送达与基线合成回退仍待真机验证。
+
 2026-09-30 的实现优先使用 CarExtender 的原生回复 `PendingIntent`，其次使用通知 actions；没有原生动作时，仅在聊天通知、非空已知会话 key、存在 `contentIntent` 且 `MainHook.isSyntheticReplyAvailable()` 校验通过时提供合成回复。合成代理及转发接收器都携带 `key_username`，会话来自已解析的原生会话或第 3.5 节通知身份 hook，不能从标题、ticker 或通知 id 猜用户名。本次合成回退尚未真机验证。
 
 普通模块/仪器测试进程没有 compile-only 的 Xposed API，不能直接加载继承 `XposedModule` 的 `MainHook`。`MessagingBuilder.isSyntheticReplyAvailable()` 对 `NoClassDefFoundError` 返回 false，并记录 `action_synthetic_skipped reason=xposed_api_unavailable`；保持消息重建及原生回复，不添加未经验证的合成入口。该回退不修改微信版本映射或签名门禁，也不向 APK 打包 Xposed API。
@@ -64,19 +70,21 @@
 
 | 功能 | 当前匹配语义 | 未匹配时行为 |
 | --- | --- | --- |
-| 通知栏回复 `WeChatReplyProfile.forPackage()` | 8.0.72 或 8.0.78 的版本名、对应版本号任一命中即选候选；再运行时校验接收器和门禁签名 | 选 legacy 候选并校验；不可用时不开放合成投递 |
-| 图片事件 | 8.0.72 **且** 3085；完整签名校验 | 不启用图片事件 |
-| 应用内回复事件 | 8.0.72 **且** 3085，或 8.0.78 **且** 3180；完整签名校验 | 保留原轮次行为 |
-| 撤回身份和事件 | 同上两组精确版本；完整字段/方法及事件父类校验 | 不启用精确撤回关联 |
+| 通知栏回复 `WeChatReplyProfile.forPackage()` | 8.0.77 名称且 3141/3160 精确匹配；8.0.72/8.0.78 保留名称或版本号任一匹配；再校验运行时签名 | 选 legacy 候选并校验；不可用时不开放合成投递 |
+| 图片事件 / 独立大图服务 | 8.0.72 **且** 3085，或 8.0.77 **且** 3141/3160；完整签名校验 | 分别不启用对应组件 |
+| 应用内回复事件 | 8.0.72 **且** 3085、8.0.77 **且** 3141/3160、8.0.78 **且** 3180；完整签名校验 | 保留原轮次行为 |
+| 撤回身份和事件 | 同上四组精确版本；完整字段/方法及事件父类校验 | 不启用精确撤回关联 |
 
-### 3.2 图片事件（版本绑定最深，当前仅 8.0.72/3085）
+### 3.2 图片事件（8.0.72/3085、8.0.77/3141、8.0.77/3160）
 
 | 依赖点 | 8.0.72 | 失效表现 |
 | --- | --- | --- |
-| 版本门禁 | `versionName=8.0.72` 且 `versionCode=3085` | 其他版本直接 `events_unavailable` |
+| 版本门禁 | 三组精确版本分别选画像；本列为 8.0.72/3085 | 未映射组合直接 `events_unavailable` |
 | 状态类 / 简单消息类 | `v65.z`、`yh3.f` | 类找不到或字段类型不符 |
 | 消息类 | `com.tencent.mm.storage.f9`（`O0`/`getMsgId`/`getCreateTime`/`getType`/`C0`） | 事件索引拿不到消息 |
 | 查询 / 路径类 | `b80.m.oi(...)`、`m90.b`、`com.tencent.mm.vfs.w6.i(...)` | 缩略图路径解析失败 |
+
+8.0.77 的旧图片类不兼容，已改为独立画像并开放精确支持组合。完整新签名、证据及回退见第 3.7 节和 8.0.77 findings。
 
 ### 3.3 应用内回复轮次发送事件（独立于通知栏回复画像和图片预览）
 
@@ -120,7 +128,7 @@
 | 会话与服务端 ID | `storage.f9.O0(): String`、`storage.f9.I0(): long` | `storage.e9.N0(): String`、`storage.e9.F0(): long` |
 | 离线来源与哈希 | [8.0.72 findings](wechat-8.0.72-findings.md) | [8.0.78 findings](wechat-8.0.78-findings.md) |
 
-`NotificationItem.i` 的 `toString()` 标签虽为 msgId，`notification.x` → `m0.a(...)` 的调用链证明它取自上述服务端 ID accessor，不能与本地 `getMsgId()` 混用。记录的是运行时原名 `f/h/i/g/c`，不是 JADX 的生成别名。版本名与版本号必须**同时**匹配；8.0.76、8.0.77 及其他组合尚未启用此映射。
+`NotificationItem.i` 的 `toString()` 标签虽为 msgId，`notification.x` → `m0.a(...)` 的调用链证明它取自上述服务端 ID accessor，不能与本地 `getMsgId()` 混用。记录的是运行时原名 `f/h/i/g/c`，不是 JADX 的生成别名。版本名与版本号必须**同时**匹配；8.0.77/3141、8.0.77/3160 已新增完整画像；8.0.76 及其他组合未启用映射。
 
 非空会话与正数服务端 ID 用于通知身份标记、撤回索引和归档裁剪。重建先过滤精确目标及已确认的撤回提示，再推进轮次；正文回退、MessagingStyle、RemoteInput 历史和可关联的回复 ID 一起清理。当前归档实例及活动通知 token 均匹配时才重新发布，已移除或替换的通知不能被旧事件复活；裁剪为空时取消通知并返回 `StopPost`。
 
@@ -132,6 +140,43 @@
 - 标准 SystemUI 移除通知仅在 `NotificationListenerService.REASON_CLICK`、`REASON_CANCEL`、`REASON_CANCEL_ALL` 时发出定向轮次重置；listener cancel 不清空回复轮次。沿用活动通知 token 和接收端代次校验，避免通知 id 复用时误清新通知。
 - 原生回复转发只执行一次 `RemoteInput.addResultsToIntent()`；@ 前缀调整在 results Bundle 内完成，不再拷贝旧 ClipData。原生 PendingIntent 回调 `resultCode != 0` 时中止预留，不记成功回复历史。
 - `WeChatDecorator.Local.onDestroy()` 关闭 `MessagingBuilder` 的接收器并停止应用内回复追踪、清理来源索引和轮次重置接收器。验证时覆盖生命周期与原生/合成回复的混合场景；本次仅有构建和自动化证据。
+
+### 3.7 8.0.77 同名不同构建的完整画像与验证
+
+当前真机是 3141，用户提供 APK 是 3160；两种构建独立匹配 `versionName=8.0.77 && versionCode=<code>`。
+通知回复、图片、应用内发送与撤回都按自己的完整签名解析，不能用“一个功能 ready”代表其他功能已启用。
+
+| 目标 | 3141 | 3160 |
+| --- | --- | --- |
+| 通知回复 gates（static boolean） | `bs1.a.e()/g()/c()` | `lq1.a.e()/h()/c()` |
+| 状态/简单消息 | `ld5.z.d(String): Object`、`gp3.f`（继承 `gp3.g.d:int`） | `pb5.z.d(String): Object`、`mn3.f`（继承 `mn3.g.d:int`） |
+| 流程 AFTER hook | `db0.m.l(ld5.z): od5.b`、`handleDataFromRemote(ld5.z,j51.e): od5.b`、`handleDataFromFile(ld5.z,ra0.d): od5.b` | `n90.m.l(pb5.z): sb5.b`、`handleDataFromRemote(pb5.z,q31.e): sb5.b`、`handleDataFromFile(pb5.z,b90.d): sb5.b` |
+| 消息类/会话/发送方向/服务端 ID | `storage.e9`；`N0(): String`、`C0(): int`、`J0(): long` | `storage.e9`；`Q0(): String`、`A0(): int`、`K0(): long` |
+| 路径 AFTER hook | `x51.l0.d3(storage.e9,String,boolean): String` | `e41.l0.N2(storage.e9,String,boolean): String` |
+| 大图 core/query | `yp0.k1.v(): yp0.c0` static；`qd5.k0.f(String,String[],int): Cursor` | `ho0.j1.v(): ho0.b0` static；`ub5.k0.f(String,String[],int): Cursor` |
+| 下载服务完整方法 | `x51.j.b(long,MsgIdTalker,int,Object,int,pa0.w,int,boolean): int` | `e41.j.b(long,MsgIdTalker,int,Object,int,z80.w,int,boolean): int` |
+| 本人状态 AFTER hook | `storage.e9.r1(int): void`，本类 override；状态 `M0(): int`；排除 `a3/M2/F2(): boolean` | `storage.e9.u1(int): void`，本类 override；状态 `P0(): int`；排除 `Z2/L2/E2(): boolean` |
+| 撤回 payload | `RevokeMsgEvent.g: en.gs`、`en.gs.c: storage.e9` | `RevokeMsgEvent.g: fm.fs`、`fm.fs.c: storage.e9` |
+
+两版均保留 `getString/getLong/getInteger(int)`、消息 ID/时间/类型与 `field_msgSvrId:long` 完整校验，
+simplemsginfo 字段偏移一致；VFS 为 `vfs.a7.i(String,boolean): String` static，
+WXGF 为 `MMWXGFJNI.wxam2PicBuf(byte[],int,int): byte[]` static。
+撤回沿用第 3.5 节的 `NotificationItem.a(Context):void` 与 `IEvent.e():boolean` BEFORE、
+字段 `f/h/i/g/c` 类型及事件父类校验。下载服务 getter、数据库字段/schema、两份来源哈希及反编译位置
+完整记录在 [8.0.77 findings](wechat-8.0.77-findings.md)。
+
+作用进程与回调时机沿用基线；预览开关关闭时跳过图片 hook，大图开关额外控制下载提交。
+应用内回复/撤回不依赖预览开关。未知构建或签名失败分别关闭对应组件，保留现有回退。
+图片服务获取始终使用已选画像，后续调用不再硬编码另一版本类名。
+
+3141 设备检查结果：通知回复 `profile_ready usable=true`、`app_reply_ready`、`recall_ready`、
+`events_ready revision=image-events-10`、`large_ready revision=image-large-2`。
+新增 opt-in 仪器参数 `verify_wechat_profiles=true` 校验已安装微信的 40 项描述符，
+不初始化业务、不安装 hook、不查数据库、不发送消息；Manifest 仅查询 `com.tencent.mm`。
+110 项单元测试、33 项模块框架仪器测试与 lint（0 errors）通过；同 release 证书安装与回拉哈希一致。
+自动检查阶段按用户要求只做不发消息检查；同日用户随后反馈“测试基本通过”，并授权合并推送。
+本轮整体验收记为基本通过（用户实机反馈）；实际送达、连续收图、下载开关/取消/超时、发送失败/轮次推进、
+撤回精确裁剪及通知不复活的逐项覆盖仍待记录。3160 未做同构建真机检查。
 
 ## 4. 一次性适配 Runbook（步骤 0–8）
 
@@ -318,9 +363,9 @@ adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oa
 ## 8. 已知未验证项与回滚
 
 - WeChat 8.0.76 画像存在但**未实机验证**，回归状态为 pending，不要声称通过。
-- 图片事件仅覆盖 8.0.72/3085，其他版本自动关闭。
-- 应用内回复轮次事件仅映射 8.0.72/3085 与 8.0.78/3180；两版映射都尚未经过真实微信运行验证，其他版本自动保留旧轮次行为。
-- 撤回身份/事件仅映射上述两版；两版实际 hook 时序、精确裁剪、清除后不复活及图片回退待真机验证。新合成回退、SystemUI 移除原因和生命周期行为同样不能借用历史原生回复验收。
+- 图片事件及普通大图覆盖 8.0.72/3085、8.0.77/3141、8.0.77/3160；未映射组合自动关闭。3141 hook 与描述符检查通过，实际收图/下载和 3160 真机待验收。
+- 应用内回复轮次映射 8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.78/3180；3141 hook 就绪，实际发送与轮次推进待验收；其他组合保留原轮次行为。
+- 撤回身份/事件映射上述四组精确版本；3141 hook 就绪，实际撤回裁剪、清除后不复活及图片回退待真实消息验收。新合成回退、SystemUI 移除原因和生命周期行为同样不能借用历史原生回复验收。
 - 2026-09-30 项目计划 1/2/3 已通过本地 106 项单元测试、Debug/仪器 APK 构建和 lint（0 errors）。同日按用户授权安装后，PJZ110 / Android 16 上 33 项模块 framework 仪器用例全部通过；修复普通进程缺少 Xposed API 的合成回退，测试使用仅作用于自身进程的隐藏 API 参数。两包签名及安装后回拉哈希均核对通过，微信/SystemUI 未重启。验证记录见[项目修改计划](project-modification-plan.md)；真实微信 hook 与通知行为仍未验收。
 - 回滚：保留上一版同 release 证书的 APK，取得安装授权后原地回滚；旧包若触发版本降级限制须先检查安装结果和原因，不自动卸载或重启整机。
 
@@ -343,6 +388,7 @@ adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oa
 
 - 标签统一 `wechat-<versionName>`；常量名 `RELEASE_<版本号用下划线>`。
 - 此模板描述现有**通知栏回复候选画像**：版本名或版本号任一命中（`||`）选候选，再校验运行时签名；未知版本选择 `wechat-legacy` 候选，不能仅凭候选标签声称支持。应用内回复、图片、撤回的精确门禁采用同时匹配（`&&`），不得复制本模板的 `||`。
+- 8.0.77 的 3141/3160 是同名不同布局，通知回复也改为 `&&` 精确门禁；该例外不得使用上面的 `||` 模板。
 - `gateMethods` 顺序与接收器调用顺序一致，便于人工比对。
 - 新增画像必须同步在 `WeChatReplyProfileTest` 增加映射断言。
 
