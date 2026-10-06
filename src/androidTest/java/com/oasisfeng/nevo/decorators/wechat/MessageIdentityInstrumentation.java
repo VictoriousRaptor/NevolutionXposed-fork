@@ -57,7 +57,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyInputsUseLocalizedReplyLabel",
                 "replyActionSurvivesArchiveRemoval", "recallSequence", "recallWithoutIdentity", "recallSameTextAndTime",
                 "recallSelfAndRoundMetadata", "recallReusedNotificationId", "emptyRecallStaysSuppressed",
-                "replyEligibility", "nativeReplyForwarding" };
+                "replyEligibility", "nativeReplyForwarding",
+                "mediaReplyActionDeduplication", "concurrentMediaReplyRecast",
+                "animatedStickerMediaBranch", "animatedStickerReplyAfterUpdate" };
         Runnable[] tests = { this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
                 this::replyThenIncoming, this::repeatedRebuildAndPreview, this::untrustedMissingSender, this::reusedNotificationId,
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
@@ -75,7 +77,11 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> Plan123Instrumentation.recallReusedNotificationId(getTargetContext()),
                 () -> Plan123Instrumentation.emptyRecallStaysSuppressed(getTargetContext()),
                 () -> Plan123Instrumentation.replyEligibility(getTargetContext()),
-                () -> Plan123Instrumentation.nativeReplyForwarding(getTargetContext()) };
+                () -> Plan123Instrumentation.nativeReplyForwarding(getTargetContext()),
+                () -> Plan123Instrumentation.mediaReplyActionDeduplication(getTargetContext()),
+                () -> Plan123Instrumentation.concurrentMediaReplyRecast(getTargetContext()),
+                () -> Plan123Instrumentation.animatedStickerMediaBranch(getTargetContext()),
+                () -> Plan123Instrumentation.animatedStickerReplyAfterUpdate(getTargetContext()) };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();

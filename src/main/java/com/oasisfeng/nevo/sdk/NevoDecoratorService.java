@@ -177,6 +177,7 @@ public abstract class NevoDecoratorService {
 		}
 
 		public static void setActions(Notification n, Action... actions) {
+			XposedHelpers.setAdditionalInstanceField(n, KEY_ACTIONS_SERIALIZED, null);
 			final java.lang.reflect.Field field = ACTIONS_FIELD;
 			if (field != null) {
 				try {

@@ -31,6 +31,10 @@ public final class NotificationArchiveInstrumentation extends NevoDecoratorServi
                 cache(id, notification);
                 cache(id, notification); // Reply recast of the same notification.
                 Notification rebuilt = Notification.Builder.recoverBuilder(context, notification).build();
+                markActionsSerialized(rebuilt);
+                if (!hasSerializedActions(rebuilt)) throw new AssertionError("Actions serialization flag not marked");
+                setActions(rebuilt, rebuilt.actions);
+                if (hasSerializedActions(rebuilt)) throw new AssertionError("setActions failed to invalidate actionsSerialized flag");
                 replaceCachedNotification(id, notification, rebuilt);
                 if (getArchivedNotification(id) != rebuilt) throw new AssertionError("Rebuild not cached");
                 final long token = round;

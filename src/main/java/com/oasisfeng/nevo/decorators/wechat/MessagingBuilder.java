@@ -299,10 +299,22 @@ class MessagingBuilder {
 		if (SDK_INT >= P) replyAction.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
 
 		final Action[] existing = n.actions;
-		final Action[] merged = new Action[existing == null ? 1 : existing.length + 1];
-		if (existing != null) System.arraycopy(existing, 0, merged, 0, existing.length);
-		merged[merged.length - 1] = replyAction.build();
-		setActions(n, merged);
+		final List<Action> merged = new ArrayList<>();
+		if (existing != null) for (final Action action : existing) {
+			boolean isReply = false;
+			if (action != null && action.actionIntent != null) {
+				final RemoteInput[] inputs = action.getRemoteInputs();
+				if (inputs != null) for (final RemoteInput input : inputs) {
+					if (input != null && input.getAllowFreeFormInput()) {
+						isReply = true;
+						break;
+					}
+				}
+			}
+			if (!isReply) merged.add(action);
+		}
+		merged.add(replyAction.build());
+		setActions(n, merged.toArray(new Action[0]));
 		logReply("action_media_reply_attached", "notificationId=" + id + " resultKey=" + replyInput.getResultKey()
 				+ " existingActions=" + (existing == null ? 0 : existing.length));
 		return true;
