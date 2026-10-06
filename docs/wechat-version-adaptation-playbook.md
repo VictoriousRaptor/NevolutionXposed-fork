@@ -41,6 +41,7 @@
 | 2026-09-27 应用内回复轮次 | 新增独立的 `WeChatAppReplyEvents` 精确版本映射：8.0.72/3085 的 `storage.f9.q1(int)` 与 8.0.78/3180 的 `storage.e9.t1(int)`；离线源码已核对，真实微信运行时行为待验证 |
 | 2026-09-30 项目计划 1、2、3 | 统一聊天通知回复资格；合成回复携带已知会话 `key_username`；新增两版撤回精确 ID hook；标准 SystemUI 移除原因和 RemoteInput 清理，微信本地 notify hook 接受 `StopPost`。本地构建及单元测试、真机模块仪器测试通过；真实微信行为待验证 |
 | 8.0.77 适配（2026-09-30） | 基线 `f132a2f`，分支 `codex/wechat-8.0.77`；3141/3160 分别完成通知回复、图片/大图、应用内回复及撤回画像；3141 五条链路 ready，真实消息验收待完成，见 [核对记录](wechat-8.0.77-findings.md) |
+| 2026-10-06 媒体回复去重与标记失效 | 修复输入期间新通知到达导致媒体内联回复动作累积的问题；`attachReplyAction` 去除旧可投递自由文本回复；`setActions` 失效 `nevo.actionsSerialized` 标记；源码修复及回归用例已添加，真实微信行为与修复后真机 UI 待验收 |
 
 ## 3. 版本敏感点总表
 
@@ -140,6 +141,9 @@
 - 标准 SystemUI 移除通知仅在 `NotificationListenerService.REASON_CLICK`、`REASON_CANCEL`、`REASON_CANCEL_ALL` 时发出定向轮次重置；listener cancel 不清空回复轮次。沿用活动通知 token 和接收端代次校验，避免通知 id 复用时误清新通知。
 - 原生回复转发只执行一次 `RemoteInput.addResultsToIntent()`；@ 前缀调整在 results Bundle 内完成，不再拷贝旧 ClipData。原生 PendingIntent 回调 `resultCode != 0` 时中止预留，不记成功回复历史。
 - `WeChatDecorator.Local.onDestroy()` 关闭 `MessagingBuilder` 的接收器并停止应用内回复追踪、清理来源索引和轮次重置接收器。验证时覆盖生命周期与原生/合成回复的混合场景；本次仅有构建和自动化证据。
+- **媒体通知内联回复动作合并与去重**：用户在媒体通知输入期间到达同 ID 新通知并发送成功后，控制器回调对 latest 缓存清除 `pre-applied`/`applied` 标记并调用 `attachReplyAction` 重新发布。旧实现整体复制原 actions 数组再追加模块回复，导致累积多个重复回复动作。现改为在合并时过滤旧的可投递自由文本回复动作（`actionIntent != null` 且 `RemoteInput` 中包含 `allowFreeFormInput == true`），再加入当前 CarExtender 产生的新模块回复动作；非回复动作（大图缩放、标记已读、仅选择项/仅数据输入、无 Intent 动作及原有 null 元素）保持原对象、原顺序与相对位置；无 CarExtender/native reply 或非聊天 ticker 仍不修改原动作。诊断日志保持仅记录 `notificationId`、`resultKey` 与 `existingActions` 元数据。
+- **已重建通知动作修改与序列化标记失效**：`LocalDecorator.setActions(Notification, Action...)` 修改动作时显式清除 `nevo.actionsSerialized` 附加实例字段（置为 null）。避免已由 `recoverBuilder()` 重建的通知后续修改动作后，因残留序列化标记导致 MainHook 跳过必要的 actions 序列化/RemoteViews 重建链路。动作去重仅在既有聊天 ticker、CarExtender 会话和原生回复 PendingIntent 资格满足时生效；版本相关旁路沿用原画像选择和完整运行时签名校验：8.0.72/3085、8.0.78/3180 的通知回复候选仍以版本名或版本号任一匹配（`||`）选择，8.0.77/3141、3160 仍须两者同时匹配（`&&`）。其他版本保留原候选、签名校验和保守回退，不因本次修复宣称新增支持；图片、应用内回复及撤回门禁分别保持不变。
+- **输入期间的结果键竞态（仅记录）**：同 ID 新通知改变原生结果键、代理已更新为新键，而 SystemUI 仍按旧键立即发送时，接收器可能以 `native_drop reason=missing_input` 退出。尚无已适配微信版本触发该条件的实机证据；本次发布依用户要求只记录风险，不修改键映射或发送规则。条件、AOSP 依据和 UI 验证边界见[输入生命周期与竞态记录](notification-reply-input-lifecycle.md)。
 
 ### 3.7 8.0.77 同名不同构建的完整画像与验证
 
@@ -344,6 +348,10 @@ adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oa
 | 撤回版本门禁 | 未支持版本、名称/代码交叉组合、字段或方法类型不符 | 不启用精确关联，不按文本猜目标 |
 | SystemUI 移除原因 | 点击、手动清除、全部清除及 listener cancel | 前三种重置匹配代次；listener cancel 不清轮次 |
 | RemoteInput 与生命周期 | @ 前缀、原生回调失败、混合回复、Local 销毁 | 不重复编码/发送；失败不留成功历史；接收器释放 |
+| 媒体输入期间更新与回复 | 重复 attach、同 ID 第二条消息后发送、已有多个回复及其他动作、标记清除后 recoverBuilder/Parcel | 第二条实际正文保留，原生转发一次，仅一个有效回复；其他动作保持，重建及序列化后仍为一个回复 |
+| 动画表情媒体分支判定 | `[动画表情]` / `[2条][动画表情]` 媒体通知，多次 apply 与序列化标记失效 | 稳定返回 `Unprocessed`；正文与模板保持不变，序列化标记被清除，保持单一有效回复动作且非回复动作保留 |
+| 动画表情更新后回复投递 | 第一条普通消息到达并挂载回复，第二条动画表情同 ID 更新后通过原代理发送回复 | 原代理保持有效并成功派发至最新 native target，first count=0、latest count=1，输入历史仅记入最新通知，正文与单一回复保持 |
+| 输入期间的 SystemUI 状态（真机待验收） | 在回复框输入中文/emoji，收到同 ID 动画表情消息后继续编辑并发送 | 草稿保留、输入法可用、投递一次且会话正确；旧代理派发测试不代替此 UI 验收，另检查结果键或回复入口变化时的行为 |
 
 ## 7. 常见失败模式
 
@@ -367,6 +375,8 @@ adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oa
 - 应用内回复轮次映射 8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.78/3180；3141 hook 就绪，实际发送与轮次推进待验收；其他组合保留原轮次行为。
 - 撤回身份/事件映射上述四组精确版本；3141 hook 就绪，实际撤回裁剪、清除后不复活及图片回退待真实消息验收。新合成回退、SystemUI 移除原因和生命周期行为同样不能借用历史原生回复验收。
 - 2026-09-30 项目计划 1/2/3 已通过本地 106 项单元测试、Debug/仪器 APK 构建和 lint（0 errors）。同日按用户授权安装后，PJZ110 / Android 16 上 33 项模块 framework 仪器用例全部通过；修复普通进程缺少 Xposed API 的合成回退，测试使用仅作用于自身进程的隐藏 API 参数。两包签名及安装后回拉哈希均核对通过，微信/SystemUI 未重启。验证记录见[项目修改计划](project-modification-plan.md)；真实微信 hook 与通知行为仍未验收。
+- 2026-10-06 媒体通知重复回复去重与 `nevo.actionsSerialized` 失效：用户已在真机复现原输入期间新消息导致重复回复按钮的现象。本次完成源码修复并通过 110 项本地单元测试、Debug/仪器 APK 构建及 lint（0 errors / 34 warnings）；两个 APK 证书与现有 release 密钥一致。新增仪器用例仅通过编译，本轮未在设备运行；修复后的真机 UI 流程及微信运行时行为尚未验收。计划及独立验收证据保存在本地 `.debug-artifacts/reply-action-dedup/`，未纳入 Git。
+- 2026-10-06 动画表情测试计划新增用例（`animatedStickerMediaBranch`、`animatedStickerReplyAfterUpdate`）：2026-10-07 完成 Debug/仪器 APK 构建、新增用例编译及 lint（0 errors / 34 warnings），两包 release 证书核对一致；仪器 runner 共注册 37 项，本轮没有在设备运行。生产及单测源码未变，110 项单元测试通过结果由 Gradle 复用。旧代理派发测试覆盖稳定结果键下的模块控制器与广播转发链路，不代表真实 SystemUI 的草稿文本或输入焦点已被保留；结果键变化、回复入口变化及厂商布局重建仍须分别检查，真机交互与微信实际行为待验收。本地计划、执行及输入链路分析保存在 `.debug-artifacts/animated-sticker-tests/`。
 - 回滚：保留上一版同 release 证书的 APK，取得安装授权后原地回滚；旧包若触发版本降级限制须先检查安装结果和原因，不自动卸载或重启整机。
 
 ## 附录 A：画像模板与命名规范
