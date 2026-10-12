@@ -59,7 +59,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "recallSelfAndRoundMetadata", "recallReusedNotificationId", "emptyRecallStaysSuppressed",
                 "replyEligibility", "nativeReplyForwarding",
                 "mediaReplyActionDeduplication", "concurrentMediaReplyRecast",
-                "animatedStickerMediaBranch", "animatedStickerReplyAfterUpdate" };
+                "animatedStickerMediaBranch", "animatedStickerReplyAfterUpdate",
+                "markdownStylesAndParcel", "markdownRebuildAndDisable", "markdownIdentityReplyRecall", "markdownBuilderAndPreview",
+                "markdownCodeStylesAndParcel", "markdownCodeSourceAndReply" };
         Runnable[] tests = { this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
                 this::replyThenIncoming, this::repeatedRebuildAndPreview, this::untrustedMissingSender, this::reusedNotificationId,
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
@@ -81,7 +83,13 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> Plan123Instrumentation.mediaReplyActionDeduplication(getTargetContext()),
                 () -> Plan123Instrumentation.concurrentMediaReplyRecast(getTargetContext()),
                 () -> Plan123Instrumentation.animatedStickerMediaBranch(getTargetContext()),
-                () -> Plan123Instrumentation.animatedStickerReplyAfterUpdate(getTargetContext()) };
+                () -> Plan123Instrumentation.animatedStickerReplyAfterUpdate(getTargetContext()),
+                NotificationMarkdownInstrumentation::stylesSurviveParcelAndExistingSpans,
+                () -> NotificationMarkdownInstrumentation.repeatedRebuildAndDisable(getTargetContext()),
+                () -> NotificationMarkdownInstrumentation.identityReplyAndRecallUseSource(getTargetContext()),
+                () -> NotificationMarkdownInstrumentation.sourceSurvivesBuilderAndPreview(getTargetContext()),
+                NotificationMarkdownInstrumentation::codeStylesSurviveParcel,
+                () -> NotificationMarkdownInstrumentation.codeSourceAndReplySurviveRebuild(getTargetContext()) };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();

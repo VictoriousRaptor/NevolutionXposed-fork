@@ -42,6 +42,7 @@
 | 2026-09-30 项目计划 1、2、3 | 统一聊天通知回复资格；合成回复携带已知会话 `key_username`；新增两版撤回精确 ID hook；标准 SystemUI 移除原因和 RemoteInput 清理，微信本地 notify hook 接受 `StopPost`。本地构建及单元测试、真机模块仪器测试通过；真实微信行为待验证 |
 | 8.0.77 适配（2026-09-30） | 基线 `f132a2f`，分支 `codex/wechat-8.0.77`；3141/3160 分别完成通知回复、图片/大图、应用内回复及撤回画像；3141 五条链路 ready，真实消息验收待完成，见 [核对记录](wechat-8.0.77-findings.md) |
 | 2026-10-06 媒体回复去重与标记失效 | 修复输入期间新通知到达导致媒体内联回复动作累积的问题；`attachReplyAction` 去除旧可投递自由文本回复；`setActions` 失效 `nevo.actionsSerialized` 标记；源码修复及回归用例已添加，真实微信行为与修复后真机 UI 待验收 |
+| 2026-10-12 通知 Markdown | 新增默认关闭的 `WeChatDecorator.markdown` 开关，只在通知输出时解析加粗、斜体、删除线及反引号行内/围栏代码；代码采用等宽字体和灰色底纹，受系统 span 清理限制。历史身份、回复和撤回使用保留的原文。无需新增 hook 或微信混淆画像；真实通知样式待真机验证，见[实现与验证边界](wechat-notification-markdown.md) |
 
 ## 3. 版本敏感点总表
 
@@ -75,6 +76,11 @@
 | 图片事件 / 独立大图服务 | 8.0.72 **且** 3085，或 8.0.77 **且** 3141/3160；完整签名校验 | 分别不启用对应组件 |
 | 应用内回复事件 | 8.0.72 **且** 3085、8.0.77 **且** 3141/3160、8.0.78 **且** 3180；完整签名校验 | 保留原轮次行为 |
 | 撤回身份和事件 | 同上四组精确版本；完整字段/方法及事件父类校验 | 不启用精确撤回关联 |
+| 通知 Markdown 展示 | 无新增版本名/版本号匹配或运行时签名校验；适用于既有微信通知重建路径，含上述版本及 legacy 回退；须开启微信通知增强和 `WeChatDecorator.markdown` | 默认关闭；语法不支持、解析达到限制或出现运行时异常时保留原文，不改变其他功能的版本门禁 |
+
+Markdown 在微信进程的 `WeChatDecorator.Local.apply(NotificationManager, String, int, Notification): Decorating` 末段、`MessagingBuilder.flatIntoExtras(MessagingStyle, Bundle): void` 之后执行，不新增微信或 SystemUI hook。`onCreate(SharedPreferences): void` 读取开关，设置存储 schema 升至 5，升级默认关闭；修改设置后需重启微信进程。`EXTRA_TEXT` 和 `EXTRA_MESSAGES[*].text` 使用可序列化的 Android `StyleSpan`/`StrikethroughSpan`，代码使用 `TypefaceSpan("monospace")`/`BackgroundColorSpan(0x30808080)`。代码内标记保持字面量，正文空白和换行保留，未闭合或空围栏保留原样。系统可能过滤字体或背景 span，不能保证灰底或等宽展示。原文保存于 `nevo.markdown.rawText`（消息内置于 `extras`）。重复重建先读取原文，图片预览复制身份时也保留原文；发送 RemoteInput 和输入历史仍保留用户原始文字。回复、图片、应用内回复和撤回仍按上表分别匹配，不因展示可用而视为完成适配。
+
+诊断标签 `WeChat.Markdown`：启动记录 `source=markdown_settings enabled=<true|false>`；Debug 在字符数、样式数、嵌套或工作量超限时记录 `source=markdown_skipped reason=limit`；运行时解析失败记录 `source=markdown_fallback type=<异常类名>`，不记录消息正文。回归须分别检查三种强调样式、行内代码/不同长度反引号/带语言标签围栏/缩进与 CRLF、转义和残缺标记、中文与 emoji 范围、重复通知/回复/撤回及图片切换、关闭开关恢复原文，以及折叠、展开、锁屏和悬浮通知在明暗主题下的字体与底纹。自动化和真实微信/SystemUI 展示的验证层级见[专题文档](wechat-notification-markdown.md)。
 
 ### 3.2 图片事件（8.0.72/3085、8.0.77/3141、8.0.77/3160）
 
