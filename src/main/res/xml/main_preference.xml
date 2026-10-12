@@ -10,6 +10,12 @@
 			android:summary="@string/decorator_wechat_description"
 			android:title="@string/decorator_wechat_title"/>
 		<CheckBoxPreference
+			android:key="WeChatDecorator.markdown"
+			android:defaultValue="false"
+			android:dependency="WeChatDecorator.enabled"
+			android:summary="@string/decorator_wechat_markdown_description"
+			android:title="@string/decorator_wechat_markdown_title"/>
+		<CheckBoxPreference
 			android:key="WeChatDecorator.image_preview"
 			android:defaultValue="false"
 			android:summary="@string/decorator_wechat_image_preview_description"

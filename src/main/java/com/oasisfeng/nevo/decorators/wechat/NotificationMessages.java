@@ -51,7 +51,7 @@ final class NotificationMessages {
     }
 
     static Message incoming(Conversation conversation, Notification notification) {
-        CharSequence raw = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
+        CharSequence raw = NotificationMarkdown.originalText(notification.extras);
         if (TextUtils.isEmpty(raw)) return null;
         String text = raw.toString().replaceFirst("^\\[\\d+(?:条|則)?\\]", "");
         int colon = text.indexOf(WeChatMessage.SENDER_MESSAGE_SEPARATOR);
@@ -72,7 +72,7 @@ final class NotificationMessages {
     }
 
     static Message read(Bundle bundle, Conversation conversation, boolean messagingContext, boolean historical) {
-        CharSequence text = bundle.getCharSequence("text");
+        CharSequence text = NotificationMarkdown.originalMessageText(bundle);
         if (text == null) return null;
         Person person = null;
         if (Build.VERSION.SDK_INT >= 28) {
@@ -105,6 +105,7 @@ final class NotificationMessages {
         }
         Message message = new Message(text, bundle.getLong("time", 0), person);
         if (extras != null) message.getExtras().putAll(extras);
+        message.getExtras().remove(NotificationMarkdown.RAW_TEXT);
         String mime = bundle.getString("type");
         Parcelable uri = bundle.getParcelable("uri");
         if (mime != null && uri instanceof android.net.Uri) message.setData(mime, (android.net.Uri) uri);
@@ -273,7 +274,7 @@ final class NotificationMessages {
                 SERVER_ID, RECALLED_IDS, RECALL_PROMPT, WeChatRecallEvents.VERIFIED_KEY,
                 WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN,
                 ConversationClassification.TYPE, ConversationClassification.SOURCE,
-                Notification.EXTRA_REMOTE_INPUT_HISTORY,
+                Notification.EXTRA_REMOTE_INPUT_HISTORY, NotificationMarkdown.RAW_TEXT,
                 Notification.EXTRA_MESSAGES, "android.messagingUser", "android.selfDisplayName"));
         for (String key : new java.util.HashSet<>(identity.keySet())) if (!keep.contains(key)) identity.remove(key);
         target.extras.putAll(identity);

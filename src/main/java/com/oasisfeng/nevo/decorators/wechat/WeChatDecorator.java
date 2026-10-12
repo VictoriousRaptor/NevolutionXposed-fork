@@ -119,6 +119,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		/** Opt-in: without the setting, notifications keep WeChat's original [图片] text. */
 		private boolean mImagePreviewEnabled;
 		private boolean mImagePreviewLargeEnabled;
+		private boolean mMarkdownEnabled;
 		private static void imageLog(String stage, String details) {
 			if (BuildConfig.DEBUG) Log.i(TAG, "NX_IMAGE stage=" + stage + " " + details);
 		}
@@ -180,6 +181,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 			mImagePreviewEnabled = pref.getBoolean(PREF_IMAGE_PREVIEW, false);
 			mAppReplyTrackingActive = true;
 			mImagePreviewLargeEnabled = pref.getBoolean(PREF_IMAGE_PREVIEW_LARGE, false);
+			mMarkdownEnabled = pref.getBoolean(NotificationMarkdown.PREF, false);
+			Log.i("WeChat.Markdown", "source=markdown_settings enabled=" + mMarkdownEnabled);
 			imagePreviews.setLargePreviewEnabled(mImagePreviewLargeEnabled);
 
 			mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), mReplyController);		// Must be called after loadPreferences().
@@ -271,6 +274,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		@Override public synchronized Decorating apply(NotificationManager nm, String tag, int id, Notification n) {
 			if (n.extras.getBoolean(EXTRA_SUPPRESSED_RECALL)) return Decorating.StopPost;
 			if (ImagePreviewLoader.isPreview(n)) return Decorating.Processed;
+			NotificationMarkdown.restoreText(n.extras);
 			if (mWeChatTargetingO == null) mWeChatTargetingO = isWeChatTargeting26OrAbove();
 			if (BuildConfig.DEBUG) Log.d(TAG, "apply tag " + tag + " id " + id);
 
@@ -488,6 +492,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 			messaging.setGroupConversation(is_group_chat).setConversationTitle(is_group_chat ? title : null);
 			MessagingBuilder.flatIntoExtras(messaging, extras);
+			NotificationMarkdown.apply(n, mMarkdownEnabled);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
 
 			if (SDK_INT >= N && extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) != null)

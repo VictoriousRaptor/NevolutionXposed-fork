@@ -32,6 +32,7 @@ public class RemotePreferenceStoreTest {
 		assertEquals(Boolean.TRUE, merged.get("WeChatDecorator.enabled"));
 		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
 		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW_LARGE));
+		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_MARKDOWN));
 		assertEquals(Boolean.FALSE, merged.get("MediaDecorator.enabled"));
 		assertFalse(merged.containsKey("MIUIDecorator.enabled"));
 	}
@@ -98,5 +99,23 @@ public class RemotePreferenceStoreTest {
 
 		assertEquals(java.util.Arrays.asList(RemotePreferenceStore.BOOLEAN_KEYS),
 				new java.util.ArrayList<>(RemotePreferenceStore.merge(local, Collections.emptyMap()).keySet()));
+	}
+
+	@Test public void markdownUpgradeDefaultsOffAndKeepsOtherChoices() {
+		Map<String, Boolean> stored = new LinkedHashMap<>();
+		stored.put(RemotePreferenceStore.KEY_IMAGE_PREVIEW, true);
+		stored.put(RemotePreferenceStore.KEY_IMAGE_PREVIEW_LARGE, true);
+		Map<String, Boolean> values = RemotePreferenceStore.migratedLocalValues(stored, 4);
+		assertEquals(Boolean.FALSE, values.get(RemotePreferenceStore.KEY_MARKDOWN));
+		assertEquals(Boolean.TRUE, values.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW_LARGE));
+		assertEquals(Boolean.TRUE, values.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
+	}
+
+	@Test public void markdownExplicitChoiceSurvivesCurrentSchemaAndRemoteMerge() {
+		Map<String, Boolean> stored = Collections.singletonMap(RemotePreferenceStore.KEY_MARKDOWN, true);
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.migratedLocalValues(stored, 5).get(RemotePreferenceStore.KEY_MARKDOWN));
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.merge(Collections.emptyMap(), stored).get(RemotePreferenceStore.KEY_MARKDOWN));
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(
+				Collections.singletonMap(RemotePreferenceStore.KEY_MARKDOWN, false), stored).get(RemotePreferenceStore.KEY_MARKDOWN));
 	}
 }
