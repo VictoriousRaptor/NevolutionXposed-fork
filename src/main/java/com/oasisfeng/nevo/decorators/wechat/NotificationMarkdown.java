@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.os.Parcelable;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
+import android.text.TextUtils;
 import android.text.style.BackgroundColorSpan;
 import android.text.style.StrikethroughSpan;
 import android.text.style.StyleSpan;
@@ -18,6 +19,7 @@ import com.oasisfeng.nevo.xposed.BuildConfig;
 final class NotificationMarkdown {
     static final String PREF = "WeChatDecorator.markdown";
     static final String RAW_TEXT = "nevo.markdown.rawText";
+    static final String OWNER = "nevo.markdown.owner";
     private static final String TAG = "WeChat.Markdown";
     // Translucent neutral gray works over light and dark backgrounds without fixing text color.
     static final int CODE_BACKGROUND = 0x30808080;
@@ -62,13 +64,46 @@ final class NotificationMarkdown {
             message.putCharSequence("text", rendered);
             metadata = metadata == null ? new Bundle() : new Bundle(metadata);
             metadata.remove(RAW_TEXT);
-            if (rendered != raw) metadata.putCharSequence(RAW_TEXT, raw);
+            metadata.remove(OWNER);
+            if (rendered != raw) {
+                metadata.putCharSequence(RAW_TEXT, raw);
+                metadata.putString(OWNER, WeChatDecorator.WECHAT_PACKAGE);
+            }
             if (!metadata.isEmpty()) message.putBundle("extras", metadata);
             else message.remove("extras");
             if (output == null) output = messages.clone();
             output[i] = message;
         }
         if (output != null) extras.putParcelableArray(Notification.EXTRA_MESSAGES, output);
+    }
+
+    /** Restore only our code ranges after framework sanitization, keeping its other decisions. */
+    static CharSequence restoreCodeStyles(CharSequence cleaned, Bundle metadata) {
+        if (cleaned == null || metadata == null
+                || !WeChatDecorator.WECHAT_PACKAGE.equals(metadata.getString(OWNER))) return cleaned;
+        CharSequence raw = metadata.getCharSequence(RAW_TEXT);
+        if (raw == null) return cleaned;
+        InlineMarkdown.Result parsed = InlineMarkdown.parse(raw.toString());
+        if (parsed.limited || !TextUtils.equals(cleaned, parsed.text)) return cleaned;
+        SpannableStringBuilder output = null;
+        for (InlineMarkdown.Range range : parsed.spans) {
+            if ((range.style & InlineMarkdown.CODE) == 0) continue;
+            boolean font = false, background = false;
+            if (cleaned instanceof Spanned) {
+                Spanned spans = (Spanned) cleaned;
+                for (TypefaceSpan span : spans.getSpans(range.start, range.end, TypefaceSpan.class))
+                    if ("monospace".equals(span.getFamily()) && spans.getSpanStart(span) == range.start
+                            && spans.getSpanEnd(span) == range.end) font = true;
+                for (BackgroundColorSpan span : spans.getSpans(range.start, range.end, BackgroundColorSpan.class))
+                    if (span.getBackgroundColor() == CODE_BACKGROUND && spans.getSpanStart(span) == range.start
+                            && spans.getSpanEnd(span) == range.end) background = true;
+            }
+            if (font && background) continue;
+            if (output == null) output = new SpannableStringBuilder(cleaned);
+            if (!font) output.setSpan(new TypefaceSpan("monospace"), range.start, range.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            if (!background) output.setSpan(new BackgroundColorSpan(CODE_BACKGROUND), range.start, range.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        return output == null ? cleaned : output;
     }
 
     static CharSequence render(CharSequence source) {

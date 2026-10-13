@@ -43,6 +43,7 @@
 | 8.0.77 适配（2026-09-30） | 基线 `f132a2f`，分支 `codex/wechat-8.0.77`；3141/3160 分别完成通知回复、图片/大图、应用内回复及撤回画像；3141 五条链路 ready，真实消息验收待完成，见 [核对记录](wechat-8.0.77-findings.md) |
 | 2026-10-06 媒体回复去重与标记失效 | 修复输入期间新通知到达导致媒体内联回复动作累积的问题；`attachReplyAction` 去除旧可投递自由文本回复；`setActions` 失效 `nevo.actionsSerialized` 标记；源码修复及回归用例已添加，真实微信行为与修复后真机 UI 待验收 |
 | 2026-10-12 通知 Markdown | 新增默认关闭的 `WeChatDecorator.markdown` 开关，只在通知输出时解析加粗、斜体、删除线及反引号行内/围栏代码；代码采用等宽字体和灰色底纹，受系统 span 清理限制。历史身份、回复和撤回使用保留的原文。无需新增 hook 或微信混淆画像；真实通知样式待真机验证，见[实现与验证边界](wechat-notification-markdown.md) |
+| 2026-10-13 代码样式清理修复 | 针对手机 Android 16 / ColorOS 16.0.10 的消息 span 白名单清理，新增 framework 消息清理 AFTER hook，在微信主进程与 SystemUI 中仅恢复本模块代码范围的等宽字体和灰底；不关闭系统清理，也不恢复其他被移除的 span。签名校验与失败回退见第 3.1 节，设备验证状态见[专题文档](wechat-notification-markdown.md) |
 
 ## 3. 版本敏感点总表
 
@@ -78,9 +79,19 @@
 | 撤回身份和事件 | 同上四组精确版本；完整字段/方法及事件父类校验 | 不启用精确撤回关联 |
 | 通知 Markdown 展示 | 无新增版本名/版本号匹配或运行时签名校验；适用于既有微信通知重建路径，含上述版本及 legacy 回退；须开启微信通知增强和 `WeChatDecorator.markdown` | 默认关闭；语法不支持、解析达到限制或出现运行时异常时保留原文，不改变其他功能的版本门禁 |
 
-Markdown 在微信进程的 `WeChatDecorator.Local.apply(NotificationManager, String, int, Notification): Decorating` 末段、`MessagingBuilder.flatIntoExtras(MessagingStyle, Bundle): void` 之后执行，不新增微信或 SystemUI hook。`onCreate(SharedPreferences): void` 读取开关，设置存储 schema 升至 5，升级默认关闭；修改设置后需重启微信进程。`EXTRA_TEXT` 和 `EXTRA_MESSAGES[*].text` 使用可序列化的 Android `StyleSpan`/`StrikethroughSpan`，代码使用 `TypefaceSpan("monospace")`/`BackgroundColorSpan(0x30808080)`。代码内标记保持字面量，正文空白和换行保留，未闭合或空围栏保留原样。系统可能过滤字体或背景 span，不能保证灰底或等宽展示。原文保存于 `nevo.markdown.rawText`（消息内置于 `extras`）。重复重建先读取原文，图片预览复制身份时也保留原文；发送 RemoteInput 和输入历史仍保留用户原始文字。回复、图片、应用内回复和撤回仍按上表分别匹配，不因展示可用而视为完成适配。
+Markdown 在微信进程的 `WeChatDecorator.Local.apply(NotificationManager, String, int, Notification): Decorating` 末段、`MessagingBuilder.flatIntoExtras(MessagingStyle, Bundle): void` 之后执行。`onCreate(SharedPreferences): void` 读取开关，设置存储 schema 为 5，升级默认关闭。`EXTRA_TEXT` 和 `EXTRA_MESSAGES[*].text` 使用可序列化的 Android `StyleSpan`/`StrikethroughSpan`，代码使用 `TypefaceSpan("monospace")`/`BackgroundColorSpan(0x30808080)`。代码内标记保持字面量，正文空白和换行保留，未闭合或空围栏保留原样。原文保存于 `nevo.markdown.rawText`（消息内置于 `extras`），转换的消息还保存 `nevo.markdown.owner=com.tencent.mm`；读取规范消息时清除两项展示元数据，关闭功能后的正常重建也清除它们。重复重建先读取原文，图片预览复制身份时也保留原文；发送 RemoteInput 和输入历史仍保留用户原始文字。回复、图片、应用内回复和撤回仍按上表分别匹配，不因展示可用而视为完成适配。
+
+代码样式恢复 hook：`android.app.Notification$MessagingStyle$Message.stripNonStyleSpans(CharSequence): CharSequence` 的 AFTER 回调，读取 `Message.getExtras(): Bundle`，在清理后的返回值上仅补回代码样式，随后由 framework 原有调用者赋回消息正文；不反射写入 `mText`。作用进程限定 `com.tencent.mm` 主进程和 `com.android.systemui`；沿用这两个 LSPosed 作用域，不加入 `system_server`。安装前精确校验参数、CharSequence 返回值及方法非 static；缺失、签名不符或安装失败记录 unavailable，保留原生输出。实际回调还须同时满足微信通知增强与 Markdown 开关开启、消息 owner 标记匹配、存在原文、解析未超限、清理后的全部文字与原文解析结果一致。原方法异常时不修复；仅补回代码范围中的字体/灰底，保留系统已清理后的其他样式，重复回调不累积 span。签名已离线核对 PJZ110 Android 16 / API 36 / `PJZ110_16.0.10.501(CN01)` 的 framework；未添加微信版本名/版本号门禁，其他 Android/OEM 仅按完整签名校验并保守回退，尚不宣称运行时兼容。旧系统若未经过此清理方法则不触发恢复，不覆盖其他颜色处理或 OEM 的额外清理路径。修改 Markdown 设置需重启微信进程；安装包含新 hook 的 APK 后，微信及 SystemUI 两个进程均需重新加载模块才能验证完整链路，相关设备操作须按授权范围执行。
 
 诊断标签 `WeChat.Markdown`：启动记录 `source=markdown_settings enabled=<true|false>`；Debug 在字符数、样式数、嵌套或工作量超限时记录 `source=markdown_skipped reason=limit`；运行时解析失败记录 `source=markdown_fallback type=<异常类名>`，不记录消息正文。回归须分别检查三种强调样式、行内代码/不同长度反引号/带语言标签围栏/缩进与 CRLF、转义和残缺标记、中文与 emoji 范围、重复通知/回复/撤回及图片切换、关闭开关恢复原文，以及折叠、展开、锁屏和悬浮通知在明暗主题下的字体与底纹。自动化和真实微信/SystemUI 展示的验证层级见[专题文档](wechat-notification-markdown.md)。
+
+恢复 hook 日志：`source=code_styles_hook_ready process=<进程>` 表示安装成功；`code_styles_hook_unavailable ... type=<异常类>` 表示保守回退。首次实际补回样式记录 `source=code_styles_restored process=<进程>`，之后仅 Debug 记录；回调失败记录 `source=code_styles_fallback type=<异常类>`。均不记录正文。新增回归须覆盖原生清理→恢复→Parcel 的重复往返、灰底被清理但字体保留的情况、未标记/owner 不符/正文已改变/解析超限的消息保持原生结果、关闭设置后移除展示元数据，以及两个进程的实际 hook 与通知字体/底纹验证；ready 或 restored 日志仍不能替代 UI 验收。
+
+ART 内联处理：安装 hook 前通过 libxposed API 102 的 `deoptimize(Executable): boolean` 对已核对的调用链取消优化，避免 boot image/JIT 的内联清理代码绕过私有方法 hook。目标依次为 `Message.ensureColorContrastOrStripStyling(int): void`、`MessagingStyle.getBundleArrayForMessages(List, boolean, int): Bundle[]`（static）、`MessagingStyle.addExtras(Bundle, boolean, int): void`、`MessagingStyle.makeMessagingView(int): RemoteViews`；其余均为实例方法。每一项也需完整参数/返回值/static 属性校验，取消优化失败时不安装恢复 hook并记录 unavailable。范围仍限定上述两个进程，取消优化影响共享消息布局方法的执行方式，但不改变无标记消息的清理或输出结果；其它 OEM 调用链不推断已覆盖。
+
+`makeMessagingView` 是受限非 SDK 方法，查找处局部标注 `BlockedPrivateApi`：此代码仅由已注入的 LSPosed 模块执行，不在普通设置 App 中调用。该标注只说明 Xposed 用途，不证明运行时访问成功；访问限制、签名或取消优化失败仍保守回退，须以两个进程的 hook 日志和实际通知验证。未全局关闭 lint 或修改 targetSdk。
+
+2026-10-13 验收分层：134 项主机测试、签名构建及 Release lint 通过；PJZ110 Android 16 上 46/46 framework 仪器用例实际通过，包含新增三项清理恢复回归。用户手动重启系统界面后确认界面生效，测试 APK 已卸载，保留修复版。当前日志缓冲区没有保留专用 ready/restored 记录，未额外确认两个进程的 hook 调用现场；所有通知形态、明暗主题、真实回复投递和其他 OEM 尚未逐项验收。源码、设备测试、用户界面确认与缺失的日志证据分别记录于[专题文档](wechat-notification-markdown.md)。
 
 ### 3.2 图片事件（8.0.72/3085、8.0.77/3141、8.0.77/3160）
 

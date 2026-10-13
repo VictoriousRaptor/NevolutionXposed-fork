@@ -21,6 +21,8 @@ import com.oasisfeng.nevo.decorators.wechat.ConversationManager.Conversation;
 
 import java.util.Collections;
 import java.util.List;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 /** Framework regression cases, registered in the existing runner. Compilation is not execution. */
 final class NotificationMarkdownInstrumentation {
@@ -154,6 +156,78 @@ final class NotificationMarkdownInstrumentation {
                 "disabled code messages not restored");
         check(raw.contentEquals(notification.extras.getCharSequence(Notification.EXTRA_TEXT)), "disabled code collapsed text not restored");
         check(!last.getBundle("extras").containsKey(NotificationMarkdown.RAW_TEXT), "stale code source metadata");
+        check(!last.getBundle("extras").containsKey(NotificationMarkdown.OWNER), "stale code owner metadata");
+    }
+
+    static void frameworkCodeCleanupRoundTrip() {
+        try {
+            String raw = "😀 **粗** `Wi.i`\n```txt\n x();\n```\n尾";
+            SpannableStringBuilder original = new SpannableStringBuilder(raw);
+            original.setSpan(new ForegroundColorSpan(0xff123456), 0, 2, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            Notification.MessagingStyle.Message message = new Notification.MessagingStyle.Message(
+                    NotificationMarkdown.render(original), 100, (android.app.Person) null);
+            message.getExtras().putAll(codeMetadata(raw));
+            Method cleanup = message.getClass().getDeclaredMethod("ensureColorContrastOrStripStyling", int.class);
+            cleanup.setAccessible(true);
+            Field textField = message.getClass().getDeclaredField("mText");
+            textField.setAccessible(true);
+            Method toBundle = message.getClass().getDeclaredMethod("toBundle");
+            toBundle.setAccessible(true);
+            Method fromBundle = message.getClass().getDeclaredMethod("getMessageFromBundle", Bundle.class);
+            fromBundle.setAccessible(true);
+            for (int round = 0; round < 3; round++) {
+                cleanup.invoke(message, 0xffeeeeee);
+                CharSequence cleaned = message.getText();
+                CharSequence restored = NotificationMarkdown.restoreCodeStyles(cleaned, message.getExtras());
+                check(cleaned.toString().contentEquals(restored), "restoration changed message characters");
+                Spanned styled = (Spanned) restored;
+                check(styled.getSpans(0, styled.length(), TypefaceSpan.class).length == 2, "code fonts lost or duplicated");
+                check(styled.getSpans(0, styled.length(), BackgroundColorSpan.class).length == 2, "code backgrounds lost or duplicated");
+                check(styled.getSpans(0, styled.length(), StyleSpan.class).length == 1, "sanitized emphasis lost");
+                check(styled.getSpans(0, styled.length(), ForegroundColorSpan.class).length == 0, "unrelated source color restored");
+                check(NotificationMarkdown.restoreCodeStyles(restored, message.getExtras()) == restored, "restoration not idempotent");
+                textField.set(message, restored);
+                Bundle bundle = (Bundle) toBundle.invoke(message);
+                message = (Notification.MessagingStyle.Message) fromBundle.invoke(null, parcel(bundle));
+                check(raw.contentEquals(message.getExtras().getCharSequence(NotificationMarkdown.RAW_TEXT)), "framework lost source metadata");
+            }
+            check(raw.contentEquals(original), "restoration mutated source");
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+
+    static void restorationRejectsUnownedOrChangedText() {
+        CharSequence cleaned = "code";
+        check(NotificationMarkdown.restoreCodeStyles(cleaned, new Bundle()) == cleaned, "unmarked message changed");
+        Bundle metadata = codeMetadata("`code`");
+        metadata.remove(NotificationMarkdown.OWNER);
+        check(NotificationMarkdown.restoreCodeStyles(cleaned, metadata) == cleaned, "ownerless message changed");
+        metadata.putString(NotificationMarkdown.OWNER, "another.app");
+        check(NotificationMarkdown.restoreCodeStyles(cleaned, metadata) == cleaned, "other app message changed");
+        check(NotificationMarkdown.restoreCodeStyles("modified", codeMetadata("`code`")) == "modified", "changed text restyled");
+        check(NotificationMarkdown.restoreCodeStyles(cleaned, codeMetadata("**code**")) == cleaned, "emphasis-only message restyled");
+        check(NotificationMarkdown.restoreCodeStyles(cleaned, codeMetadata("`" + "a".repeat(InlineMarkdown.MAX_LENGTH) + "`")) == cleaned,
+                "over-limit source restyled");
+    }
+
+    static void restorationCompletesPartialStyles() {
+        Bundle metadata = codeMetadata("😀 `Wi.i`");
+        SpannableStringBuilder cleaned = new SpannableStringBuilder("😀 Wi.i");
+        cleaned.setSpan(new TypefaceSpan("monospace"), 3, 7, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        Spanned restored = (Spanned) NotificationMarkdown.restoreCodeStyles(cleaned, metadata);
+        check(restored.getSpans(0, restored.length(), TypefaceSpan.class).length == 1, "existing code font duplicated");
+        BackgroundColorSpan[] backgrounds = restored.getSpans(0, restored.length(), BackgroundColorSpan.class);
+        check(backgrounds.length == 1 && restored.getSpanStart(backgrounds[0]) == 3 && restored.getSpanEnd(backgrounds[0]) == 7,
+                "missing code background or wrong emoji offsets");
+        check(backgrounds[0].getBackgroundColor() == NotificationMarkdown.CODE_BACKGROUND, "wrong background color");
+        check(cleaned.getSpans(0, cleaned.length(), BackgroundColorSpan.class).length == 0, "cleaned source was mutated");
+        check(NotificationMarkdown.restoreCodeStyles(restored, metadata) == restored, "partial repair duplicates styles");
+    }
+
+    private static Bundle codeMetadata(String raw) {
+        Bundle metadata = new Bundle();
+        metadata.putCharSequence(NotificationMarkdown.RAW_TEXT, raw);
+        metadata.putString(NotificationMarkdown.OWNER, WeChatDecorator.WECHAT_PACKAGE);
+        return metadata;
     }
 
     private static Notification notification(Context context, String text, long time) {
