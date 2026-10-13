@@ -23,6 +23,7 @@ import com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService.SystemUIDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatNotificationRemoval;
+import com.oasisfeng.nevo.decorators.wechat.NotificationMarkdownHooks;
 import com.oasisfeng.nevo.xposed.compat.PackageHookContext;
 import com.oasisfeng.nevo.xposed.compat.XC_MethodHook;
 import com.oasisfeng.nevo.xposed.compat.XposedBridge;
@@ -141,6 +142,9 @@ public class MainHook extends XposedModule {
 		if (!param.isFirstPackage()) return;
 		PackageHookContext loadPackageParam = new PackageHookContext(
 				param.getPackageName(), processName, param.getClassLoader());
+		NotificationMarkdownHooks.install(loadPackageParam.classLoader,
+				() -> pref.getBoolean("WeChatDecorator.enabled", true)
+						&& pref.getBoolean(RemotePreferenceStore.KEY_MARKDOWN, false), processName, this::deoptimize);
 		switch (loadPackageParam.packageName) {
 			case "com.android.systemui":
 				if (!"com.android.systemui".equals(loadPackageParam.processName)) return;

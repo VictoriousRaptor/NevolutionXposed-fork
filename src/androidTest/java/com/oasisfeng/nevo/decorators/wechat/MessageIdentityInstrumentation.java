@@ -61,7 +61,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "mediaReplyActionDeduplication", "concurrentMediaReplyRecast",
                 "animatedStickerMediaBranch", "animatedStickerReplyAfterUpdate",
                 "markdownStylesAndParcel", "markdownRebuildAndDisable", "markdownIdentityReplyRecall", "markdownBuilderAndPreview",
-                "markdownCodeStylesAndParcel", "markdownCodeSourceAndReply" };
+                "markdownCodeStylesAndParcel", "markdownCodeSourceAndReply",
+                "markdownFrameworkCodeCleanup", "markdownRestorationScope", "markdownPartialCodeStyles" };
         Runnable[] tests = { this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
                 this::replyThenIncoming, this::repeatedRebuildAndPreview, this::untrustedMissingSender, this::reusedNotificationId,
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
@@ -89,7 +90,10 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> NotificationMarkdownInstrumentation.identityReplyAndRecallUseSource(getTargetContext()),
                 () -> NotificationMarkdownInstrumentation.sourceSurvivesBuilderAndPreview(getTargetContext()),
                 NotificationMarkdownInstrumentation::codeStylesSurviveParcel,
-                () -> NotificationMarkdownInstrumentation.codeSourceAndReplySurviveRebuild(getTargetContext()) };
+                () -> NotificationMarkdownInstrumentation.codeSourceAndReplySurviveRebuild(getTargetContext()),
+                NotificationMarkdownInstrumentation::frameworkCodeCleanupRoundTrip,
+                NotificationMarkdownInstrumentation::restorationRejectsUnownedOrChangedText,
+                NotificationMarkdownInstrumentation::restorationCompletesPartialStyles };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();

@@ -106,6 +106,7 @@ final class NotificationMessages {
         Message message = new Message(text, bundle.getLong("time", 0), person);
         if (extras != null) message.getExtras().putAll(extras);
         message.getExtras().remove(NotificationMarkdown.RAW_TEXT);
+        message.getExtras().remove(NotificationMarkdown.OWNER);
         String mime = bundle.getString("type");
         Parcelable uri = bundle.getParcelable("uri");
         if (mime != null && uri instanceof android.net.Uri) message.setData(mime, (android.net.Uri) uri);
