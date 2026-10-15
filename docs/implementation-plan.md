@@ -237,7 +237,7 @@ reuse or wrapper pre-seeding.
 Create ignored `local.properties` with the resolved SDK path:
 
 ```properties
-sdk.dir=C:/Users/<user>/scoop/apps/android-clt/current
+sdk.dir=C:/Users/<you>/scoop/apps/android-clt/current
 ```
 
 The repository currently has no `gradlew.bat`. Bootstrap its existing Gradle
@@ -286,7 +286,7 @@ Done, including the JADX prerequisite for the deferred phone phase.
   with `distributionSha256Sum` set; the wrapper downloaded and verified the
   distribution from it.
 - Ignored `local.properties` contains
-  `sdk.dir=C:/Users/<user>/scoop/apps/android-clt/current`.
+  `sdk.dir=C:/Users/<you>/scoop/apps/android-clt/current`（本机用户目录已脱敏）.
 - `.\gradlew.bat clean assembleDebug` succeeded, and a repeat run with
   `--refresh-dependencies` (dependencies pulled through the Aliyun mirrors)
   produced a byte-identical APK.

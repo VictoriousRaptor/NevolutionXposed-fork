@@ -46,6 +46,11 @@ public final class WeChatReplyProfile {
 
 	private static final String RECEIVER_CLASS = "com.tencent.mm.plugin.auto.service.MMAutoMessageReplyReceiver";
 
+	/** Device APK-verified WeChat 8.0.79/3182; do not borrow another build's layout. */
+	private static final WeChatReplyProfile RELEASE_8_0_79_3182 = new WeChatReplyProfile(
+			"wechat-8.0.79/3182", new String[] { RECEIVER_CLASS }, new String[] { "z2.s1" },
+			new String[] { "lt1.a" }, new String[] { "c", "d", "b" });
+
 	/** Device APK-verified 8.0.77/3141; distinct from the supplied 3160 build. */
 	private static final WeChatReplyProfile RELEASE_8_0_77_3141 = new WeChatReplyProfile(
 			"wechat-8.0.77/3141", new String[] { RECEIVER_CLASS }, new String[] { "z2.s1" },
@@ -97,6 +102,8 @@ public final class WeChatReplyProfile {
 	}
 
 	public static WeChatReplyProfile forPackage(String versionName, long versionCode) {
+		if ("8.0.79".equals(versionName) && versionCode == 3182L) return RELEASE_8_0_79_3182;
+		if ("8.0.79".equals(versionName) || versionCode == 3182L) return LEGACY;
 		if ("8.0.77".equals(versionName) && versionCode == 3141L) return RELEASE_8_0_77_3141;
 		if ("8.0.77".equals(versionName) && versionCode == 3160L) return RELEASE_8_0_77;
 		// Other 8.0.77 builds must not reuse a different build's obfuscated layout.

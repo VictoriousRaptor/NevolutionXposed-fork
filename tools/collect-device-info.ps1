@@ -19,7 +19,7 @@ device or the WeChat installation.
 #>
 [CmdletBinding()]
 param(
-    [string]   $AdbPath  = 'C:\Users\<user>\scoop\apps\android-clt\current\platform-tools\adb.exe',
+    [string]   $AdbPath  = (Join-Path $env:USERPROFILE 'scoop\apps\android-clt\current\platform-tools\adb.exe'),
     [string]   $JadxPath = 'jadx',
     [string]   $OutRoot  = (Join-Path (Split-Path -Parent $PSScriptRoot) '.debug-artifacts\device'),
     [string]   $Package  = 'com.tencent.mm',

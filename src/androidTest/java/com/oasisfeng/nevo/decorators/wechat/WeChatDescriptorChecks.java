@@ -23,7 +23,7 @@ final class WeChatDescriptorChecks {
                 Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY);
         WeChatDescriptorChecks v = new WeChatDescriptorChecks(wechat.getClassLoader());
         Class<?> msg = v.type(p.message), state = v.type(p.state), simple = v.type(p.simple);
-        v.method(state, "d", Object.class, String.class);
+        v.method(state, p.stateGet, Object.class, String.class);
         v.field(simple, "d", int.class);
         v.method(simple, "getString", String.class, int.class);
         v.method(simple, "getLong", long.class, int.class);

@@ -38,7 +38,7 @@ final class WeChatImageEvents {
 			Class<?> msg = Class.forName(profile.message, false, loader);
 			Class<?> flow = Class.forName(profile.flow, false, loader);
 			stage = "state_accessor";
-			Method stateGet = method(state, "d", Object.class, String.class);
+			Method stateGet = method(state, profile.stateGet, Object.class, String.class);
 			stage = "message_base";
 			// Decompiled aliases such as f473340d exist only in JADX output; resolve the real obfuscated field.
 			Field resolved = null;
