@@ -26,7 +26,7 @@
 ### 第二轮安装与运行确认（2026-09-15 23:07）
 
 - 上述待检查事项更新：Gradle 最终退出码 0，`BUILD SUCCESSFUL in 9m 49s`；lint 0 错误、58 条警告。
-- 已覆盖安装到设备 `<DEVICE_SERIAL>`，设备 base.apk SHA-256 与本轮 `f46495b4...73b1d5dd` 完整哈希一致，版本 3.1.1 / 9。
+- 已覆盖安装到测试设备（序列号已脱敏），设备 base.apk SHA-256 与本轮 `f46495b4...73b1d5dd` 完整哈希一致，版本 3.1.1 / 9。
 - 首次重启未查到本模块运行标记；再次重启后，微信主进程 PID 13683 确认 `onModuleLoaded`、`diagnostic_build revision=image-diag-2`、`events_ready profile=8.0.72/3085 ... scans=0 base=g.d`，回复 profile 同时 ready。
 - 启动中仍有 `Failed to create module context: Application package com.oasisfeng.nevo.xposed not found` 警告；图片钩子随后明确 ready，不能将此警告当作图片链路失败的结论。
 - 已进入收图复测准备阶段。图片发布、连续性修复效果和高清落盘时机仍待用户发送测试图片验证，尚未宣称修复验收通过。

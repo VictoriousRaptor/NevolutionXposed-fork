@@ -1,5 +1,9 @@
 # 撤回通知历史裁剪
 
+2026-10-16 补充：精确新增 8.0.79/3182，`RevokeMsgEvent.g: en.js`、`en.js.c: storage.e9`，
+会话/服务端 ID 为 `N0(): String` / `I0(): long`。通知 ID 来源、原始完整签名及本轮验证边界见
+[8.0.79 记录](wechat-8.0.79-findings.md)。缺少精确 ID 的保守处理与既有 BEFORE hook 不变。
+
 更新日期：2026-09-30。源码实现及离线映射已完成；真实微信运行验证待执行。
 
 8.0.77 新增两组精确画像：3141 为 `RevokeMsgEvent.g: en.gs`、`en.gs.c: storage.e9`，

@@ -21,6 +21,7 @@ import static org.junit.Assert.assertEquals;
 public class WeChatReplyProfileTest {
 
 	@Test public void mapsKnownVersionsToTheirProfiles() {
+		assertEquals("wechat-8.0.79/3182", WeChatReplyProfile.forPackage("8.0.79", 3182L).label);
 		assertEquals("wechat-8.0.78", WeChatReplyProfile.forPackage("8.0.78", 3180L).label);
 		assertEquals("wechat-8.0.77", WeChatReplyProfile.forPackage("8.0.77", 3160L).label);
 		assertEquals("wechat-8.0.72", WeChatReplyProfile.forPackage("8.0.72", 3085L).label);
@@ -43,6 +44,19 @@ public class WeChatReplyProfileTest {
 		assertEquals(Arrays.asList("z2.s1"), candidates(profile, "helperCandidates"));
 		assertEquals(Arrays.asList("bs1.a"), candidates(profile, "gateCandidates"));
 		assertEquals(Arrays.asList("c", "g", "b"), candidates(profile, "gateMethods"));
+	}
+
+	@Test public void requiresExactWeChat8079Build() throws Exception {
+		final WeChatReplyProfile profile = WeChatReplyProfile.forPackage("8.0.79", 3182L);
+		assertEquals(Arrays.asList("com.tencent.mm.plugin.auto.service.MMAutoMessageReplyReceiver"),
+				candidates(profile, "receiverCandidates"));
+		assertEquals(Arrays.asList("z2.s1"), candidates(profile, "helperCandidates"));
+		assertEquals(Arrays.asList("lt1.a"), candidates(profile, "gateCandidates"));
+		assertEquals(Arrays.asList("c", "d", "b"), candidates(profile, "gateMethods"));
+		for (long code : new long[]{0L, 3085L, 3141L, 3160L, 3180L, 3183L})
+			assertEquals("wechat-legacy", WeChatReplyProfile.forPackage("8.0.79", code).label);
+		for (String name : new String[]{"8.0.72", "8.0.77", "8.0.78", "8.0.79.dev", "unknown"})
+			assertEquals("wechat-legacy", WeChatReplyProfile.forPackage(name, 3182L).label);
 	}
 
 	@Test public void separatesWeChat8077Builds() throws Exception {

@@ -23,6 +23,8 @@ final class WeChatRecallEvents {
             this.message = message; this.payload = payload; this.serverId = serverId; this.talker = talker;
         }
         static Profile forVersion(String name, long code) {
+            if ("8.0.79".equals(name) && code == 3182)
+                return new Profile("com.tencent.mm.storage.e9", "en.js", "I0", "N0");
             if ("8.0.72".equals(name) && code == 3085)
                 return new Profile("com.tencent.mm.storage.f9", "pm.ds", "I0", "O0");
             if ("8.0.78".equals(name) && code == 3180)

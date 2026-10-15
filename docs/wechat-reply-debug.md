@@ -30,6 +30,9 @@ The reply path is diagnosed in this order:
 
 - WeChat 8.0.72 (Google Play, versionCode 3085): verified, see
   `wechat-8.0.72-findings.md`.
+- WeChat 8.0.79/3182: exact name AND code mapping, gates `lt1.a[c,d,b]`;
+  independent image, app-reply and recall mappings and validation boundaries are in
+  `wechat-8.0.79-findings.md`. Runtime readiness does not prove message delivery.
 - WeChat 8.0.78 (China build, versionCode 3180): verified and delivered, see
   `wechat-8.0.78-findings.md`.
 - WeChat 8.0.76 legacy profile: mapping preserved but not live-tested.

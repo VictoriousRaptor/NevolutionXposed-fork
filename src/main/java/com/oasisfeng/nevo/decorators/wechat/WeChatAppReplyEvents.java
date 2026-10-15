@@ -31,6 +31,9 @@ final class WeChatAppReplyEvents {
         }
 
         static Profile forVersion(String name, long code) {
+            if ("8.0.79".equals(name) && code == 3182)
+                return new Profile("8.0.79/3182", "com.tencent.mm.storage.e9", "r1", "C0", "M0", "N0",
+                        "a3", "M2", "F2");
             if ("8.0.72".equals(name) && code == 3085)
                 return new Profile("8.0.72/3085", "com.tencent.mm.storage.f9", "q1", "C0", "M0", "O0",
                         "b3", "N2", "F2");
