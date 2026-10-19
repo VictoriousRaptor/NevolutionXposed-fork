@@ -91,7 +91,7 @@ class MessagingBuilder {
 	private static final String KEY_DATA_URI= "uri";
 	private static final String KEY_EXTRAS_BUNDLE = "extras";
 
-	private static final String KEY_USERNAME = "key_username";
+	private static final String KEY_USERNAME = WeChatReplyProfile.USERNAME_EXTRA;
 	private static final String MENTION_SEPARATOR = " ";			// Separator between @nick and text. It's not a regular white space, but U+2005.
 
 	/**
@@ -99,11 +99,10 @@ class MessagingBuilder {
 	 * 
 	 * @param conversation 会话的内存存根
 	 * @param n 当前消息
-	 * @param title 标题
-	 * @param archieve 消息存档
+	 * @param archive 消息存档
 	 * @return 会话的图形化
 	 */
-	@Nullable MessagingStyle buildFromArchive(final Conversation conversation, final Notification n, final CharSequence title, final List<Notification> archive) {
+	@Nullable MessagingStyle buildFromArchive(final Conversation conversation, final Notification n, final List<Notification> archive) {
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
 		appendKnownMessages(messaging, conversation, n, archive);
 		return messaging.getMessages().isEmpty() && !n.extras.getBoolean(NotificationMessages.RECALL_PROMPT)
@@ -112,27 +111,27 @@ class MessagingBuilder {
 	/**
 	 * 从车载扩展信息重建会话
 	 */
-	@Nullable MessagingStyle buildFromExtender(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
-		if (!WeChatMessage.isChat(n.tickerText)) return buildFromArchive(conversation, n, title, archive);
+	@Nullable MessagingStyle buildFromExtender(final Conversation conversation, final int id, final Notification n, final List<Notification> archive) {
+		if (!WeChatMessage.isChat(n.tickerText)) return buildFromArchive(conversation, n, archive);
 		final Notification.CarExtender extender = new Notification.CarExtender(n);
 		final CarExtender.UnreadConversation convs = extender.getUnreadConversation();
 		if (convs == null) {
-			final MessagingStyle fromActions = buildFromActions(conversation, id, n, title, archive);
+			final MessagingStyle fromActions = buildFromActions(conversation, id, n, archive);
 			if (fromActions != null) return fromActions;
-			return buildWithSyntheticReply(conversation, id, n, title, archive);
+			return buildWithSyntheticReply(conversation, id, n, archive);
 		}
 		final long latest_timestamp = convs.getLatestTimestamp();
-		if (n.when <= 0 && latest_timestamp > 0) n.when = conversation.timestamp = latest_timestamp;
+		if (n.when <= 0 && latest_timestamp > 0) n.when = latest_timestamp;
 
 		final PendingIntent on_reply = convs.getReplyPendingIntent();
 		if (on_reply == null) {
 			if (convs.getReadPendingIntent() != null) mMarkReadPendingIntents.put(id, convs.getReadPendingIntent());
-			MessagingStyle fromActions = buildFromActions(conversation, id, n, title, archive);
-			return fromActions != null ? fromActions : buildWithSyntheticReply(conversation, id, n, title, archive);
+			MessagingStyle fromActions = buildFromActions(conversation, id, n, archive);
+			return fromActions != null ? fromActions : buildWithSyntheticReply(conversation, id, n, archive);
 		}
 		if (conversation.key == null) {
 			try {
-				if (on_reply != null) on_reply.send(mContext, 0, null, (p, intent, r, d, b) -> {
+				on_reply.send(mContext, 0, null, (p, intent, r, d, b) -> {
 					final String key = intent.getStringExtra(KEY_USERNAME);
 					if (key != null) {
 						conversation.onTalkerResolved.accept(key);
@@ -150,29 +149,11 @@ class MessagingBuilder {
 
 		final List<Action> actions = new ArrayList<>();
 		// Forward standard notification RemoteInput results through WeChat's original action.
-		final RemoteInput remote_input;
-		if (SDK_INT >= N && on_reply != null && (remote_input = convs.getRemoteInput()) != null) {
-			final PendingIntent proxy = proxyDirectReply(id, on_reply, remote_input, null);
-			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(remote_input.getResultKey()).addExtras(remote_input.getExtras())
-					.setAllowFreeFormInput(true).setLabel(actionReply);
-
-			final Action.Builder reply_action = new Action.Builder(null, actionReply, proxy)
-					.addRemoteInput(reply_remote_input.build()).setAllowGeneratedReplies(true);
-			if (SDK_INT >= P) reply_action.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
-			actions.add(reply_action.build());
-		} else if (SDK_INT >= N && on_reply != null) {
-			// Some WeChat builds omit RemoteInput from CarExtender but still provide a valid
-			// reply PendingIntent. Preserve that version-specific PendingIntent instead of
-			// inventing a broadcast to an obfuscated receiver.
-			final RemoteInput fallbackRemoteInput = new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY)
-					.setAllowFreeFormInput(true).setLabel(actionReply).build();
-			final PendingIntent proxy = proxyDirectReply(id, on_reply, fallbackRemoteInput, null);
-			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, proxy)
-					.addRemoteInput(fallbackRemoteInput)
-					.setAllowGeneratedReplies(true);
-			if (SDK_INT >= P) reply_action_builder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
-			actions.add(reply_action_builder.build());
-			logReply("action_native_fallback", "notificationId=" + id + " resultKey=" + DEFAULT_AUTO_REPLY_RESULT_KEY);
+		if (SDK_INT >= N) {
+			final RemoteInput remoteInput = convs.getRemoteInput();
+			actions.add(buildNativeReplyAction(id, on_reply, remoteInput));
+			if (remoteInput == null)
+				logReply("action_native_fallback", "notificationId=" + id + " resultKey=" + DEFAULT_AUTO_REPLY_RESULT_KEY);
 		}
 		// 放大
 		if (n.extras.containsKey(WeChatDecorator.EXTRA_PICTURE_PATH)) {
@@ -193,7 +174,7 @@ class MessagingBuilder {
 		return SDK_INT >= S ? (FLAG_UPDATE_CURRENT | FLAG_MUTABLE) : FLAG_UPDATE_CURRENT;
 	}
 
-	@Nullable private MessagingStyle buildFromActions(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
+	@Nullable private MessagingStyle buildFromActions(final Conversation conversation, final int id, final Notification n, final List<Notification> archive) {
 		if (!WeChatMessage.isChat(n.tickerText)) return null;
 		final Action[] actions = n.actions;
 		if (actions == null) return null;
@@ -242,18 +223,22 @@ class MessagingBuilder {
 			newActions.add(zoom_action.build());
 		}
 		// Forward standard notification RemoteInput results through WeChat's original action.
-		if (onReply != null && replyRemoteInput != null) {
-			final PendingIntent proxy = proxyDirectReply(id, onReply, replyRemoteInput, null);
-			final RemoteInput.Builder reply_remote_input = new RemoteInput.Builder(replyRemoteInput.getResultKey())
-					.addExtras(replyRemoteInput.getExtras()).setAllowFreeFormInput(true).setLabel(actionReply);
-			final Action.Builder reply_action_builder = new Action.Builder(null, actionReply, proxy)
-					.addRemoteInput(reply_remote_input.build()).setAllowGeneratedReplies(true);
-			if (SDK_INT >= P) reply_action_builder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
-			newActions.add(reply_action_builder.build());
-		}
+		newActions.add(buildNativeReplyAction(id, onReply, replyRemoteInput));
 
 		setActions(n, newActions.toArray(new Action[0]));
 		return messaging;
+	}
+
+	/** Keep the native target even when CarExtender omits its RemoteInput descriptor. */
+	private Action buildNativeReplyAction(int id, PendingIntent target, @Nullable RemoteInput source) {
+		RemoteInput.Builder input = new RemoteInput.Builder(source == null ? DEFAULT_AUTO_REPLY_RESULT_KEY : source.getResultKey())
+				.setAllowFreeFormInput(true).setLabel(actionReply);
+		if (source != null) input.addExtras(source.getExtras());
+		RemoteInput replyInput = input.build();
+		Action.Builder action = new Action.Builder(null, actionReply, proxyDirectReply(id, target, replyInput, null))
+				.addRemoteInput(replyInput).setAllowGeneratedReplies(true);
+		if (SDK_INT >= P) action.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
+		return action.build();
 	}
 
 	/** Intercept the PendingIntent in RemoteInput to update the notification with replied message upon success. */
@@ -284,19 +269,7 @@ class MessagingBuilder {
 			return false;
 		}
 		final RemoteInput remoteInput = convs.getRemoteInput();
-		final RemoteInput replyInput;
-		if (remoteInput != null) {
-			final RemoteInput.Builder builder = new RemoteInput.Builder(remoteInput.getResultKey())
-					.addExtras(remoteInput.getExtras()).setAllowFreeFormInput(true).setLabel(actionReply);
-			replyInput = builder.build();
-		} else {
-			replyInput = new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY)
-					.setAllowFreeFormInput(true).setLabel(actionReply).build();
-		}
-		final PendingIntent proxy = proxyDirectReply(id, onReply, replyInput, null);
-		final Action.Builder replyAction = new Action.Builder(null, actionReply, proxy)
-				.addRemoteInput(replyInput).setAllowGeneratedReplies(true);
-		if (SDK_INT >= P) replyAction.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
+		final Action replyAction = buildNativeReplyAction(id, onReply, remoteInput);
 
 		final Action[] existing = n.actions;
 		final List<Action> merged = new ArrayList<>();
@@ -313,9 +286,10 @@ class MessagingBuilder {
 			}
 			if (!isReply) merged.add(action);
 		}
-		merged.add(replyAction.build());
+		merged.add(replyAction);
 		setActions(n, merged.toArray(new Action[0]));
-		logReply("action_media_reply_attached", "notificationId=" + id + " resultKey=" + replyInput.getResultKey()
+		logReply("action_media_reply_attached", "notificationId=" + id + " resultKey="
+				+ (remoteInput == null ? DEFAULT_AUTO_REPLY_RESULT_KEY : remoteInput.getResultKey())
 				+ " existingActions=" + (existing == null ? 0 : existing.length));
 		return true;
 	}
@@ -478,7 +452,7 @@ class MessagingBuilder {
 		default void abortNotificationReply(long reservation) {}
 	}
 
-	MessagingBuilder(final Context context, final Context packageContext, /* final SharedPreferences preferences,  */final Controller controller) {
+	MessagingBuilder(final Context context, final Controller controller) {
 		mContext = context;
 		// Try to load resources from module APK
 		Context moduleContext = null;
@@ -646,8 +620,8 @@ class MessagingBuilder {
 		}
 	}
 
-	@Nullable private MessagingStyle buildWithSyntheticReply(final Conversation conversation, final int id, final Notification n, final CharSequence title, final List<Notification> archive) {
-		if (!WeChatMessage.isChat(n.tickerText)) return buildFromArchive(conversation, n, title, archive);
+	@Nullable private MessagingStyle buildWithSyntheticReply(final Conversation conversation, final int id, final Notification n, final List<Notification> archive) {
+		if (!WeChatMessage.isChat(n.tickerText)) return buildFromArchive(conversation, n, archive);
 		final PendingIntent contentIntent = n.contentIntent;
 		if (contentIntent == null) {
 			if (BuildConfig.DEBUG) Log.d(TAG, "No contentIntent for synthetic reply");

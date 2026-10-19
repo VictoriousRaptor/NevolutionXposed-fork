@@ -185,7 +185,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			Log.i("WeChat.Markdown", "source=markdown_settings enabled=" + mMarkdownEnabled);
 			imagePreviews.setLargePreviewEnabled(mImagePreviewLargeEnabled);
 
-			mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), mReplyController);		// Must be called after loadPreferences().
+			mMessagingBuilder = new MessagingBuilder(getAppContext(), mReplyController);		// Must be called after loadPreferences().
 			if (!mRoundResetReceiverRegistered) {
 				ContextCompat.registerReceiver(getAppContext(), mRoundResetReceiver,
 						new IntentFilter(WeChatNotificationRemoval.ACTION_RESET_ROUND), ContextCompat.RECEIVER_EXPORTED);
@@ -437,9 +437,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 			final Icon icon = n.getLargeIcon();
 			if (icon != null) cached.icon = IconCompat.createFromIcon(getAppContext(), icon);
 			cached.title = title;
-			cached.summary = content;
-			cached.ticker = n.tickerText;
-			cached.timestamp = n.when;
 			final Conversation conversation = mConversationManager.snapshot(cached, n);
 			if (is_recall) conversation.setType(conversation.isGroupChat()
 					? Conversation.TYPE_GC_RECALL : Conversation.TYPE_DM_RECALL);
@@ -464,10 +461,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (!ensureMessagingBuilder()) return Decorating.Unprocessed;
 			if (BuildConfig.DEBUG) Log.d(TAG, "Calling buildFromExtender...");
 			final List<Notification> archive = getArchivedNotifications(id);
-			MessagingStyle messaging = mMessagingBuilder.buildFromExtender(conversation, id, n, title, archive);
+			MessagingStyle messaging = mMessagingBuilder.buildFromExtender(conversation, id, n, archive);
 			if (BuildConfig.DEBUG) Log.d(TAG, "buildFromExtender returned: " + (messaging != null ? "non-null" : "null")); // build message from android auto
 			if (messaging == null)	// EXTRA_TEXT will be written in buildFromArchive()
-				messaging = mMessagingBuilder.buildFromArchive(conversation, n, title, archive);
+				messaging = mMessagingBuilder.buildFromArchive(conversation, n, archive);
 			if (messaging == null) return Decorating.Unprocessed;
 			final List<MessagingStyle.Message> messages = messaging.getMessages();
 			if (messages.isEmpty()) {
@@ -537,7 +534,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (getAppContext() == null) return false;
 			try {
 				if (BuildConfig.DEBUG) Log.d(TAG, "mMessagingBuilder is null, initializing...");
-				mMessagingBuilder = new MessagingBuilder(getAppContext(), getPackageContext(), mReplyController);
+				mMessagingBuilder = new MessagingBuilder(getAppContext(), mReplyController);
 				return true;
 			} catch (final Exception e) {
 				Log.w(TAG, "Failed to init mMessagingBuilder: " + e.getMessage());

@@ -386,9 +386,6 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
     private Conversation classified(ConversationManager manager, Notification n) {
         Conversation cached = manager.getConversation(1);
         cached.title = "Alice";
-        cached.summary = n.extras.getCharSequence(Notification.EXTRA_TEXT);
-        cached.ticker = n.tickerText;
-        cached.timestamp = n.when;
         return manager.snapshot(cached, n);
     }
 
@@ -489,7 +486,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         int replyResource = context.getResources().getIdentifier("action_reply", "string", context.getPackageName());
         check(replyResource != 0, "action_reply resource not found");
         String expected = context.getString(replyResource);
-        MessagingBuilder builder = new MessagingBuilder(context, context, (id, modifies) -> {});
+        MessagingBuilder builder = new MessagingBuilder(context, (id, modifies) -> {});
         try {
             PendingIntent reply = PendingIntent.getBroadcast(context, 501,
                     new Intent("com.oasisfeng.nevo.test.REPLY").setPackage(context.getPackageName()),
@@ -502,7 +499,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
 
             Notification fromCar = carNotification(carConversation);
             Conversation carPeer = conversation(false); carPeer.key = "alice";
-            check(builder.buildFromExtender(carPeer, 1, fromCar, "Alice", Collections.emptyList()) != null,
+            check(builder.buildFromExtender(carPeer, 1, fromCar, Collections.emptyList()) != null,
                     "car reply action was not built");
             checkReplyLabel(fromCar, expected);
 
@@ -511,7 +508,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             fromActions.actions = new Notification.Action[]{ new Notification.Action.Builder(null, "Reply", reply)
                     .addRemoteInput(original).build() };
             Conversation actionPeer = conversation(false); actionPeer.key = "alice";
-            check(builder.buildFromExtender(actionPeer, 2, fromActions, "Alice", Collections.emptyList()) != null,
+            check(builder.buildFromExtender(actionPeer, 2, fromActions, Collections.emptyList()) != null,
                     "actions reply was not built");
             checkReplyLabel(fromActions, expected);
 
@@ -520,7 +517,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                             .addMessage("hello").setLatestTimestamp(100).setReplyAction(reply, null).build();
             Notification fromFallback = carNotification(fallbackConversation);
             Conversation fallbackPeer = conversation(false); fallbackPeer.key = "alice";
-            check(builder.buildFromExtender(fallbackPeer, 3, fromFallback, "Alice", Collections.emptyList()) != null,
+            check(builder.buildFromExtender(fallbackPeer, 3, fromFallback, Collections.emptyList()) != null,
                     "fallback reply action was not built");
             checkReplyLabel(fromFallback, expected);
 

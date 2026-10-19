@@ -70,6 +70,14 @@
 
 普通模块/仪器测试进程没有 compile-only 的 Xposed API，不能直接加载继承 `XposedModule` 的 `MainHook`。`MessagingBuilder.isSyntheticReplyAvailable()` 对 `NoClassDefFoundError` 返回 false，并记录 `action_synthetic_skipped reason=xposed_api_unavailable`；保持消息重建及原生回复，不添加未经验证的合成入口。该回退不修改微信版本映射或签名门禁，也不向 APK 打包 Xposed API。
 
+2026-10-20 回复门禁安装去重：微信主进程的 `Application.onCreate(): void` AFTER、`MMAutoMessageReplyReceiver.onReceive(Context, Intent): void` BEFORE，以及合成回复派发前，统一复用 `MainHook.hookAutoLogicMethods()`。仅处理当前 `WeChatReplyProfile` 已校验的无参数、static、boolean 返回值门禁（包括上述各版本和 legacy 候选）；保留现有版本名/版本号匹配规则、画像重试及启用条件，不新增目标或作用进程。安装过程串行，按精确 `java.lang.reflect.Method` 记录成功项；同一方法不随回复次数重复添加回调，单项失败不记为成功，后续安装调用仍可重试。`hookAutoLogicMethods: <方法> hook failed` 保留安装失败诊断；`car_mode_bypass_ready` 仅表示安装流程已执行，不证明所有方法均成功或消息已送达。RemoteInput 辅助类和平台结果回退保持原有安装与单次取用语义。
+
+同轮简化将三处原生回复动作构建集中在 `MessagingBuilder`，保留原始 PendingIntent、resultKey/extras、动作顺序及无 RemoteInput 时的默认结果键；合成派发仍独立。`Notification.actions` 直接写入公开字段，写入前仍清除 `nevo.actionsSerialized` 标记。图片首次发布与重新挂接共用通知构建步骤，继续复制原有身份、轮次、撤回和 Markdown 原文元数据；未改变下载目标、缓存上限或各图片画像。
+
+回归需分别覆盖启动后多次回复不叠加门禁回调、单项安装失败后的重试、原生/缺 RemoteInput/媒体回复、同 ID 更新后的动作去重、图片首次发布及重新挂接的身份与 token 保留。2026-10-20 本地 138 项单元测试及 Debug/仪器 APK 构建通过，两包签名与现有 release 证书一致；PJZ110 / Android 16 上 46/46 项模块 framework 仪器测试通过，已安装微信 8.0.79/3182 的 40 项描述符检查通过。测试仅在模块测试进程放开隐藏 API 检查；微信与 SystemUI 进程均未变化，临时测试包已卸载，保留本轮 Debug 模块。上述测试不证明新门禁 hook 已在微信进程加载，也不替代真实消息收发、合成回复安装失败重试或厂商通知 UI 验收；这些运行时行为仍待验证。
+
+本轮应用源码 Lint 通过，结果为 0 errors / 33 warnings。测试源码的 Lint 分析在常规和单工作线程尝试中均长时间未产出，已中止；生成报告时明确排除了 `lintAnalyzeDebugAndroidTest` 与 `lintAnalyzeDebugUnitTest`，测试源码静态检查状态仍为未完成。
+
 各功能的版本匹配不能混用：
 
 | 功能 | 当前匹配语义 | 未匹配时行为 |

@@ -50,11 +50,7 @@ class ConversationManager {
 		long resolutionGeneration;
 		java.util.function.Consumer<String> onTalkerResolved = ignored -> {};
 		String knownKey() { return resolvedKey != null ? resolvedKey : key; }
-		int count;
 		CharSequence title;
-		CharSequence summary;
-		CharSequence ticker;
-		long timestamp;
 		IconCompat icon;
 		PendingIntent contentIntent;
 		PendingIntent replyIntent;
@@ -167,11 +163,7 @@ class ConversationManager {
 		Conversation view = new Conversation(cached.id);
 		view.key = cached.knownKey();
 		view.title = cached.title;
-		view.summary = cached.summary;
-		view.ticker = cached.ticker;
-		view.timestamp = cached.timestamp;
 		view.icon = cached.icon;
-		view.count = cached.count;
 		view.contentIntent = cached.contentIntent;
 		view.notificationPeerId = cached.notificationPeerId;
 		view.typeEvidence = decision;

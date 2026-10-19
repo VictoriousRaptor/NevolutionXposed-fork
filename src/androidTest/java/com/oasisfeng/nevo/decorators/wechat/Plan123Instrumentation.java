@@ -111,20 +111,20 @@ final class Plan123Instrumentation {
     }
 
     static void replyEligibility(Context context) {
-        MessagingBuilder builder = new MessagingBuilder(context, context, (id, modifies) -> {});
+        MessagingBuilder builder = new MessagingBuilder(context, (id, modifies) -> {});
         PendingIntent nativeReply = PendingIntent.getBroadcast(context, 802,
                 new Intent("com.oasisfeng.nevo.test.NATIVE").setPackage(context.getPackageName()), flags());
         try {
             for (String ticker : new String[]{null, "", "好友请求", ":hello"}) {
                 Notification n = car(context, nativeReply); n.tickerText = ticker;
-                check(builder.buildFromExtender(conversation(false), 802, n, "Alice", Collections.emptyList()) != null,
+                check(builder.buildFromExtender(conversation(false), 802, n, Collections.emptyList()) != null,
                         "non-chat content stopped rebuilding");
                 check(n.actions == null || n.actions.length == 0, "non-chat gained car reply");
                 check(!builder.attachReplyAction(802, n), "non-chat gained media reply");
                 Notification.Action original = new Notification.Action.Builder(null, "native", nativeReply)
                         .addRemoteInput(new RemoteInput.Builder("native-key").build()).build();
                 n.actions = new Notification.Action[]{original};
-                builder.buildFromExtender(conversation(false), 802, n, "Alice", Collections.emptyList());
+                builder.buildFromExtender(conversation(false), 802, n, Collections.emptyList());
                 check(n.actions.length == 1 && n.actions[0] == original, "non-chat native action was proxied or deleted");
             }
             Notification media = car(context, nativeReply); media.tickerText = "Group: Bob: [文件]";
@@ -132,7 +132,7 @@ final class Plan123Instrumentation {
             Notification noNative = raw(context, "hello", 100, 0);
             noNative.tickerText = "Alice: hello";
             noNative.contentIntent = nativeReply;
-            check(builder.buildFromExtender(conversation(false), 803, noNative, "Alice", Collections.emptyList()) != null,
+            check(builder.buildFromExtender(conversation(false), 803, noNative, Collections.emptyList()) != null,
                     "chat without native objects lost message rebuilding");
             check(noNative.actions == null || noNative.actions.length == 0,
                     "ordinary test process exposed an unverified synthetic reply");
@@ -140,7 +140,7 @@ final class Plan123Instrumentation {
     }
 
     static void mediaReplyActionDeduplication(Context context) {
-        MessagingBuilder builder = new MessagingBuilder(context, context, (id, modifies) -> {});
+        MessagingBuilder builder = new MessagingBuilder(context, (id, modifies) -> {});
         PendingIntent nativeReply = PendingIntent.getBroadcast(context, 805,
                 new Intent("com.oasisfeng.nevo.test.MEDIA_DEDUP").setPackage(context.getPackageName()), flags());
         PendingIntent otherActionIntent = PendingIntent.getBroadcast(context, 806,
@@ -377,7 +377,7 @@ final class Plan123Instrumentation {
                 }
             }
         };
-        MessagingBuilder builder = new MessagingBuilder(context, context, controller);
+        MessagingBuilder builder = new MessagingBuilder(context, controller);
         builderHolder[0] = builder;
 
         try {
@@ -474,7 +474,7 @@ final class Plan123Instrumentation {
                 }
             }
         };
-        MessagingBuilder builder = new MessagingBuilder(context, context, controller);
+        MessagingBuilder builder = new MessagingBuilder(context, controller);
         builderHolder[0] = builder;
 
         try {
@@ -584,7 +584,7 @@ final class Plan123Instrumentation {
         PendingIntent nativeReply = PendingIntent.getBroadcast(context, 804, new Intent(action).setPackage(context.getPackageName()), flags());
         Notification history = normalize(conversation(false), raw(context, "A", 100, 1), null);
         NotificationMessages.recordReply(history, "earlier", 150, "earlier");
-        MessagingBuilder builder = new MessagingBuilder(context, context, (id, modifies) -> {
+        MessagingBuilder builder = new MessagingBuilder(context, (id, modifies) -> {
             for (WeChatDecorator.ModifyNotification modify : modifies) modify.modify(history);
             recorded.countDown();
         });

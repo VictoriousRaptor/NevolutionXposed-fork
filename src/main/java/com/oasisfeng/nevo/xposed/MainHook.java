@@ -15,6 +15,8 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 
 import java.lang.reflect.Method;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.oasisfeng.nevo.sdk.HookSupport;
@@ -23,6 +25,7 @@ import com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService.SystemUIDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatNotificationRemoval;
+import com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile;
 import com.oasisfeng.nevo.decorators.wechat.NotificationMarkdownHooks;
 import com.oasisfeng.nevo.xposed.compat.PackageHookContext;
 import com.oasisfeng.nevo.xposed.compat.XC_MethodHook;
@@ -39,8 +42,8 @@ import io.github.libxposed.api.XposedModule;
  */
 public class MainHook extends XposedModule {
 	private static final String TAG = "MainHook";
-	public static final String WECHAT_AUTO_REPLY_ACTION = "com.tencent.mm.permission.MM_AUTO_REPLY_MESSAGE";
-	public static final String WECHAT_AUTO_REPLY_RESULT_KEY = "key_voice_reply_text";
+	public static final String WECHAT_AUTO_REPLY_ACTION = WeChatReplyProfile.REPLY_ACTION;
+	public static final String WECHAT_AUTO_REPLY_RESULT_KEY = WeChatReplyProfile.RESULT_KEY;
 
 	private android.content.SharedPreferences pref;
 	private String processName;
@@ -49,6 +52,8 @@ public class MainHook extends XposedModule {
 
 	private static Class<?> sMMAutoMessageReplyReceiverClass = null;
 	private static volatile com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved sReplyProfile = null;
+	/** Guarded by hookAutoLogicMethods; failed installations remain eligible for retry. */
+	private static final Set<Method> sHookedCarModeGates = new HashSet<>();
 	/** A rejected profile is retried, but never more often than this. */
 	private static final long PROFILE_RETRY_INTERVAL_MS = 5_000L;
 	private static volatile long sLastProfileAttempt = 0L;
@@ -374,7 +379,7 @@ public class MainHook extends XposedModule {
 						// notifications, so WeChat itself creates the car conversation
 						// with the reply PendingIntent that carries key_username. The
 						// synthetic path cannot provide that username by itself.
-						MainHook.this.hookCarModeBypass(context.getClassLoader());
+						MainHook.this.hookCarModeBypass();
 						LocalDecorator wechat = MainHook.this.wechat.getLocalDecorator("com.tencent.mm");
 						wechat.onCreate(pref);
 						if (!wechat.isDisabled() && (wechat instanceof HookSupport)) ((HookSupport)wechat).hook(loadPackageParam);
@@ -427,7 +432,6 @@ public class MainHook extends XposedModule {
 			if (BuildConfig.DEBUG) Log.d(TAG, "hookAutoReplyReceiver: found class " + receiverClass);
 			// Only the public entry point is traced; hooking every declared method of the
 			// receiver produced per-call logging without adding diagnostic value.
-			final ClassLoader finalCl = loadPackageParam.classLoader;
 			XposedHelpers.findAndHookMethod(receiverClass, "onReceive", android.content.Context.class, android.content.Intent.class, new XC_MethodHook() {
 				@Override
 				protected void beforeHookedMethod(MethodHookParam param) {
@@ -440,7 +444,7 @@ public class MainHook extends XposedModule {
 						logReply("wechat_receiver_remote_input_failed", Log.getStackTraceString(e));
 					}
 					// Try to hook car mode bypass if not already done
-					hookCarModeBypass(finalCl);
+					hookCarModeBypass();
 					android.content.Intent intent = (android.content.Intent) param.args[1];
 					logReply("wechat_receiver_action", "action=" + intent.getAction());
 					if (intent.getExtras() != null) {
@@ -477,16 +481,7 @@ public class MainHook extends XposedModule {
 		}
 		try {
 			final Class<?> gateClass = resolved.gateClass;
-			for (final String methodName : resolved.gateMethods) {
-				try {
-					XposedHelpers.findAndHookMethod(gateClass, methodName, new XC_MethodHook() {
-						@Override
-						protected void beforeHookedMethod(MethodHookParam param) { param.setResult(true); }
-					});
-				} catch (Throwable failure) {
-					XposedBridge.rethrowFrameworkError(failure);
-				} // hooks may already be added
-			}
+			hookAutoLogicMethods(gateClass, resolved.gateMethods);
 			logReply("car_mode_bypass_ready", "class=" + gateClass.getName() + " methods=" + resolved.gateMethods);
 		} catch (Throwable th) {
 			XposedBridge.rethrowFrameworkError(th);
@@ -541,7 +536,7 @@ public class MainHook extends XposedModule {
 		return resolved;
 	}
 
-	private void hookCarModeBypass(ClassLoader cl) {
+	private void hookCarModeBypass() {
 		if (carModeBypassHooked) return;
 		try {
 			final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved resolved = currentProfile();
@@ -604,17 +599,20 @@ public class MainHook extends XposedModule {
 		}
 	}
 
-	private void hookAutoLogicMethods(final Class<?> autoLogicClass, java.util.List<String> bypassMethods) {
+	private static synchronized void hookAutoLogicMethods(final Class<?> autoLogicClass, java.util.List<String> bypassMethods) {
 		if (BuildConfig.DEBUG) Log.d(TAG, "hooking " + autoLogicClass.getName() + " " + bypassMethods);
 		for (final String methodName : bypassMethods) {
 			try {
-				XposedHelpers.findAndHookMethod(autoLogicClass, methodName, new XC_MethodHook() {
+				Method method = XposedHelpers.findMethodExact(autoLogicClass, methodName);
+				if (sHookedCarModeGates.contains(method)) continue;
+				XposedBridge.hookMethod(method, new XC_MethodHook() {
 					@Override
 					protected void beforeHookedMethod(MethodHookParam param) {
 						param.setResult(true);
 						if (BuildConfig.DEBUG) Log.d(TAG, "Bypassed " + autoLogicClass.getSimpleName() + "." + methodName + "() -> true");
 					}
 				});
+				sHookedCarModeGates.add(method);
 			} catch (Throwable e) {
 				XposedBridge.rethrowFrameworkError(e);
 				XposedBridge.log("hookAutoLogicMethods: " + methodName + " hook failed: " + e.getMessage());

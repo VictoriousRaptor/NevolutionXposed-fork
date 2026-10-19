@@ -164,28 +164,9 @@ public abstract class NevoDecoratorService {
 			XposedHelpers.setObjectField(n, "mSortKey", sortKey);
 		}
 	
-		private static final java.lang.reflect.Field ACTIONS_FIELD = notificationActionsField();
-
-		private static java.lang.reflect.Field notificationActionsField() {
-			try {
-				final java.lang.reflect.Field field = Notification.class.getDeclaredField("actions");
-				field.setAccessible(true);
-				return field;
-			} catch (final NoSuchFieldException e) {
-				return null;
-			}
-		}
-
 		public static void setActions(Notification n, Action... actions) {
 			XposedHelpers.setAdditionalInstanceField(n, KEY_ACTIONS_SERIALIZED, null);
-			final java.lang.reflect.Field field = ACTIONS_FIELD;
-			if (field != null) {
-				try {
-					field.set(n, actions);
-					return;
-				} catch (final Exception ignored) {}
-			}
-			XposedHelpers.setObjectField(n, "actions", actions);
+			n.actions = actions;
 		}
 	
 		protected final String prefKey;

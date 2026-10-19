@@ -184,7 +184,7 @@ final class ImagePreviewLoader {
 	}
 
 	private void resolve(Context context, NotificationManager manager, String tag, int id, Request request) {
-		if (pending.get(request.key) != request) return;
+		if (pending.get(request.key) != request || request.publishing) return;
 		try {
 			String talker = request.talker();
 			if (talker == null || talker.isEmpty()) { retryOrFinish(context, manager, tag, id, request, "talker_pending"); return; }
@@ -192,7 +192,6 @@ final class ImagePreviewLoader {
 					request.when > 0 ? request.when : request.received, request.started, SystemClock.elapsedRealtime());
 			if (event == null) { retryOrFinish(context, manager, tag, id, request, "no_unique_message_event"); return; }
 			request.resolvedTalker = talker;
-			request.messageTime = event.created;
 			if (request.eventKey != null && !request.eventKey.equals(event.key)) { finish(request, "event_changed"); return; }
 			request.eventKey = event.key;
 			request.probePaths = event.paths;
@@ -201,9 +200,7 @@ final class ImagePreviewLoader {
 			if (owner != null && owner != request.token) { finish(request, "message_already_assigned"); return; }
 			ImagePreviewPolicy.Size target = targetSize(context);
 			Set<String> resolvedPaths = new HashSet<>();
-			List<ImageEventIndex.Path> rankedPaths = new ArrayList<>(event.paths);
-			rankedPaths.sort((a, b) -> Integer.compare(b.quality, a.quality));
-			Scan scan = scanCandidates(request, rankedPaths, target, resolvedPaths, null);
+			Scan scan = scanCandidates(request, event.paths, target, resolvedPaths, null);
 			boolean largeCandidateConsidered = false;
 			if (largePreviewEnabled && event.msgSvrId > 0
 					&& (scan.best == null || !ImagePreviewPolicy.coversTarget(scan.best.width, scan.best.height, target.width, target.height))) {
@@ -220,10 +217,9 @@ final class ImagePreviewLoader {
 					request.largePaths = request.largeRow != null && request.largeRow.isComplete(request.largeRow)
 							? request.largeRow.paths() : null;
 				}
-				if (request.largePaths != null && !request.largePaths.isEmpty()) {
+				List<ImageEventIndex.Path> largePaths = request.largePaths;
+				if (largePaths != null && !largePaths.isEmpty()) {
 					largeCandidateConsidered = true;
-					List<ImageEventIndex.Path> largePaths = new ArrayList<>(request.largePaths);
-					largePaths.sort((a, b) -> Integer.compare(b.quality, a.quality));
 					scan = scanCandidates(request, largePaths, target, resolvedPaths, scan.best);
 				}
 				if (request.largeRow != null && !request.largeSubmitAttempted
@@ -256,23 +252,24 @@ final class ImagePreviewLoader {
 			boolean waitForQuality = ImagePreviewPolicy.shouldWaitForQuality(best.width, best.height, best.quality,
 					target.width, target.height, elapsed, request.largeDownloadComplete);
 			if (waitForQuality && retry(context, manager, tag, id, request, "waiting_for_quality")) return;
-			if (request.publishing) return;
 			Bitmap bitmap = decode(best, target);
 			if (bitmap == null) {
-				log("decode_failed", "request=" + request.token + " quality=" + best.quality
+				if (BuildConfig.DEBUG) log("decode_failed", "request=" + request.token + " quality=" + best.quality
 						+ " fileChanged=" + (best.file.length() != best.size || best.file.lastModified() != best.modified));
 				retryOrFinish(context, manager, tag, id, request, "decode_or_file_changed"); return;
 			}
 			request.publishing = true;
-			ImagePreviewPolicy.Size planned = ImagePreviewPolicy.fitInside(best.width, best.height,
-					target.width, target.height, ImagePreviewPolicy.MAX_PIXELS);
-			int sample = ImagePreviewPolicy.sampleSize(best.width, best.height, planned.width, planned.height);
 			claimed.put(event.key, request.token);
 			while (claimed.size() > 64) claimed.remove(claimed.keySet().iterator().next());
-			log("decoded", "request=" + request.token + " source=message_event scans=0 mime=" + best.mime
-					+ " quality=" + best.quality + " sourceSize=" + best.width + "x" + best.height + " sample=" + sample
-					+ " output=" + bitmap.getWidth() + "x" + bitmap.getHeight()
-					+ " bytes=" + bitmap.getAllocationByteCount() + " elapsedMs=" + (SystemClock.elapsedRealtime() - request.started));
+			if (BuildConfig.DEBUG) {
+				ImagePreviewPolicy.Size planned = ImagePreviewPolicy.fitInside(best.width, best.height,
+						target.width, target.height, ImagePreviewPolicy.MAX_PIXELS);
+				int sample = ImagePreviewPolicy.sampleSize(best.width, best.height, planned.width, planned.height);
+				log("decoded", "request=" + request.token + " source=message_event scans=0 mime=" + best.mime
+						+ " quality=" + best.quality + " sourceSize=" + best.width + "x" + best.height + " sample=" + sample
+						+ " output=" + bitmap.getWidth() + "x" + bitmap.getHeight()
+						+ " bytes=" + bitmap.getAllocationByteCount() + " elapsedMs=" + (SystemClock.elapsedRealtime() - request.started));
+			}
 			main.post(() -> publish(context, manager, tag, id, request, bitmap));
 		} catch (Exception | OutOfMemoryError failure) { finish(request, failure.getClass().getSimpleName()); }
 	}
@@ -296,10 +293,11 @@ final class ImagePreviewLoader {
 			File file = new File(resolved);
 			if (!file.isAbsolute()) { candidateLog(request, path, "reason=not_absolute"); continue; }
 			long size = file.length(), modified = file.lastModified();
-			String fileState = "exists=" + file.exists() + " regular=" + file.isFile()
-					+ " readable=" + file.canRead() + " bytes=" + size;
+			String fileState = BuildConfig.DEBUG ? "exists=" + file.exists() + " regular=" + file.isFile()
+					+ " readable=" + file.canRead() + " bytes=" + size : "";
 			if (size <= 0 || size > MAX_SOURCE_BYTES || !file.isFile() || !file.canRead()) {
-				candidateLog(request, path, "reason=file_unavailable " + fileState); continue;
+				if (BuildConfig.DEBUG) candidateLog(request, path, "reason=file_unavailable " + fileState);
+				continue;
 			}
 			BitmapFactory.Options options = bounds(file);
 			byte[] decodedBytes = null;
@@ -307,7 +305,7 @@ final class ImagePreviewLoader {
 				decodedBytes = largePreview.decodeWxgf(file, size, modified);
 				if (decodedBytes != null) options = bounds(decodedBytes);
 			}
-			candidateLog(request, path, fileState + " source=" + options.outWidth + "x" + options.outHeight
+			if (BuildConfig.DEBUG) candidateLog(request, path, fileState + " source=" + options.outWidth + "x" + options.outHeight
 					+ " mime=" + options.outMimeType + " wxgf=" + (decodedBytes != null));
 			if (options.outWidth <= 0 || options.outHeight <= 0 || options.outMimeType == null
 					|| !options.outMimeType.startsWith("image/")) continue;
@@ -489,20 +487,11 @@ final class ImagePreviewLoader {
 						+ " pendingMatches=" + (pending.get(request.key) == request));
 				return;
 			}
-			Notification.Builder builder = Notification.Builder.recoverBuilder(context, current);
-			builder.setStyle(new Notification.BigPictureStyle().bigPicture(bitmap))
-					.setOnlyAlertOnce(true);
-			Notification result = builder.build();
-			NotificationMessages.copyIdentityExtras(current, result);
-			result.extras.putBoolean(READY, true);
-			result.extras.putLong(TOKEN, request.token);
-			// recoverBuilder() already parceled the actions, so the notify hook may skip its own rebuild.
-			NevoDecoratorService.LocalDecorator.markActionsSerialized(result);
+			Notification result = buildPreviewNotification(context, current, bitmap, request.token);
 			manager.notify(tag, id, result);
 			log("published", "request=" + request.token + " style=BigPicture actions="
 					+ (result.actions == null ? 0 : result.actions.length) + " picture=" + pictureSize(result));
-			previews.put(request.key, new Preview(request, request.resolvedTalker, request.messageTime, request.token, bitmap,
-					SystemClock.elapsedRealtime()));
+			previews.put(request.key, new Preview(request, request.token, bitmap, SystemClock.elapsedRealtime()));
 			prunePreviews(SystemClock.elapsedRealtime());
 			main.postDelayed(() -> prunePreviews(SystemClock.elapsedRealtime()), PREVIEW_KEEP_MS);
 		} catch (Exception failure) {
@@ -518,20 +507,24 @@ final class ImagePreviewLoader {
 		return picture == null ? "none" : picture.getWidth() + "x" + picture.getHeight();
 	}
 
+	private static Notification buildPreviewNotification(Context context, Notification current, Bitmap bitmap, long token) {
+		Notification result = Notification.Builder.recoverBuilder(context, current)
+				.setStyle(new Notification.BigPictureStyle().bigPicture(bitmap)).setOnlyAlertOnce(true).build();
+		NotificationMessages.copyIdentityExtras(current, result);
+		result.extras.putBoolean(READY, true);
+		result.extras.putLong(TOKEN, token);
+		// recoverBuilder() already parceled the actions, so the notify hook may skip its own rebuild.
+		NevoDecoratorService.LocalDecorator.markActionsSerialized(result);
+		return result;
+	}
+
 	private void reattach(Context context, NotificationManager manager, String tag, int id, Preview preview) {
 		Notification current = active(manager, tag, id);
 		if (current == null || isPreview(current) || current.extras.getLong(TOKEN) != preview.token
 				|| previews.get(id + ":" + tag) != preview
 				|| SystemClock.elapsedRealtime() - preview.publishedAt >= PREVIEW_KEEP_MS) return;
 		try {
-			Notification.Builder builder = Notification.Builder.recoverBuilder(context, current)
-					.setStyle(new Notification.BigPictureStyle().bigPicture(preview.bitmap))
-					.setOnlyAlertOnce(true);
-			Notification result = builder.build();
-			NotificationMessages.copyIdentityExtras(current, result);
-			result.extras.putBoolean(READY, true);
-			result.extras.putLong(TOKEN, preview.token);
-			NevoDecoratorService.LocalDecorator.markActionsSerialized(result);
+			Notification result = buildPreviewNotification(context, current, preview.bitmap, preview.token);
 			manager.notify(tag, id, result);
 			log("reattached", "request=" + preview.token + " id=" + id + " style=BigPicture");
 		} catch (Exception failure) {
@@ -578,14 +571,11 @@ final class ImagePreviewLoader {
 
 	private static final class Preview {
 		final Request request;
-		final String talker;
-		final long messageTime, token, publishedAt;
+		final long token, publishedAt;
 		final int bytes;
 		final Bitmap bitmap;
-		Preview(Request request, String talker, long messageTime, long token, Bitmap bitmap, long publishedAt) {
+		Preview(Request request, long token, Bitmap bitmap, long publishedAt) {
 			this.request = request;
-			this.talker = talker;
-			this.messageTime = messageTime;
 			this.token = token;
 			this.bitmap = bitmap;
 			this.publishedAt = publishedAt;
@@ -612,7 +602,6 @@ final class ImagePreviewLoader {
 		WeChatImageDownloader.BaseRow largeRow;
 		volatile List<ImageEventIndex.Path> largePaths;
 		volatile String resolvedTalker;
-		volatile long messageTime;
 		volatile ScheduledFuture<?> future;
 		final CharSequence title, text;
 		Request(String key, TalkerSource talkerSource, Notification n, List<String> messages) {
