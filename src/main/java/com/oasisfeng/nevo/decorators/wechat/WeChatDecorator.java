@@ -339,11 +339,12 @@ public class WeChatDecorator extends NevoDecoratorService {
 				mConversationManager.resetConversation(id);
 				clearArchivedNotifications(id);
 			}
-			mConversationManager.getConversation(id).title = title;
+			final Conversation cached = mConversationManager.getConversation(id);
+			cached.title = title;
 			if (extras.getBoolean(WeChatRecallEvents.VERIFIED_KEY))
-				mConversationManager.acceptTalker(mConversationManager.getConversation(id), storedKey);
-			mConversationManager.getConversation(id).contentIntent = n.contentIntent;
-			if (replyTarget != null) mConversationManager.getConversation(id).replyIntent = replyTarget;
+				mConversationManager.acceptTalker(cached, storedKey);
+			cached.contentIntent = n.contentIntent;
+			if (replyTarget != null) cached.replyIntent = replyTarget;
 			if (!extras.getBoolean(NotificationMessages.STORED)
 					|| extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN) == 0)
 				extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN,
@@ -433,7 +434,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 
 			extras.putCharSequence(Notification.EXTRA_TEXT, content);
 
-			final Conversation cached = mConversationManager.getConversation(id);
 			final Icon icon = n.getLargeIcon();
 			if (icon != null) cached.icon = IconCompat.createFromIcon(getAppContext(), icon);
 			cached.title = title;

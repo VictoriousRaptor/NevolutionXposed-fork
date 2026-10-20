@@ -179,7 +179,6 @@ class MessagingBuilder {
 		final Action[] actions = n.actions;
 		if (actions == null) return null;
 
-		Action replyAction = null;
 		RemoteInput replyRemoteInput = null;
 		PendingIntent onReply = null;
 
@@ -189,13 +188,12 @@ class MessagingBuilder {
 			if (remoteInputs != null) {
 				for (final RemoteInput ri : remoteInputs) {
 					if (ri != null && ri.getAllowFreeFormInput()) {
-						replyAction = action;
 						replyRemoteInput = ri;
 						onReply = action.actionIntent;
 						break;
 					}
 				}
-				if (replyAction != null) break;
+				if (replyRemoteInput != null) break;
 			}
 		}
 

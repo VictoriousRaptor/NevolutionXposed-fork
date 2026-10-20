@@ -49,7 +49,6 @@ final class WeChatImageDownloader {
 	private Object downloadService;
 	private Class<?> callbackClass;
 	private Class<?> imageServiceClass;
-	private Class<?> msgIdTalkerClass;
 	private Class<?> downloadServiceClass;
 	private Constructor<?> msgIdTalkerConstructor;
 	private Method coreStorageGet;
@@ -95,7 +94,7 @@ final class WeChatImageDownloader {
 			imageServiceClass = Class.forName(profile.service, false, loader);
 			Class<?> imageServiceImplementation = Class.forName(profile.implementation, false, loader);
 			downloadServiceClass = Class.forName(profile.download, false, loader);
-			msgIdTalkerClass = Class.forName("com.tencent.mm.plugin.msg.MsgIdTalker", false, loader);
+			Class<?> msgIdTalkerClass = Class.forName("com.tencent.mm.plugin.msg.MsgIdTalker", false, loader);
 			callbackClass = Class.forName(profile.callback, false, loader);
 			serviceGet = method(serviceManager, "c", Class.forName(profile.serviceBase, false, loader), Class.class);
 			downloadServiceGet = method(imageServiceImplementation, profile.downloadGet, Class.forName(profile.downloadInterface, false, loader));

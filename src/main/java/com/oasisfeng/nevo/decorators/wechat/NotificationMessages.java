@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /** Common Android adapter for all notification/reply paths. */
 final class NotificationMessages {
@@ -34,6 +35,7 @@ final class NotificationMessages {
     static final String SERVER_ID = "nevo.wechat.messageServerId";
     static final String RECALLED_IDS = "nevo.wechat.recalledServerIds";
     static final String RECALL_PROMPT = "nevo.wechat.recallPrompt";
+    private static final Pattern UNREAD_COUNT_PREFIX = Pattern.compile("^\\[\\d+(?:条|則)?\\]");
 
     private static String peerId(Conversation conversation) {
         if (conversation.notificationPeerId == null) conversation.notificationPeerId = "nevo:peer:" + UUID.randomUUID();
@@ -53,7 +55,7 @@ final class NotificationMessages {
     static Message incoming(Conversation conversation, Notification notification) {
         CharSequence raw = NotificationMarkdown.originalText(notification.extras);
         if (TextUtils.isEmpty(raw)) return null;
-        String text = raw.toString().replaceFirst("^\\[\\d+(?:条|則)?\\]", "");
+        String text = UNREAD_COUNT_PREFIX.matcher(raw.toString()).replaceFirst("");
         int colon = text.indexOf(WeChatMessage.SENDER_MESSAGE_SEPARATOR);
         String sender = null;
         if (colon > 0) {
@@ -142,7 +144,8 @@ final class NotificationMessages {
             if (removed && entry.value.getPerson() == null && entry.replyId != null) round.forgetReply(entry.replyId);
             return removed;
         });
-        current.extras.putLongArray(RECALLED_IDS, recalls.ids());
+        long[] recalledIds = recalls.ids();
+        current.extras.putLongArray(RECALLED_IDS, recalledIds);
         // Canonicalize before signatures/merge: a later talker lookup must not split one peer.
         if (!conversation.isGroupChat() && conversation.getType() != Conversation.TYPE_BOT_MESSAGE) {
             if (conversation.icon == null) for (int i = entries.size() - 1; i >= 0; i--) {
@@ -192,7 +195,7 @@ final class NotificationMessages {
         for (Message message : result) message.getExtras().putLong(MESSAGE_ROUND, round.cutoff);
         writeRound(current.extras, round);
         current.extras.putString(PEER_ID, peerId(conversation));
-        if (round.cutoff > 0 || recalls.ids().length > 0) updateInputHistory(current.extras, result);
+        if (round.cutoff > 0 || recalledIds.length > 0) updateInputHistory(current.extras, result);
         if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=merge inputs=" + entries.size()
                 + " output=" + result.size() + " currentTime=" + current.when);
         return result;
