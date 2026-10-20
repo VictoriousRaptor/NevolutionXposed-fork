@@ -84,6 +84,12 @@
 
 本次结构清理的本地验证：138 项单元测试通过，Debug 与仪器 APK 构建通过，两包证书与现有 release 密钥一致；应用生产源码 Lint 为 0 errors / 33 warnings，继续明确排除上述两个测试源码分析任务。本轮没有安装 APK、运行仪器测试或操作微信/SystemUI；构建与源码引用核对不代表运行时 hook 或真实通知行为已验收。
 
+2026-10-20 通知栏回复后新来信提醒修复：针对 `v3.2.1-build.33` / 微信 8.0.76 / 澎湃 OS 4 的报告，修正通用 `NotificationMessages.rebuild()` 的输入历史重建。`EXTRA_REMOTE_INPUT_HISTORY` 仅收集当前 `ConversationRound.pendingReplies` 中的本人回复；严格更新的对方来信提交轮次后，已回应的回复保留在 `EXTRA_MESSAGES`，不再补回输入历史，避免 `Local.apply()` 因旧回复追加 `FLAG_ONLY_ALERT_ONCE`。连续回复及相同/旧时间通知保留待回应输入，撤回仍按精确 ID 裁剪。原通知已有的静默标记与图片补图的 `setOnlyAlertOnce(true)` 保留。
+
+该修复作用于既有微信主进程通知重建路径，含 8.0.76 legacy 及其他既有画像；启用条件仍为微信通知增强开启。未新增 hook、回调、开关、版本名/版本号匹配或运行时签名校验，回复投递、图片、应用内回复与撤回各自的版本门禁及失败回退不变。沿用 `WeChat.Identity` 的匿名 `source=round advanced=...` / `source=merge` 日志，不记录输入正文。新增最终 `Local.apply()` 提醒标记回归，并调整私聊、群聊、重放和混合回复的输入历史断言。
+
+本次本地验证：138 项单元测试通过，Debug 与仪器 APK 构建通过，两包签名与现有 release 证书一致；应用源码 Lint 为 0 errors / 33 warnings，仍排除 `lintAnalyzeDebugAndroidTest` 与 `lintAnalyzeDebugUnitTest`。仪器 runner 共注册 47 项，本轮只编译、未执行；没有安装 APK 或操作设备。澎湃 OS 4 / 微信 8.0.76 的声音、震动、浮动及真实消息收发仍待授权设备验收。
+
 各功能的版本匹配不能混用：
 
 | 功能 | 当前匹配语义 | 未匹配时行为 |
@@ -393,6 +399,7 @@ adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oa
 | --- | --- | --- |
 | 单聊回复 | 收到单聊消息后在通知栏输入并发送 | 会话内出现该消息，日志出现完整 native 链路 |
 | 群聊回复 | 同上（群聊） | 消息进入正确群会话 |
+| 通知栏回复后的新来信提醒 | A → 通知栏连续回复 B1/B2 → C → D，另检查补图及原本静默的通知 | 回复刷新保持静默；C/D 保留 B1/B2 展示但清除已回应输入历史，不新增 `FLAG_ONLY_ALERT_ONCE`；图片和原有静默策略保留。源码标记检查与声音/震动/浮动真机验收分别记录 |
 | 多语言/emoji | 中文、英文、emoji 各一条 | 不截断、不乱码、不重复发送 |
 | 媒体/文件通知 | 收到图片/视频/文件消息 | 保留微信原布局；符合聊天和投递条件时提供回复入口 |
 | 视频/语音通话 | 拨打或接听 | 通知类型正确，不被当成普通消息 |

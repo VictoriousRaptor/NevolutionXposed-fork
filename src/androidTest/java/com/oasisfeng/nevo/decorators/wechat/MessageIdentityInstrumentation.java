@@ -57,7 +57,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyInputsUseLocalizedReplyLabel",
                 "replyActionSurvivesArchiveRemoval", "recallSequence", "recallWithoutIdentity", "recallSameTextAndTime",
                 "recallSelfAndRoundMetadata", "recallReusedNotificationId", "emptyRecallStaysSuppressed",
-                "replyEligibility", "nativeReplyForwarding",
+                "replyEligibility", "nativeReplyForwarding", "replyAlertsAfterIncoming",
                 "mediaReplyActionDeduplication", "concurrentMediaReplyRecast",
                 "animatedStickerMediaBranch", "animatedStickerReplyAfterUpdate",
                 "markdownStylesAndParcel", "markdownRebuildAndDisable", "markdownIdentityReplyRecall", "markdownBuilderAndPreview",
@@ -81,6 +81,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> Plan123Instrumentation.emptyRecallStaysSuppressed(getTargetContext()),
                 () -> Plan123Instrumentation.replyEligibility(getTargetContext()),
                 () -> Plan123Instrumentation.nativeReplyForwarding(getTargetContext()),
+                () -> Plan123Instrumentation.replyAlertsAfterIncoming(getTargetContext()),
                 () -> Plan123Instrumentation.mediaReplyActionDeduplication(getTargetContext()),
                 () -> Plan123Instrumentation.concurrentMediaReplyRecast(getTargetContext()),
                 () -> Plan123Instrumentation.animatedStickerMediaBranch(getTargetContext()),
@@ -292,15 +293,19 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         checkTexts(c, next, "B1", "B2", "C");
         next = normalized(c, notification("D", 300), Collections.singletonList(next));
         checkTexts(c, next, "B1", "B2", "C", "D");
+        check(next.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                "answered replies were restored as input history");
         NotificationMessages.recordReply(next, "E", 310, "E");
         next = normalized(c, notification("D", 300), Collections.singletonList(next));
         checkTexts(c, next, "B1", "B2", "C", "D", "E");
+        CharSequence[] history = next.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY);
+        check(history.length == 1 && "E".contentEquals(history[0]), "pending reply history lost or mixed with answered replies");
         next = normalized(c, notification("F", 400), Collections.singletonList(next));
         checkTexts(c, next, "E", "F");
         next = normalized(c, notification("A", 100), Collections.singletonList(next));
         checkTexts(c, next, "E", "F");
-        CharSequence[] history = next.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY);
-        check(history.length == 1 && "E".contentEquals(history[0]), "previous reply history resurrected");
+        check(next.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                "answered reply history resurrected after replay");
     }
 
     private void appReplyStartsFresh() {
@@ -326,6 +331,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         preview.extras = parcel(preview.extras);
         Notification refreshed = normalized(c, notification("E", 200), Collections.singletonList(preview));
         checkTexts(c, refreshed, "D", "E");
+        check(refreshed.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                "mixed reply history muted the new incoming message");
     }
 
     private void groupRound() {
@@ -338,6 +345,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         check(messages.size() == 3 && messages.get(0).getPerson() == null, "group round did not retain reply");
         check("Bob".contentEquals(messages.get(1).getPerson().getName()), "first member lost");
         check("Carol".contentEquals(messages.get(2).getPerson().getName()), "group members merged");
+        check(next.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                "answered group reply remained in input history");
     }
 
     private void roundPreviewAndUndated() {

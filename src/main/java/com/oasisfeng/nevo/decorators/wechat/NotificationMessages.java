@@ -195,7 +195,7 @@ final class NotificationMessages {
         for (Message message : result) message.getExtras().putLong(MESSAGE_ROUND, round.cutoff);
         writeRound(current.extras, round);
         current.extras.putString(PEER_ID, peerId(conversation));
-        if (round.cutoff > 0 || recalledIds.length > 0) updateInputHistory(current.extras, result);
+        if (round.cutoff > 0 || recalledIds.length > 0) updateInputHistory(current.extras, result, round);
         if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=merge inputs=" + entries.size()
                 + " output=" + result.size() + " currentTime=" + current.when);
         return result;
@@ -367,10 +367,13 @@ final class NotificationMessages {
         extras.putBundle(ROUND, data);
     }
 
-    private static void updateInputHistory(Bundle extras, List<Message> messages) {
+    private static void updateInputHistory(Bundle extras, List<Message> messages, ConversationRound round) {
         List<CharSequence> replies = new ArrayList<>();
+        // Answered replies stay in the transcript, but must not silence later incoming notifications.
         for (int i = messages.size() - 1; i >= 0; i--)
-            if (messages.get(i).getPerson() == null) replies.add(messages.get(i).getText());
+            if (messages.get(i).getPerson() == null
+                    && round.pendingReplies.contains(messages.get(i).getExtras().getString(REPLY_ID)))
+                replies.add(messages.get(i).getText());
         if (replies.isEmpty()) extras.remove(Notification.EXTRA_REMOTE_INPUT_HISTORY);
         else extras.putCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY, replies.toArray(new CharSequence[0]));
     }

@@ -110,6 +110,49 @@ final class Plan123Instrumentation {
         } finally { local.onDestroy(); }
     }
 
+    static void replyAlertsAfterIncoming(Context context) {
+        WeChatDecorator.Local local = new WeChatDecorator.Local("WeChatDecorator");
+        local.onCreate(context.getSharedPreferences("reply-alert-test", Context.MODE_PRIVATE));
+        android.app.NotificationManager manager = context.getSystemService(android.app.NotificationManager.class);
+        try {
+            Notification a = raw(context, "A", 100, 1);
+            local.apply(manager, null, 830, a);
+            NotificationMessages.recordReply(a, "B1", 110, "alert-reply-1");
+            NotificationMessages.recordReply(a, "B2", 120, "alert-reply-2");
+            local.apply(manager, null, 830, a);
+            check((a.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0, "reply refresh could alert again");
+            CharSequence[] history = a.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY);
+            check(history.length == 2, "consecutive pending replies lost");
+
+            Notification c = raw(context, "C", 200, 2);
+            local.apply(manager, null, 830, c);
+            texts(conversation(false), c, "B1", "B2", "C");
+            check(c.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                    "answered replies remained in input history");
+            check((c.flags & Notification.FLAG_ONLY_ALERT_ONCE) == 0, "incoming message was muted after reply");
+
+            Notification preview = Notification.Builder.recoverBuilder(context, c)
+                    .setStyle(new Notification.BigPictureStyle().bigPicture(
+                            android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)))
+                    .setOnlyAlertOnce(true).build();
+            NotificationMessages.copyIdentityExtras(c, preview);
+            local.apply(manager, null, 830, preview);
+            check((preview.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0, "preview lost its silent update flag");
+            check(preview.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                    "preview restored answered input history");
+
+            Notification d = raw(context, "D", 300, 3);
+            local.apply(manager, null, 830, d);
+            texts(conversation(false), d, "B1", "B2", "C", "D");
+            check((d.flags & Notification.FLAG_ONLY_ALERT_ONCE) == 0, "later incoming message was still muted");
+
+            Notification silent = raw(context, "E", 400, 4);
+            silent.flags |= Notification.FLAG_ONLY_ALERT_ONCE;
+            local.apply(manager, null, 830, silent);
+            check((silent.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0, "original silent update flag was cleared");
+        } finally { local.onDestroy(); }
+    }
+
     static void replyEligibility(Context context) {
         MessagingBuilder builder = new MessagingBuilder(context, (id, modifies) -> {});
         PendingIntent nativeReply = PendingIntent.getBroadcast(context, 802,
