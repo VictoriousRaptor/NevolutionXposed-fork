@@ -2,7 +2,7 @@ package com.oasisfeng.nevo.decorators.wechat;
 
 /** Pure sizing and selection policy for notification image previews. */
 final class ImagePreviewPolicy {
-	static final long QUALITY_WAIT_MS = 5000;
+	static final long QUALITY_WAIT_MS = 1500;
 	static final int MAX_PIXELS = 1024 * 1024;
 	static final int QUALITY_UNKNOWN = 0;
 	static final int QUALITY_THUMBNAIL = 1;

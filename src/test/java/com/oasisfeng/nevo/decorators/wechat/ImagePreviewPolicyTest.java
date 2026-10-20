@@ -23,9 +23,9 @@ public class ImagePreviewPolicyTest {
 
 	@Test public void waitsForUndersizedCandidateThenFallsBackAtDeadline() {
 		assertTrue(ImagePreviewPolicy.shouldWaitForQuality(384, 216, ImagePreviewPolicy.QUALITY_THUMBNAIL,
-				1080, 608, 4999));
+				1080, 608, 1499));
 		assertFalse(ImagePreviewPolicy.shouldWaitForQuality(384, 216, ImagePreviewPolicy.QUALITY_THUMBNAIL,
-				1080, 608, 5000));
+				1080, 608, 1500));
 		assertFalse(ImagePreviewPolicy.shouldWaitForQuality(1280, 720, ImagePreviewPolicy.QUALITY_HD,
 				1080, 608, 0));
 		assertTrue(ImagePreviewPolicy.shouldWaitForQuality(1920, 1080, ImagePreviewPolicy.QUALITY_THUMBNAIL,
