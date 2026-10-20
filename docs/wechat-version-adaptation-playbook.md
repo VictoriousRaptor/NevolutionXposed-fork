@@ -78,7 +78,7 @@
 
 本轮应用源码 Lint 通过，结果为 0 errors / 33 warnings。测试源码的 Lint 分析在常规和单工作线程尝试中均长时间未产出，已中止；生成报告时明确排除了 `lintAnalyzeDebugAndroidTest` 与 `lintAnalyzeDebugUnitTest`，测试源码静态检查状态仍为未完成。
 
-2026-10-20 后续无消费者结构清理：删除 `Conversation` 中仅由 `setType()` 自行维护、从未交给消息的旧 sender Builder/占位对象及无调用 helper；实际 Person 仍由 `NotificationMessages` 构造，群成员原名 URI、类型切换时的参与者清理和异步快照代次保留。删除 `SystemUIDecorator` 从未读写的字符串归档，以及仅服务于无调用取消接口的 NLS holder；`MainHook` 只移除构造回调中的保存操作，保留 `NotificationListenerService` 所有已声明构造函数的 AFTER hook、实际监听器类的 posted/removed BEFORE hook、媒体装饰分发和微信轮次重置广播。`LocalDecorator` 的整数 ID 归档、120 总条数/20 单会话上限及匹配代次的清理均不变。
+2026-10-20 后续结构清理及调试能力复核：删除 `Conversation` 中仅由 `setType()` 自行维护、从未交给消息的旧 sender Builder/占位对象及无调用 helper；实际 Person 仍由 `NotificationMessages` 构造，群成员原名 URI、类型切换时的参与者清理和异步快照代次保留。仅删除 `SystemUIDecorator` 从未读写的字符串归档；恢复 NLS 弱引用、`setNLS()`、`getNLS()`、`cancelNotification(String)` 及 `MainHook` 构造回调中的保存操作，保留同进程调试访问和手动取消能力。listener 原来有实际写入，不能将没有源码读取调用等同于没有调试价值。`NotificationListenerService` 所有已声明构造函数的 AFTER hook、实际监听器类的 posted/removed BEFORE hook、媒体装饰分发和微信轮次重置广播均保留。`LocalDecorator` 的整数 ID 归档、120 总条数/20 单会话上限及匹配代次的清理均不变。
 
 同轮图片状态简化删除 `Preview` 对 `Request.token` 的重复保存，并将只供同步成功日志读取的下载提交结果从 `Task` 改为局部值；token 比较、反射调用完整签名、返回值非负成功条件、轮询/取消时序、TTL 和失败关闭行为不变。适用于当前全部既有画像，不改变任何功能的版本名/版本号匹配规则、开关、诊断日志或启用条件。上述为源码等价性核对；本轮自动化结果另行记录，前述历史设备结果不作为本轮真机验收。仍需在授权设备上分别回归私聊/群聊身份、撤回、图片首次发布/重新挂接、媒体通知及移除后的轮次广播。
 
@@ -169,6 +169,7 @@ ART 内联处理：安装 hook 前通过 libxposed API 102 的 `deoptimize(Execu
 
 ### 3.6 Android/SystemUI 与本地通知 hook 合约
 
+- SystemUI listener 调试入口不依赖微信版本画像，适用于现有 SystemUI hook 范围；在 `android.service.notification.NotificationListenerService` 所有已声明构造函数的 AFTER 回调中刷新弱引用，不改 posted/removed 目标的完整签名、查找校验和兼容回退。`getNLS()` 与 `cancelNotification(String): void` 供同一 SystemUI 进程、模块类加载器内的手工调试使用，不新增自动调用或功能开关。弱引用为空时取消无操作，否则沿用 listener 的取消行为及异常传播；Debug 保留 `cancelNotification ` 日志，Release 不输出该日志。运行时回归应覆盖实例刷新、空引用和按 key 取消，并单独核对下述 listener cancel 不清空微信轮次的规则；源码与构建验证不能代替这些真机检查。
 - 微信主进程的 `android.app.NotificationManager.notify(String, int, Notification): void` BEFORE hook 必须遵守本地装饰返回的 `Decorating.StopPost`，阻止空撤回提示和已抑制快照再次发布；这属于 framework 合约，不新增微信混淆版本映射。
 - 标准 SystemUI 移除通知仅在 `NotificationListenerService.REASON_CLICK`、`REASON_CANCEL`、`REASON_CANCEL_ALL` 时发出定向轮次重置；listener cancel 不清空回复轮次。沿用活动通知 token 和接收端代次校验，避免通知 id 复用时误清新通知。
 - 原生回复转发只执行一次 `RemoteInput.addResultsToIntent()`；@ 前缀调整在 results Bundle 内完成，不再拷贝旧 ClipData。原生 PendingIntent 回调 `resultCode != 0` 时中止预留，不记成功回复历史。

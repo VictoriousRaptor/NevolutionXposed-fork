@@ -328,7 +328,7 @@ lint 最终状态：
 
 分别指向 `NevoDecoratorService` 的静态 application/package context 和 `SystemUIDecorator` 的静态 service 引用。Application context 通常是有意长期持有，但 service 引用需要结合生命周期确认；不能仅根据 lint 文本直接删除。
 
-2026-10-20 结构清理补充：上文描述的是当时的诊断结果。当前已通过生产代码、测试和动态入口引用核对，确认 SystemUI 的 listener 保存、字符串取消接口及空归档均无消费者，已删除整条分支；仍保留 Application/package Context 和微信本地归档。本轮图片预览只从 `Preview.request.token` 读取原有 final token，并将下载提交返回值收回同步调用栈，不改变下载目标、完成条件、回调时序或过期策略。
+2026-10-20 结构清理复核：上文描述的是当时的诊断结果。SystemUI 的 listener 弱引用原来有实际写入，虽然仓库内没有读取或取消调用方，仍保留 `setNLS()`、`getNLS()`、字符串取消接口和构造回调中的保存操作，供同进程调试使用；仅继续删除没有写入调用的 SystemUI 归档。Application/package Context 和微信本地归档保留。本轮图片预览只从 `Preview.request.token` 读取原有 final token，并将下载提交返回值收回同步调用栈，不改变下载目标、完成条件、回调时序或过期策略。源码核对及构建不代表 listener 运行时状态或真机取消行为已经验证。
 
 ### 7.7 其他，2 条
 

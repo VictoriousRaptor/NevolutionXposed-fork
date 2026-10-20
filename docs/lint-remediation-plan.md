@@ -140,11 +140,13 @@
   可以刷新弱引用。
 - `cancelNotification()` 先取局部强引用，再检查是否为空。
 
-2026-10-20 结构清理：以上 NLS holder 是保留取消接口时的历史实现。当前唯一的
-`cancelNotification(String)` 已没有调用方，SystemUI 归档也没有任何读写消费者，
-因此连同 `mNLS`、`setNLS()`、`getNLS()` 和构造回调中的单条保存操作一起删除。
-`LocalDecorator` 的整数 ID 归档和取消路径仍在使用，Application/package Context
-抑制决策、NLS 构造及通知 posted/removed hook 均保留；本次不据此宣称真机回归通过。
+2026-10-20 复核后保留以上 NLS 弱引用、`setNLS()`、`getNLS()`、
+`cancelNotification(String)` 及构造回调中的保存操作。虽然仓库内没有读取或取消
+调用方，listener 实例原来确实会被保存，同进程、对应类加载器内的调试器或反射
+探针可以使用这些入口；不能仅凭没有源码调用就删除调试可操作性。SystemUI
+字符串归档没有写入调用，继续删除。`LocalDecorator` 的整数 ID 归档和取消路径、
+Application/package Context 抑制决策、NLS 构造及通知 posted/removed hook 均保留；
+本次不据此宣称真机回归通过。
 
 ### ContentDescription
 
@@ -213,8 +215,8 @@
 2. 对 `notifyWeChatRoundRemoved()` 增加带依据的权限抑制。
 3. `MessagingBuilder.loadSelfIcon()` 改用 `getDataDir()`。
 4. `NevoDecoratorService` 的两个静态 Context 加局部抑制说明。
-5. 历史修复将 `mNLS` 改为弱引用并调整 `MainHook` 更新逻辑；该无消费者 holder
-   已在 2026-10-20 结构清理中删除，不再是当前需要维护的状态。
+5. 保留 `mNLS` 弱引用及 `MainHook` 每次构造时的更新逻辑，维护同进程调试访问
+   和按 key 取消的入口；不恢复没有写入调用的 SystemUI 归档。
 6. 运行单元测试、仪器 APK 构建和 lint。
 
 ### 阶段 2：无障碍与本地化
@@ -269,9 +271,9 @@
 
 - `Person` 重建涉及消息发送者身份，必须保留 key、URI、bot、important、icon
   的仪器测试。
-- 历史 NLS holder 的回退依据：`WeakReference` 不能改变 SystemUI 是否持续持有活跃 NLS 的前提；若设备验证
+- NLS holder 的回退依据：`WeakReference` 不能改变 SystemUI 是否持续持有活跃 NLS 的前提；若设备验证
   发现引用过早失效，应回退为“生命周期内可刷新”的 holder，而不是恢复首个实例
-  强引用。当前已删除无消费者的 holder，此项不再是当前运行路径的风险。
+  强引用。`getNLS()` 可以返回 null，取消包装方法在此时不执行操作。
 - 无障碍 XML 只处理装饰元素；操作槽位描述必须继续由运行时设置。
 - 字符串资源读取失败必须保留 fallback，不能因模块 Context 不可用丢失回复按钮。
 - 阶段 1 和阶段 2 分开提交，便于单独回退。

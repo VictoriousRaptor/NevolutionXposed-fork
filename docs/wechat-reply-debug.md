@@ -56,7 +56,13 @@ includes repeated reply recasts/removal, LRU eviction, concurrent updates, and a
 Android instrumentation case preserving a RemoteInput action through rebuild and
 parceling. Building the instrumentation APK does not mean the device test was run.
 
-The unused SystemUI archive and its listener-backed cancellation wrapper were
-removed on 2026-10-20 after checking all production, test and dynamic entry-point
-references. The active local archive, SystemUI posted/removed hooks and WeChat
-round-reset broadcast remain in place.
+The unwritten SystemUI archive was removed on 2026-10-20. The listener weak
+reference, `setNLS()`, `getNLS()` and listener-backed `cancelNotification(String)`
+remain available for debugger or reflective use in the SystemUI process with the
+module's class loader. Every listener constructor callback refreshes the weak
+reference; `getNLS()` may return null, in which case cancellation does nothing.
+These entry points have no in-repository read/cancel callers, but that alone is
+not evidence that removing them preserves manual debugging capabilities.
+The active local archive, SystemUI posted/removed hooks and WeChat round-reset
+broadcast remain in place. Source review and builds do not verify live listener
+availability or notification cancellation on a device.

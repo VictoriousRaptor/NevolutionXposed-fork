@@ -8,12 +8,14 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 import android.widget.RemoteViews;
 
 import androidx.annotation.Keep;
 
+import java.lang.ref.WeakReference;
 import java.util.List;
 import java.util.function.Predicate;
 
@@ -201,6 +203,16 @@ public abstract class NevoDecoratorService {
 	 * 在系统UI（SystemUI）中执行的通知处理。
 	 */
 	public static class SystemUIDecorator {
+		// Retained for in-process diagnostics and manual notification cancellation.
+		private static volatile WeakReference<NotificationListenerService> mNLS = new WeakReference<>(null);
+
+		public static void setNLS(NotificationListenerService nls) {
+			mNLS = new WeakReference<>(nls);
+		}
+
+		public static NotificationListenerService getNLS() {
+			return mNLS.get();
+		}
 	
 		protected final String prefKey;
 		private boolean disabled;
@@ -223,6 +235,12 @@ public abstract class NevoDecoratorService {
 		}
 		@Keep public void onNotificationRemoved(final StatusBarNotification evolving, final int reason) {
 			if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationRemoved(" + evolving + ", " + reason + ")");
+		}
+
+		protected final void cancelNotification(String key) {
+			if (BuildConfig.DEBUG) Log.d(TAG, "cancelNotification " + key);
+			final NotificationListenerService listener = getNLS();
+			if (listener != null) listener.cancelNotification(key);
 		}
 	}
 
