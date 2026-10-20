@@ -1,0 +1,15 @@
+<resources>
+    <string name="scale_test_title">Image scaling tests</string>
+    <string name="scale_test_description">Compare the same 160 dp image area in six cases. Gray areas in this page show unused space. fitStart keeps the entire image aligned to the top-left. Send each case as a notification, then manually expand it to compare the actual system layout. The collapsed view shows [Image].</string>
+    <string name="scale_test_loading">Loading local test images…</string>
+    <string name="scale_test_failed">Could not load the test images.</string>
+    <string name="scale_test_square">Square Lenna</string>
+    <string name="scale_test_full">Full Lenna (censored)</string>
+    <string name="scale_test_dimensions">Source: %1$d × %2$d pixels</string>
+    <string name="scale_test_send">Send this test notification</string>
+    <string name="scale_test_clear">Clear the six test notifications</string>
+    <string name="scale_test_permission">Allow notifications and enable pop-up banners for the image scaling test channel, then try again.</string>
+    <string name="scale_test_sent">Notification sent. Manually expand it to view the image.</string>
+    <string name="scale_test_placeholder">[Image]</string>
+    <string name="scale_test_image">Lenna image scaling comparison</string>
+</resources>

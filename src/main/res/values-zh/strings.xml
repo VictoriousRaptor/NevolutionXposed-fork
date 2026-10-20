@@ -20,6 +20,7 @@
 	<string name="xposed_description">基于现代 libxposed API 102 增强微信与媒体通知。</string>
 
 	<string name="settings_title">女娲石 Xposed 设置</string>
+	<string name="wechat_image_preview_description">收到的图片预览</string>
 	<string name="settings_core_category">核心功能</string>
 	<string name="settings_optional_category">可选增强</string>
 	<string name="settings_apply_title">应用设置</string>

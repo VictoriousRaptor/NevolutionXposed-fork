@@ -10,6 +10,12 @@
 - 默认构建命令：`.\gradlew.bat -PrequireReleaseSigning=true testDebugUnitTest assembleDebug assembleDebugAndroidTest --console=plain`。离线依赖齐全时可追加 `--offline`。
 - 构建和签名不代表授权安装、推送或发布；这些操作按用户当次指令执行。
 
+## 真机测试 APK 清理
+
+- 在实体机安装、执行测试 APK 后，流程结束时必须卸载测试 APK；成功、失败或中途异常均须在清理阶段执行，并核验测试包已从设备移除。
+- 卸载前核对精确包名及 instrumentation 目标，只清理测试包（如 `com.oasisfeng.nevo.xposed.test`），不得误卸载正式模块或微信。交付正式版本时，用 Release 覆盖模块中的临时 Debug 测试入口。
+- 测试脚本必须使用 `try/finally` 等可靠清理机制；卸载或核验失败要明确报告，不得声称清理完成。本地测试 APK、日志和回滚材料继续保存在忽略目录。
+
 ## Hook、版本限定与适配文档同步
 
 - 新增、修改或移除 hook 目标、完整签名、回调时机、作用进程、功能开关，或调整版本映射、门禁和兼容回退时，必须在同一次变更中同步更新 `docs/wechat-version-adaptation-playbook.md`。该要求也适用于 Android/SystemUI hook 及其与微信通知链路的交互。

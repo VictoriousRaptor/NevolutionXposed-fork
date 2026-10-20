@@ -14,9 +14,11 @@ import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.widget.RemoteViews;
 import androidx.core.app.NotificationCompat;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.xposed.BuildConfig;
+import com.oasisfeng.nevo.xposed.R;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -84,6 +86,10 @@ final class ImagePreviewLoader {
 		notification.extras.remove(TOKEN);
 		notification.extras.remove(READY);
 		notification.extras.remove(Notification.EXTRA_PICTURE);
+		if (notification.bigContentView != null
+				&& BuildConfig.APPLICATION_ID.equals(notification.bigContentView.getPackage())
+				&& notification.bigContentView.getLayoutId() == R.layout.wechat_image_preview)
+			notification.bigContentView = null;
 		notification.extras.putString(Notification.EXTRA_TEMPLATE, NevoDecoratorService.TEMPLATE_MESSAGING);
 	}
 
@@ -489,7 +495,7 @@ final class ImagePreviewLoader {
 			}
 			Notification result = buildPreviewNotification(context, current, bitmap, request.token);
 			manager.notify(tag, id, result);
-			log("published", "request=" + request.token + " style=BigPicture actions="
+			log("published", "request=" + request.token + " style=FitStart actions="
 					+ (result.actions == null ? 0 : result.actions.length) + " picture=" + pictureSize(result));
 			previews.put(request.key, new Preview(request, bitmap, SystemClock.elapsedRealtime()));
 			prunePreviews(SystemClock.elapsedRealtime());
@@ -507,10 +513,16 @@ final class ImagePreviewLoader {
 		return picture == null ? "none" : picture.getWidth() + "x" + picture.getHeight();
 	}
 
-	private static Notification buildPreviewNotification(Context context, Notification current, Bitmap bitmap, long token) {
+	static Notification buildPreviewNotification(Context context, Notification current, Bitmap bitmap, long token) {
+		// The notification belongs to WeChat, but these layout resources belong to the installed module.
+		RemoteViews expanded = new RemoteViews(BuildConfig.APPLICATION_ID, R.layout.wechat_image_preview);
+		expanded.setTextViewText(R.id.wechat_preview_title, current.extras.getCharSequence(Notification.EXTRA_TITLE));
+		expanded.setImageViewBitmap(R.id.wechat_preview_image, bitmap);
 		Notification result = Notification.Builder.recoverBuilder(context, current)
-				.setStyle(new Notification.BigPictureStyle().bigPicture(bitmap)).setOnlyAlertOnce(true).build();
+				.setStyle(new Notification.DecoratedCustomViewStyle())
+				.setCustomBigContentView(expanded).setOnlyAlertOnce(true).build();
 		NotificationMessages.copyIdentityExtras(current, result);
+		result.extras.putParcelable(Notification.EXTRA_PICTURE, bitmap);
 		result.extras.putBoolean(READY, true);
 		result.extras.putLong(TOKEN, token);
 		// recoverBuilder() already parceled the actions, so the notify hook may skip its own rebuild.
@@ -526,7 +538,7 @@ final class ImagePreviewLoader {
 		try {
 			Notification result = buildPreviewNotification(context, current, preview.bitmap, preview.request.token);
 			manager.notify(tag, id, result);
-			log("reattached", "request=" + preview.request.token + " id=" + id + " style=BigPicture");
+			log("reattached", "request=" + preview.request.token + " id=" + id + " style=FitStart");
 		} catch (Exception failure) {
 			log("reattach_failed", "request=" + preview.request.token + " type=" + failure.getClass().getSimpleName());
 		}

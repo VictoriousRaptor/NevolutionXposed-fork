@@ -62,7 +62,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "animatedStickerMediaBranch", "animatedStickerReplyAfterUpdate",
                 "markdownStylesAndParcel", "markdownRebuildAndDisable", "markdownIdentityReplyRecall", "markdownBuilderAndPreview",
                 "markdownCodeStylesAndParcel", "markdownCodeSourceAndReply",
-                "markdownFrameworkCodeCleanup", "markdownRestorationScope", "markdownPartialCodeStyles" };
+                "markdownFrameworkCodeCleanup", "markdownRestorationScope", "markdownPartialCodeStyles",
+                "imagePreviewFitStartAndActions", "imagePreviewDiscardClearsLayout" };
         Runnable[] tests = { this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
                 this::replyThenIncoming, this::repeatedRebuildAndPreview, this::untrustedMissingSender, this::reusedNotificationId,
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
@@ -94,7 +95,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> NotificationMarkdownInstrumentation.codeSourceAndReplySurviveRebuild(getTargetContext()),
                 NotificationMarkdownInstrumentation::frameworkCodeCleanupRoundTrip,
                 NotificationMarkdownInstrumentation::restorationRejectsUnownedOrChangedText,
-                NotificationMarkdownInstrumentation::restorationCompletesPartialStyles };
+                NotificationMarkdownInstrumentation::restorationCompletesPartialStyles,
+                () -> ImagePreviewLayoutInstrumentation.fitStartAndActions(this),
+                () -> ImagePreviewLayoutInstrumentation.discardClearsLayout(getTargetContext()) };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();

@@ -3,6 +3,7 @@
 	<string name="xposed_description">Enhances WeChat and media notifications with modern libxposed API 102.</string>
 
 	<string name="settings_title">NevolutionXposed settings</string>
+	<string name="wechat_image_preview_description">Received image preview</string>
 	<string name="settings_core_category">Core feature</string>
 	<string name="settings_optional_category">Optional enhancements</string>
 	<string name="settings_apply_title">Applying changes</string>
