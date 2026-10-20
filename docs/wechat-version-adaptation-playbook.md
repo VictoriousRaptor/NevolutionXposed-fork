@@ -78,6 +78,12 @@
 
 本轮应用源码 Lint 通过，结果为 0 errors / 33 warnings。测试源码的 Lint 分析在常规和单工作线程尝试中均长时间未产出，已中止；生成报告时明确排除了 `lintAnalyzeDebugAndroidTest` 与 `lintAnalyzeDebugUnitTest`，测试源码静态检查状态仍为未完成。
 
+2026-10-20 后续无消费者结构清理：删除 `Conversation` 中仅由 `setType()` 自行维护、从未交给消息的旧 sender Builder/占位对象及无调用 helper；实际 Person 仍由 `NotificationMessages` 构造，群成员原名 URI、类型切换时的参与者清理和异步快照代次保留。删除 `SystemUIDecorator` 从未读写的字符串归档，以及仅服务于无调用取消接口的 NLS holder；`MainHook` 只移除构造回调中的保存操作，保留 `NotificationListenerService` 所有已声明构造函数的 AFTER hook、实际监听器类的 posted/removed BEFORE hook、媒体装饰分发和微信轮次重置广播。`LocalDecorator` 的整数 ID 归档、120 总条数/20 单会话上限及匹配代次的清理均不变。
+
+同轮图片状态简化删除 `Preview` 对 `Request.token` 的重复保存，并将只供同步成功日志读取的下载提交结果从 `Task` 改为局部值；token 比较、反射调用完整签名、返回值非负成功条件、轮询/取消时序、TTL 和失败关闭行为不变。适用于当前全部既有画像，不改变任何功能的版本名/版本号匹配规则、开关、诊断日志或启用条件。上述为源码等价性核对；本轮自动化结果另行记录，前述历史设备结果不作为本轮真机验收。仍需在授权设备上分别回归私聊/群聊身份、撤回、图片首次发布/重新挂接、媒体通知及移除后的轮次广播。
+
+本次结构清理的本地验证：138 项单元测试通过，Debug 与仪器 APK 构建通过，两包证书与现有 release 密钥一致；应用生产源码 Lint 为 0 errors / 33 warnings，继续明确排除上述两个测试源码分析任务。本轮没有安装 APK、运行仪器测试或操作微信/SystemUI；构建与源码引用核对不代表运行时 hook 或真实通知行为已验收。
+
 各功能的版本匹配不能混用：
 
 | 功能 | 当前匹配语义 | 未匹配时行为 |

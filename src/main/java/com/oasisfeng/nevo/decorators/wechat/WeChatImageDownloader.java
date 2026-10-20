@@ -212,13 +212,14 @@ final class WeChatImageDownloader {
 		}
 		if (!created) return true;
 		try {
-			if (!submit(task)) {
+			int submitResult = submit(task.base);
+			if (submitResult < 0) {
 				synchronized (tasks) { tasks.remove(base.msgSvrId, task); }
 				return false;
 			}
 			Task scheduled = task;
 			task.future = worker.schedule(() -> poll(scheduled), 50, TimeUnit.MILLISECONDS);
-			log("large_submitted", "request=" + requestToken + " return=" + task.submitResult);
+			log("large_submitted", "request=" + requestToken + " return=" + submitResult);
 			return true;
 		} catch (Throwable failure) {
 			synchronized (tasks) { tasks.remove(base.msgSvrId, task); }
@@ -242,16 +243,15 @@ final class WeChatImageDownloader {
 		}
 	}
 
-	private boolean submit(Task task) throws Exception {
+	private int submit(BaseRow base) throws Exception {
 		Object service = downloadService();
 		if (service == null || !downloadServiceClass.isInstance(service))
 			throw new IllegalStateException("Image download service unavailable");
-		Object msgIdTalker = msgIdTalkerConstructor.newInstance(task.base.id, task.base.talker);
+		Object msgIdTalker = msgIdTalkerConstructor.newInstance(base.id, base.talker);
 		Object listener = Proxy.newProxyInstance(callbackClass.getClassLoader(), new Class<?>[]{callbackClass},
 				new IgnoredCallback());
-		Object result = downloadMethod.invoke(service, task.base.id, msgIdTalker, 0, null, 0, listener, -1, false);
-		task.submitResult = ((Number) result).intValue();
-		return task.submitResult >= 0;
+		Object result = downloadMethod.invoke(service, base.id, msgIdTalker, 0, null, 0, listener, -1, false);
+		return ((Number) result).intValue();
 	}
 
 	private Object downloadService() throws Exception {
@@ -402,7 +402,6 @@ final class WeChatImageDownloader {
 		volatile ScheduledFuture<?> future;
 		volatile boolean ready;
 		volatile BaseRow completedRow;
-		int submitResult;
 		Task(BaseRow base) { this.base = base; }
 	}
 

@@ -196,7 +196,6 @@ public class MainHook extends XposedModule {
 			protected void afterHookedMethod(MethodHookParam param) {
 				// XposedBridge.log("nls constructor " + param.thisObject);
 				NotificationListenerService nls = (NotificationListenerService)param.thisObject;
-				SystemUIDecorator.setNLS(nls);
 				try {
 					final Class<?> clazz = nls.getClass();
 					if (BuildConfig.DEBUG) Log.d(TAG, "NL clazz: " + clazz + " " + loadPackageParam.packageName);

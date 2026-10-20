@@ -8,7 +8,6 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 import android.widget.RemoteViews;
@@ -16,7 +15,6 @@ import android.widget.RemoteViews;
 import androidx.annotation.Keep;
 
 import java.util.List;
-import java.lang.ref.WeakReference;
 import java.util.function.Predicate;
 
 import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
@@ -203,36 +201,6 @@ public abstract class NevoDecoratorService {
 	 * 在系统UI（SystemUI）中执行的通知处理。
 	 */
 	public static class SystemUIDecorator {
-		private static volatile WeakReference<NotificationListenerService> mNLS = new WeakReference<>(null);
-
-		public static void setNLS(NotificationListenerService nls) {
-			mNLS = new WeakReference<>(nls);
-		}
-
-		public static NotificationListenerService getNLS() {
-			return mNLS.get();
-		}
-
-		// M2: 同样按条数计费，避免缓存总量随会话数线性增长
-		private static final int MAX_CACHED_SBN = 120;
-		private static final NotificationArchive<String, StatusBarNotification> cache =
-				new NotificationArchive<>(MAX_CACHED_SBN, MAX_NUM_ARCHIVED);
-	
-		protected static void cache(StatusBarNotification sbn) {
-			cache.add(sbn.getKey(), sbn);
-		}
-	
-		protected static List<StatusBarNotification> getArchivedNotifications(String key) {
-			return cache.snapshot(key);
-		}
-	
-		protected static StatusBarNotification getArchivedNotification(String key) {
-			return cache.latest(key);
-		}
-	
-		protected static boolean hasArchivedNotifications(String key) {
-			return cache.latest(key) != null;
-		}
 	
 		protected final String prefKey;
 		private boolean disabled;
@@ -255,12 +223,6 @@ public abstract class NevoDecoratorService {
 		}
 		@Keep public void onNotificationRemoved(final StatusBarNotification evolving, final int reason) {
 			if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationRemoved(" + evolving + ", " + reason + ")");
-		}
-
-		protected final void cancelNotification(String key) {
-			if (BuildConfig.DEBUG) Log.d(TAG, "cancelNotification " + key);
-			final NotificationListenerService listener = getNLS();
-			if (listener != null) listener.cancelNotification(key);
 		}
 	}
 

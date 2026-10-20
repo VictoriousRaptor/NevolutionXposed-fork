@@ -49,9 +49,14 @@ search LSPosed logs for `before hook failed`, `LruCache`, and
 in `LocalDecorator.cache()` before reply actions were added. Mutating a cached list
 in place had undercounted its size; removing history then corrupted the total.
 
-Both decorators now share `NotificationArchive`: it counts notifications explicitly,
+`LocalDecorator` uses `NotificationArchive`: it counts notifications explicitly,
 retains at most 120 notifications and 20 per conversation, and publishes stable list
 snapshots. Token matching and history removal run atomically. Regression coverage
 includes repeated reply recasts/removal, LRU eviction, concurrent updates, and an
 Android instrumentation case preserving a RemoteInput action through rebuild and
 parceling. Building the instrumentation APK does not mean the device test was run.
+
+The unused SystemUI archive and its listener-backed cancellation wrapper were
+removed on 2026-10-20 after checking all production, test and dynamic entry-point
+references. The active local archive, SystemUI posted/removed hooks and WeChat
+round-reset broadcast remain in place.

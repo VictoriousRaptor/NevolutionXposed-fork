@@ -491,7 +491,7 @@ final class ImagePreviewLoader {
 			manager.notify(tag, id, result);
 			log("published", "request=" + request.token + " style=BigPicture actions="
 					+ (result.actions == null ? 0 : result.actions.length) + " picture=" + pictureSize(result));
-			previews.put(request.key, new Preview(request, request.token, bitmap, SystemClock.elapsedRealtime()));
+			previews.put(request.key, new Preview(request, bitmap, SystemClock.elapsedRealtime()));
 			prunePreviews(SystemClock.elapsedRealtime());
 			main.postDelayed(() -> prunePreviews(SystemClock.elapsedRealtime()), PREVIEW_KEEP_MS);
 		} catch (Exception failure) {
@@ -520,15 +520,15 @@ final class ImagePreviewLoader {
 
 	private void reattach(Context context, NotificationManager manager, String tag, int id, Preview preview) {
 		Notification current = active(manager, tag, id);
-		if (current == null || isPreview(current) || current.extras.getLong(TOKEN) != preview.token
+		if (current == null || isPreview(current) || current.extras.getLong(TOKEN) != preview.request.token
 				|| previews.get(id + ":" + tag) != preview
 				|| SystemClock.elapsedRealtime() - preview.publishedAt >= PREVIEW_KEEP_MS) return;
 		try {
-			Notification result = buildPreviewNotification(context, current, preview.bitmap, preview.token);
+			Notification result = buildPreviewNotification(context, current, preview.bitmap, preview.request.token);
 			manager.notify(tag, id, result);
-			log("reattached", "request=" + preview.token + " id=" + id + " style=BigPicture");
+			log("reattached", "request=" + preview.request.token + " id=" + id + " style=BigPicture");
 		} catch (Exception failure) {
-			log("reattach_failed", "request=" + preview.token + " type=" + failure.getClass().getSimpleName());
+			log("reattach_failed", "request=" + preview.request.token + " type=" + failure.getClass().getSimpleName());
 		}
 	}
 
@@ -571,12 +571,11 @@ final class ImagePreviewLoader {
 
 	private static final class Preview {
 		final Request request;
-		final long token, publishedAt;
+		final long publishedAt;
 		final int bytes;
 		final Bitmap bitmap;
-		Preview(Request request, long token, Bitmap bitmap, long publishedAt) {
+		Preview(Request request, Bitmap bitmap, long publishedAt) {
 			this.request = request;
-			this.token = token;
 			this.bitmap = bitmap;
 			this.publishedAt = publishedAt;
 			bytes = bitmap.getAllocationByteCount();
