@@ -16,6 +16,12 @@
 			android:summary="@string/decorator_wechat_show_last_reply_description"
 			android:title="@string/decorator_wechat_show_last_reply_title"/>
 		<CheckBoxPreference
+			android:key="WeChatDecorator.preserve_emoji"
+			android:defaultValue="false"
+			android:dependency="WeChatDecorator.enabled"
+			android:summary="@string/decorator_wechat_preserve_emoji_description"
+			android:title="@string/decorator_wechat_preserve_emoji_title"/>
+		<CheckBoxPreference
 			android:key="WeChatDecorator.markdown"
 			android:defaultValue="false"
 			android:dependency="WeChatDecorator.enabled"

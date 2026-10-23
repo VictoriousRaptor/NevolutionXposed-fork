@@ -50,6 +50,8 @@
 	<string name="decorator_wechat_show_last_reply_title">显示你最后回复的消息</string>
 	<string name="decorator_wechat_show_last_reply_description">收到新消息时保留你最后一组通知栏回复。对后续通知更新生效。</string>
 	<string name="decorator_wechat_markdown_title">通知内渲染 Markdown</string>
+	<string name="decorator_wechat_preserve_emoji_title">保留通知原生 Emoji</string>
+	<string name="decorator_wechat_preserve_emoji_description">保留 Unicode 表情，避免微信将其替换为表情名称或 [表情] 占位符。对已适配微信版本的新通知生效；不包含表情包图片展示。</string>
 	<string name="decorator_wechat_markdown_description">在微信通知消息中显示 **加粗**、*斜体*、~~删除线~~ 和反引号代码。系统支持时，代码使用等宽字体和灰色底纹。保留原始消息和回复文字。修改后需要重启微信进程。</string>
 	<string name="decorator_wechat_image_preview_title">通知内显示图片</string>
 	<string name="decorator_wechat_image_preview_description">收到图片时在通知里直接显示图片，而不是 [图片]。开启或关闭后需要重启微信进程；关闭时保持微信原始的 [图片] 提示。</string>

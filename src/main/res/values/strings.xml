@@ -35,6 +35,8 @@
 	<string name="decorator_wechat_show_last_reply_title">Show your last reply</string>
 	<string name="decorator_wechat_show_last_reply_description">Keep your last notification reply when new messages arrive. Applies to subsequent notification updates.</string>
 	<string name="decorator_wechat_markdown_title">Markdown in notifications</string>
+	<string name="decorator_wechat_preserve_emoji_title">Keep original emoji in notifications</string>
+	<string name="decorator_wechat_preserve_emoji_description">Keep Unicode emoji instead of WeChat’s emoji labels or [表情] placeholder. Applies to new notifications on supported WeChat versions. Does not display sticker images.</string>
 	<string name="decorator_wechat_markdown_description">Display **bold**, *italic*, ~~strikethrough~~ and backtick code in WeChat notification messages. Code uses monospace text and a gray background where supported by the system. Original message and reply text are retained. Restart the WeChat process after changing this setting.</string>
 	<string name="decorator_wechat_image_preview_title">Image preview in notifications</string>
 	<string name="decorator_wechat_image_preview_description">Show the received picture instead of [图片] in the notification. Requires a WeChat process restart after changing; with this off, notifications keep the original [图片] text.</string>

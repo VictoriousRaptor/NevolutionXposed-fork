@@ -28,6 +28,14 @@ minSdk 24 / targetSdk 35。base 含 18 个 DEX，5 个 split 未发现 DEX。
 `.debug-artifacts/wechat-8.0.79/sources/sources/`。这些产物均仅保存在本地忽略目录。
 下文使用原始类/字段/方法名，不采用 JADX 的桥接合并别名。
 
+## Unicode emoji 的通知占位符（2026-10-23 离线补查）
+
+本版本的通知构造会经过 `com.tencent.mm.smiley.g.d(String): String`；其 `com.tencent.mm.smiley.p0.a(a1, int, int): boolean` 回调在 emoji 名称查询失败时写入 `R.string.a11`，base 资源实值为 `[表情]`（`0x7f100411`）。所以 `[表情]` 也可能来自原始 Unicode emoji 的转换，不能一概视为贴纸消息。
+
+按 split-4.apk 自带 `assets/color_emoji` 和 base 中文名称表模拟，👌、😀、🙂、🤔、😎 落入通用占位符；😊、😂、👍 分别有 `[开心]`、`[破涕为笑]`、`[强]` 名称。运行时 `color_emoji_new` 更新资源、语言及其他构建可能改变结果；本次未在微信进程执行内部函数或真机收发测试。完整调用、数据字段、反编译位置、资源来源及验证边界见[通知表情调查](wechat-emoji-notifications.md)。
+
+2026-10-23 增加默认关闭的 `WeChatDecorator.preserve_emoji`：仅版本名 8.0.79 **且**版本码 3182，在主进程 `Application.onCreate(): void` AFTER 初始化后安装。两个精确实例方法分别为 `com.tencent.mm.smiley.g.d(String): String` 的 BEFORE、`com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9, long, boolean, boolean, String, int, String, String, Intent, boolean): void` 的 BEFORE/AFTER；前者只在后者的当前线程嵌套作用域内、总开关和新开关同时开启时返回原始参数。完整参数、返回值、非 static / 非 abstract 校验及直接调用者 `m0.a(...)` 的取消优化成功后才安装；两项 hook 完成前不激活，部分失败则回退并清理。未知组合、签名不符、取消优化/安装失败均保留微信转换。`WeChat.Emoji` 的 ready 日志只证明安装，真实 emoji 显示、设置切换、其他调用者、回复与撤回行为仍须真机回归。来源和完整回归矩阵见上述专题文档，不影响其他功能画像。
+
 ## 通知回复
 
 | 依赖 | 完整运行时描述符 |

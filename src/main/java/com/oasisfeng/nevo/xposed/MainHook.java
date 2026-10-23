@@ -26,6 +26,7 @@ import com.oasisfeng.nevo.sdk.NevoDecoratorService.SystemUIDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatNotificationRemoval;
 import com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile;
+import com.oasisfeng.nevo.decorators.wechat.WeChatEmojiHooks;
 import com.oasisfeng.nevo.decorators.wechat.NotificationMarkdownHooks;
 import com.oasisfeng.nevo.xposed.compat.PackageHookContext;
 import com.oasisfeng.nevo.xposed.compat.XC_MethodHook;
@@ -374,6 +375,10 @@ public class MainHook extends XposedModule {
 					if (context != null && ref.compareAndSet(null, context)) {
 						if (BuildConfig.DEBUG) Log.d(TAG, "Application.onCreate context=" + context);
 						NevoDecoratorService.setAppContext(context);
+						WeChatEmojiHooks.install(context, loadPackageParam.classLoader,
+								() -> pref.getBoolean("WeChatDecorator.enabled", true)
+										&& pref.getBoolean(RemotePreferenceStore.KEY_PRESERVE_EMOJI, false),
+									MainHook.this::deoptimize);
 						resolveReplyProfile(context);
 						// Install the car-mode gate bypass before WeChat builds its
 						// notifications, so WeChat itself creates the car conversation

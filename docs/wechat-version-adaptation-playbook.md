@@ -99,6 +99,9 @@
 | 应用内回复事件 | 8.0.72 **且** 3085、8.0.77 **且** 3141/3160、8.0.78 **且** 3180、8.0.79 **且** 3182；完整签名校验 | 保留原轮次行为 |
 | 撤回身份和事件 | 同上五组精确版本；完整字段/方法及事件父类校验 | 不启用精确撤回关联 |
 | 通知 Markdown 展示 | 无新增版本名/版本号匹配或运行时签名校验；适用于既有微信通知重建路径，含上述版本及 legacy 回退；须开启微信通知增强和 `WeChatDecorator.markdown` | 默认关闭；语法不支持、解析达到限制或出现运行时异常时保留原文，不改变其他功能的版本门禁 |
+| 通知原生 Emoji 保留 | 仅版本名 8.0.79 **且**版本码 3182；转换和通知构建方法分别精确校验参数、返回值、非 static / 非 abstract，构建方法取消优化须成功；还须微信通知增强和 `WeChatDecorator.preserve_emoji` 均开启 | 默认关闭；未知组合、签名不符、取消优化/安装失败时保留微信原始转换；不借用回复、图片、应用内回复或撤回画像 |
+
+2026-10-23 内置表情名称映射补齐 32 项，已有映射保持不变。在微信 8.0.79 / 3182 的离线源码与资源中确认 `com.tencent.mm.smiley.g.d(String): String` 会在名称缺失时转为 `[表情]`，新增默认关闭的“保留通知原生 Emoji”以避免该上游损失。作用进程仅 `com.tencent.mm` 主进程，安装入口为既有 `Application.onCreate(): void` AFTER；转换函数 BEFORE 只在 `com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9, long, boolean, boolean, String, int, String, String, Intent, boolean): void` 的 BEFORE/AFTER 线程作用域内返回原始参数，嵌套与异常退出均清理深度。原生方法其他调用者/线程保持不变，开关每次从远程设置读取；schema 7 默认关闭并保留显式选择。安装前取消已核对直接调用者 `m0.a(...)` 的优化，防止内联绕过；部分安装未激活或失败时回退，诊断标签 `WeChat.Emoji` 仅记录 ready/unavailable/unhook_failed 及异常类型，不记录正文。真实表情图片仍为独立待办；源码、完整签名、回调时机、失败行为与回归矩阵见[通知表情调查](wechat-emoji-notifications.md)。ready 日志或构建通过不代表真实通知显示验证完成。
 
 Markdown 在微信进程的 `WeChatDecorator.Local.apply(NotificationManager, String, int, Notification): Decorating` 末段、`MessagingBuilder.flatIntoExtras(MessagingStyle, Bundle): void` 之后执行。`onCreate(SharedPreferences): void` 读取开关，设置存储 schema 为 5，升级默认关闭。`EXTRA_TEXT` 和 `EXTRA_MESSAGES[*].text` 使用可序列化的 Android `StyleSpan`/`StrikethroughSpan`，代码使用 `TypefaceSpan("monospace")`/`BackgroundColorSpan(0x30808080)`。代码内标记保持字面量，正文空白和换行保留，未闭合或空围栏保留原样。原文保存于 `nevo.markdown.rawText`（消息内置于 `extras`），转换的消息还保存 `nevo.markdown.owner=com.tencent.mm`；读取规范消息时清除两项展示元数据，关闭功能后的正常重建也清除它们。重复重建先读取原文，图片预览复制身份时也保留原文；发送 RemoteInput 和输入历史仍保留用户原始文字。回复、图片、应用内回复和撤回仍按上表分别匹配，不因展示可用而视为完成适配。
 

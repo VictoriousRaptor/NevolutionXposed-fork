@@ -11,6 +11,14 @@ import java.util.Map;
 import org.junit.Test;
 
 public class RemotePreferenceStoreTest {
+	@Test public void preserveEmojiDefaultsOffAndKeepsExplicitChoicesAcrossUpgradeAndSync() {
+		String key = RemotePreferenceStore.KEY_PRESERVE_EMOJI;
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.migratedLocalValues(Collections.emptyMap(), 6).get(key));
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.migratedLocalValues(Collections.singletonMap(key, true), 6).get(key));
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.merge(Collections.emptyMap(), Collections.singletonMap(key, true)).get(key));
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.singletonMap(key, false), Collections.singletonMap(key, true)).get(key));
+	}
+
 	@Test public void lastReplyDefaultsOffAndPreservesExplicitChoiceAcrossUpgrade() {
 		String key = RemotePreferenceStore.KEY_SHOW_LAST_REPLY;
 		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.emptyMap(), Collections.emptyMap()).get(key));
