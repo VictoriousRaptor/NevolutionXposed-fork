@@ -196,6 +196,7 @@ ART 内联处理：安装 hook 前通过 libxposed API 102 的 `deoptimize(Execu
 - 完整行为、诊断与回归边界见[通知历史与最后回复展示](notification-history-policy.md)。沿用 Debug 的 `WeChat.Identity`、`removal_receiver matched` 与匿名轮次/合并日志；Release 不增加消息、联系人或 token 明文日志。回归覆盖普通/媒体通知和 Builder 重建后的原生删除目标、关闭装饰器后直接发送，以及 SystemUI 清理缺失时的边界；framework 用例不代替微信未读数、划除/清空和进程回收场景的真机验证。
 - 原生回复转发只执行一次 `RemoteInput.addResultsToIntent()`；@ 前缀调整在 results Bundle 内完成，不再拷贝旧 ClipData。原生 PendingIntent 回调 `resultCode != 0` 时中止预留，不记成功回复历史。
 - 2026-10-23 回复已读时机：在原生/合成接收器取得有效 ID、输入及该路径必需元数据后、派发前，统一请求微信原生已读并按捕获的通知代次清理本地来信。`read_requested` 只证明用户发送操作进入此阶段，不证明微信已读成功。原生非零回调、PendingIntent 取消、合成派发不可用/异常均不阻止此前已读请求；失败仍中止来源预留且不写入 B。本地清理与原生动作分别捕获运行时异常，保留匿名通知 ID 的诊断，并继续回复派发。媒体回复挂接时一并缓存 CarExtender 的原生已读目标；无目标时不另造微信广播。清理后的当前快照保留待回应组供回调更新，SystemUI 移除仍可删除该快照；并发新来信和换会话沿用代次/会话实例保护。不改微信混淆 hook、版本门禁、作用进程或功能开关。回归须覆盖失败仍已读但无 B、连续回复组、迟到回调、新来信及移除后不复活；真实未读数和通知 UI 待真机验收。
+- 成功回复历史的保存独立于活动通知重发：通过上述校验后先按当前展示开关保存规范化快照，再检查活动 token 并决定是否发布。普通取消、listener cancel 或活动查询无匹配项均保留成功回复与去重 UUID；用户确认移除后归档为空则仍拒绝迟到回调。无活动通知的 framework 回归使用无操作重发入口，覆盖连续成功回复、C 先于回调到达、重复回调及两种开关下后续 C/D；构建不代表该用例或真实微信已验证。
 - 回复结果边界：`native_pending_intent_callback resultCode=0` 仅表示模块收到该广播回调值，并非微信业务成功码或网络送达回执；`PendingIntent.send()` 传入初值 0，已核对的 8.0.79 接收器不主动设置结果码，提前返回也可能保留 0。合成路径的 `synthetic_dispatch_complete` / `synthetic_dispatched` 仅表示直接调用 `onReceive(Context, Intent): void` 正常返回，内部提前返回同样可能被视为派发完成。微信出现对应新消息可证明已进入本地消息处理，不能反推回调数值、调用路径或对端送达；精确数值以日志为准，实际发送状态与已读数另验。[Android 回调定义](https://developer.android.com/reference/android/app/PendingIntent.OnFinished)
 - `WeChatDecorator.Local.onDestroy()` 关闭 `MessagingBuilder` 的接收器并停止应用内回复追踪、清理来源索引和轮次重置接收器。验证时覆盖生命周期与原生/合成回复的混合场景；本次仅有构建和自动化证据。
 - **媒体通知内联回复动作合并与去重**：用户在媒体通知输入期间到达同 ID 新通知并发送成功后，控制器回调对 latest 缓存清除 `pre-applied`/`applied` 标记并调用 `attachReplyAction` 重新发布。旧实现整体复制原 actions 数组再追加模块回复，导致累积多个重复回复动作。现改为在合并时过滤旧的可投递自由文本回复动作（`actionIntent != null` 且 `RemoteInput` 中包含 `allowFreeFormInput == true`），再加入当前 CarExtender 产生的新模块回复动作；非回复动作（大图缩放、标记已读、仅选择项/仅数据输入、无 Intent 动作及原有 null 元素）保持原对象、原顺序与相对位置；无 CarExtender/native reply 或非聊天 ticker 仍不修改原动作。诊断日志保持仅记录 `notificationId`、`resultKey` 与 `existingActions` 元数据。
@@ -417,7 +418,7 @@ adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oa
 | --- | --- | --- |
 | 单聊回复 | 收到单聊消息后在通知栏输入并发送 | 会话内出现该消息，日志出现完整 native 链路 |
 | 群聊回复 | 同上（群聊） | 消息进入正确群会话 |
-| 通知栏回复后的新来信提醒 | A → 通知栏连续回复 B1/B2 → C → D，另检查补图及原本静默的通知 | 回复刷新保持静默；C/D 保留 B1/B2 展示但清除已回应输入历史，不新增 `FLAG_ONLY_ALERT_ONCE`；图片和原有静默策略保留。源码标记检查与声音/震动/浮动真机验收分别记录 |
+| 通知栏回复后的新来信提醒 | A → 通知栏连续回复 B1/B2 → C → D，分别检查“显示你最后回复的消息”关闭/开启，另检查补图及原本静默的通知 | 回复刷新保持静默；默认关闭时显示 C、C+D，开启时显示 B1+B2+C、B1+B2+C+D；两者均清除已回应输入历史，不新增 `FLAG_ONLY_ALERT_ONCE`；图片和原有静默策略保留。源码标记检查与声音/震动/浮动真机验收分别记录 |
 | 多语言/emoji | 中文、英文、emoji 各一条 | 不截断、不乱码、不重复发送 |
 | 媒体/文件通知 | 收到图片/视频/文件消息 | 保留微信原布局；符合聊天和投递条件时提供回复入口 |
 | 视频/语音通话 | 拨打或接听 | 通知类型正确，不被当成普通消息 |

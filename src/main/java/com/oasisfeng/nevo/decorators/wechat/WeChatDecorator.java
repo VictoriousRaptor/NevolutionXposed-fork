@@ -288,7 +288,11 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (!clearReadNotifications(id, token, false)
 					&& latest.extras.getLong(WeChatNotificationRemoval.READ_THROUGH_TOKEN) < token) return;
 			imagePreviews.discardRead(id, reply, token);
+			NotificationMessages.clearReadHistory(conversation, reply, token, showLastReply());
 			NotificationMessages.stamp(conversation, reply);
+			// Saving a successful reply must not depend on the notification still being active.
+			if (getArchivedNotification(id) == null) cache(id, reply);
+			else replaceCachedNotification(id, latest, reply);
 			repostIfActive(id, reply, activeToken, token);
 		}
 

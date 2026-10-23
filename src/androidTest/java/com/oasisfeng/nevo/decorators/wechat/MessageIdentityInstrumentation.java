@@ -54,6 +54,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "appReplyKeepsLaterNotificationReply", "groupRound", "roundPreviewAndUndated",
                 "removedRoundStartsFresh", "lastReplyDisplayChoice", "lateReadPreservesNewMessages", "dismissUsesNativeRead",
                 "replyControllerConsecutiveGroup", "replyControllerLateCallback", "replyControllerAppReplyInterleaving", "replyControllerRemovedTarget",
+                "replyControllerWithoutActiveNotification",
                 "replyReadWithoutSend", "nativeReplyReadBeforeFailure", "syntheticReplyReadBeforeFailure",
                 "classifiesRawFirstMessages", "classificationSurvivesNextMessage", "lateTalkerIsIsolated",
                 "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyInputsUseLocalizedReplyLabel",
@@ -73,6 +74,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 this::appReplyKeepsLaterNotificationReply, this::groupRound, this::roundPreviewAndUndated,
                 this::removedRoundStartsFresh, this::lastReplyDisplayChoice, this::lateReadPreservesNewMessages, this::dismissUsesNativeRead,
                 this::replyControllerConsecutiveGroup, this::replyControllerLateCallback, this::replyControllerAppReplyInterleaving, this::replyControllerRemovedTarget,
+                this::replyControllerWithoutActiveNotification,
                 this::replyReadWithoutSend,
                 () -> ReplyReadInstrumentation.nativeReplyReadBeforeFailure(getTargetContext()),
                 () -> ReplyReadInstrumentation.syntheticReplyReadBeforeFailure(getTargetContext()),
@@ -501,7 +503,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             normalized(conversation, n, archive, show);
         }
         @Override void repostIfActive(int id, Notification notification, long expectedToken, long readToken) {
-            cache(id, normalized(conversation, notification, Collections.emptyList(), show));
+            // Model an absent active notification: reposting cannot save the reply for the controller.
         }
         void texts(String... expected) { checkTexts(conversation, getArchivedNotification(id), expected); }
         Notification latest() { return getArchivedNotification(id); }
@@ -599,6 +601,29 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             check(fixture.latest() == null, "late reply revived a removed notification");
             fixture.incoming("C", 200);
             fixture.texts("C");
+        }
+    }
+
+    private void replyControllerWithoutActiveNotification() {
+        for (boolean show : new boolean[]{false, true}) for (boolean peerBeforeCallback : new boolean[]{false, true}) {
+            try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
+                fixture.incoming("A", 100);
+                MessagingBuilder.ReplyTarget target = fixture.read();
+                if (peerBeforeCallback) fixture.incoming("C", 200);
+                fixture.controller.onReplySent(fixture.id, target, "B1", 110, "inactive-B1");
+                check(fixture.latest() != null, "successful reply lost without an active notification");
+                fixture.controller.onReplySent(fixture.id, target, "B2", 120, "inactive-B2");
+                if (!peerBeforeCallback) {
+                    fixture.texts("B1", "B2");
+                    fixture.incoming("C", 200);
+                }
+                fixture.texts(show ? new String[]{"B1", "B2", "C"} : new String[]{"C"});
+                Notification saved = fixture.latest();
+                fixture.controller.onReplySent(fixture.id, target, "B1", 110, "inactive-B1");
+                check(fixture.latest() == saved, "successful reply lost its duplicate callback guard");
+                fixture.incoming("D", 300);
+                fixture.texts(show ? new String[]{"B1", "B2", "C", "D"} : new String[]{"C", "D"});
+            }
         }
     }
 
