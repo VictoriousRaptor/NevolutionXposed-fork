@@ -99,9 +99,15 @@ simplemsginfo 基址 `d` 的布局两版一致：`+0 localId`、`+1 svrId`、`+2
 | pair constructor | `com.tencent.mm.plugin.msg.MsgIdTalker(long, String)` | 同左 |
 | decoder | `MMWXGFJNI.wxam2PicBuf(byte[], int, int): byte[]` static | 同左 |
 
-两版 `ImgInfo2` schema 均包含当前 SQL 所需列：`id/msgSvrId/msgTalker/bigImgPath/hevcPath/midImgPath/offset/totalLen/reserved1`。
+两版 `ImgInfo2` schema 此前核对的列为：`id/msgSvrId/msgTalker/bigImgPath/hevcPath/midImgPath/offset/totalLen/reserved1`。
 继续只查服务端 ID 选中的基础行并校验会话，不跟随 reserved1 另查原图行；提交参数沿用同语义的普通图片调用，
 保留最多 4 个任务、文件大小限制、有界等待、取消及缩略图回退。
+
+2026-10-23 共用下载器修复：SQL 另读 `msglocalid` 构造 `MsgIdTalker`，下载接口首参仍为基础图片行 `id`。
+本次从既有 8.0.72/3085、8.0.79/3182 源码核对两种 ID 的区别，未重新取得两版 8.0.77 APK 检查新增列；
+该列及实际下载行为仍需按本节 APK 哈希对应的两版独立复核。缺列时查询失败并保守回退，消息本地 ID 非正数时不提交，
+不扩大 8.0.77 **且** 3141/3160 的门禁或改变完整反射签名、微信主进程、图片总开关/大图开关条件；
+本地图片仍可沿用原路径预览。Debug 诊断与跨 ID 回归要求见[适配手册第 3.2 节](wechat-version-adaptation-playbook.md#32-图片事件80723085807731418077316080793182)。
 
 ### 应用内回复与撤回
 

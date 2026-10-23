@@ -119,6 +119,12 @@ ART 内联处理：安装 hook 前通过 libxposed API 102 的 `deoptimize(Execu
 
 ### 3.2 图片事件（8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.79/3182）
 
+2026-10-23 普通大图下载身份修复：固定 SQL 增加读取 `ImgInfo2.msglocalid`，与图片行 `id` 分开保存。下载接口 `b(long, MsgIdTalker, int, Object, int, <版本回调接口>, int, boolean): int` 的首参仍为选中基础行的图片 `id`，`com.tencent.mm.plugin.msg.MsgIdTalker(long, String)` 则使用 `msglocalid` 和该行的 `msgTalker`；不使用服务端 ID 或 `reserved1` 代替消息本地 ID。缺少列时查询失败并回退，`msglocalid <= 0` 时不提交下载，但仍可读取该基础行已有的本地图片。仍只在微信主进程、图片总开关及大图开关启用后请求；四组版本名与版本码必须同时匹配，完整运行时方法/返回类型校验及 hook 时机保持原有规则，回复、应用内回复和撤回门禁各自独立。
+
+本次离线补查使用既有 8.0.72/3085 与 8.0.79/3182 源码；8.0.79 的参数用途和完整证据见 [findings](wechat-8.0.79-findings.md)。共用下载器的修复也作用于两组 8.0.77 画像，本次未重新取得其 APK 核对新增列，未声明新版设备兼容性通过。沿用 Debug `NX_IMAGE stage=large_ready`、`large_query_failed`、`large_submitted`、`large_submit_failed` 诊断，不输出图片/消息真实 ID；无效消息本地 ID 的请求直接返回 false，不新增专用日志。回归须覆盖图片 ID、消息本地 ID、服务端 ID、`reserved1` 各不相等时的参数分离，消息 ID 无效时的本地预览与超时回退，以及普通大图完成、取消和迟到结果；构建与主机测试不代表真实下载通过。
+
+本次本地验证：162 项主机单元测试全部通过，其中 `WeChatImageDownloaderTest` 的 7 项包含新增两项回归；使用 `-PrequireReleaseSigning=true` 离线完成 Debug 和仪器 APK 构建，两包证书均与现有 release 密钥一致。本轮没有安装 APK、执行仪器测试、重启微信/SystemUI 或操作设备，未将历史设备验收计入本次修复结果。
+
 2026-10-21 展开图片改为 `fitStart`：生产首次补图与后续重新挂接共用 `ImagePreviewLoader.buildPreviewNotification()`，使用 `DecoratedCustomViewStyle` 保留系统通知头和动作，展开区域为模块资源包提供的 `RemoteViews`，图片区域高 160 dp、等比完整显示并左上对齐；收起和正常横幅仍使用原通知正文。保留点击入口、回复 PendingIntent/RemoteInput、消息身份与原文、请求 token、静默补图及 1.5 秒等待策略，`EXTRA_PICTURE` 继续保留给图片元数据/诊断。撤回/失效清理同时移除本模块的自定义展开图片，避免残留。Debug 发布/重新挂接日志改为 `style=FitStart`，Release 仍无图片诊断日志；不新增 hook，既有图片/大图开关、四组精确画像及运行时签名校验不变。缺失资源或构建失败沿用现有补图失败处理，保留当前通知；SystemUI 的实际宽度和高度仍由系统约束。
 
 此次 138 项单元测试通过，Release / Debug / 测试 APK 构建和既有 release 证书核对通过。Android 16 / API 36 真机的 49 项模块框架测试全部通过，新增用例核对包内及微信资源上下文中的模块布局、Parcel/重建后 `fitStart` 的比例和左上定位、占位正文、回复动作/身份/静默标记，以及撤回清理。Release 已覆盖安装并回拉核对；独立测试 APK 执行后已卸载并核验。上述没有发送真实微信消息，不替代微信实际收图、1.5 秒下载时限、连续图文、通知取消和撤回的完整 UI 验收。

@@ -93,11 +93,34 @@ simplemsginfo 偏移仍为 `d+0 localId`、`+1 svrId`、`+2 createTime`、`+3 ta
 仅接收方向 0、类型 3 进入事件索引。保持四个路径键、质量排序、有界索引和会话归属过滤。
 
 `v61/l0.java:95` 的 ImgInfo2 schema 仍包含当前固定 SQL 使用的
-`id/msgSvrId/msgTalker/bigImgPath/hevcPath/midImgPath/offset/totalLen/reserved1`。
+`id/msglocalid/msgSvrId/msgTalker/bigImgPath/hevcPath/midImgPath/offset/totalLen/reserved1`。
 下载接口参数形状不变，仍选择普通图、只查基础行，不沿 reserved1 额外查询原图；
 任务上限、大小限制、等待、取消和缩略图回退保持现有实现。
 图片事件与下载服务分别校验，预览总开关关闭时不安装；普通大图请求还要求大图开关开启。
 未知版本或签名不符时对应组件关闭，不扩大匹配范围。
+
+### 普通大图的图片 ID 与消息本地 ID（2026-10-23 离线补查）
+
+使用上文同一 ADB 来源、同一 SHA-256 的 8.0.79/3182 APK，本次未重新采集设备。
+`.debug-artifacts/wechat-8.0.79/sources/sources/v61/l0.java:71` 的原始 schema 分别声明
+`id INTEGER PRIMARY KEY` 与 `msglocalid INT`，并为 `msglocalid` 建索引；两者不是同一个 ID。
+`com/tencent/mm/plugin/msg/MsgIdTalker.java:20` 的构造函数把 `long` 存入 `d: long`、
+把会话存入 `e: String`；`a(): String` 返回会话。
+`v61/j.java:65-70` 的 `b(long, MsgIdTalker, int, Object, int, eb0.w, int, boolean): int`
+将首参及 pair 的 `d` 分别交给任务。`v61/t0.java:599-625` 再分别以图片 ID 调用
+`v61.l0.y2(Long): v61.b0` 查询图片、以消息本地 ID 调用
+`oy0.k0.Zi(String, long): com.tencent.mm.storage.e9` 查询消息，后者的 `I0(): long`
+用于请求的消息服务端 ID。源码原名取自本地反编译，不使用生成的字段别名作为 hook 目标。
+
+共用下载器因此新增读取 `msglocalid`，仅用于 `MsgIdTalker`，首参继续使用基础行 `id`；
+缺列时回退，消息本地 ID 非正数时跳过主动下载，保留本地文件预览。运行时反射签名、微信主进程、
+图片总开关/大图开关、8.0.79 **且** 3182 门禁及其他功能画像均沿用原规则。
+已有图片可由本地命中或微信自身下载提供；`v61.t0.H(v61.b0, String, long): boolean` 的 CDN
+分支还从图片行元数据取得 URL/密钥，不能从看到大图反推消息参数正确，也不能将本缺陷描述为必然下载失败。
+新增主机回归检查 Cursor 读值及实际反射提交参数，使用互不相同的图片、消息、服务端和关联原图 ID；
+另验无效消息 ID 不提交且不丢弃已有本地行。真实微信主动下载、取消、超时与各网络分支仍待授权设备验证。
+
+本次 162 项主机测试通过，Debug/仪器 APK 构建及现有 release 证书一致性校验通过；没有安装或执行设备测试。
 
 ## 应用内回复与撤回
 

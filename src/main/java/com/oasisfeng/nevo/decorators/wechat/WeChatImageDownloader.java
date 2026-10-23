@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit;
  * Every descriptor is resolved and validated before use; any mismatch disables this component.
  */
 final class WeChatImageDownloader {
-	private static final String SQL = "SELECT id, msgSvrId, msgTalker, bigImgPath, hevcPath, midImgPath, offset, totalLen, reserved1 FROM ImgInfo2 WHERE msgSvrId=?";
+	private static final String SQL = "SELECT id, msglocalid, msgSvrId, msgTalker, bigImgPath, hevcPath, midImgPath, offset, totalLen, reserved1 FROM ImgInfo2 WHERE msgSvrId=?";
 	private static final int MAX_TASKS = 4;
 	private static final long MAX_SOURCE_BYTES = 20L * 1024 * 1024;
 
@@ -149,6 +149,7 @@ final class WeChatImageDownloader {
 		try {
 			return new BaseRow(
 					cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+					cursor.getLong(cursor.getColumnIndexOrThrow("msglocalid")),
 					cursor.getLong(cursor.getColumnIndexOrThrow("msgSvrId")),
 					string(cursor, "msgTalker"),
 					string(cursor, "bigImgPath"),
@@ -196,7 +197,7 @@ final class WeChatImageDownloader {
 	 * Returning false means the caller must keep its normal timeout behavior.
 	 */
 	boolean request(BaseRow base, long requestToken, long deadline, ReadyCallback callback) {
-		if (!available || base == null || requestToken == 0 || callback == null
+		if (!available || base == null || base.msgLocalId <= 0 || requestToken == 0 || callback == null
 				|| deadline <= SystemClock.elapsedRealtime()) return false;
 		Task task;
 		boolean created = false;
@@ -247,7 +248,7 @@ final class WeChatImageDownloader {
 		Object service = downloadService();
 		if (service == null || !downloadServiceClass.isInstance(service))
 			throw new IllegalStateException("Image download service unavailable");
-		Object msgIdTalker = msgIdTalkerConstructor.newInstance(base.id, base.talker);
+		Object msgIdTalker = msgIdTalkerConstructor.newInstance(base.msgLocalId, base.talker);
 		Object listener = Proxy.newProxyInstance(callbackClass.getClassLoader(), new Class<?>[]{callbackClass},
 				new IgnoredCallback());
 		Object result = downloadMethod.invoke(service, base.id, msgIdTalker, 0, null, 0, listener, -1, false);
@@ -355,12 +356,13 @@ final class WeChatImageDownloader {
 	}
 
 	static final class BaseRow {
-		final long id, msgSvrId, offset, totalLen, reserved1;
+		final long id, msgLocalId, msgSvrId, offset, totalLen, reserved1;
 		final String talker, bigImgPath, hevcPath, midImgPath;
 
-		BaseRow(long id, long msgSvrId, String talker, String bigImgPath, String hevcPath, String midImgPath,
+		BaseRow(long id, long msgLocalId, long msgSvrId, String talker, String bigImgPath, String hevcPath, String midImgPath,
 				long offset, long totalLen, long reserved1) {
 			this.id = id;
+			this.msgLocalId = msgLocalId;
 			this.msgSvrId = msgSvrId;
 			this.talker = talker == null ? "" : talker;
 			this.bigImgPath = bigImgPath == null ? "" : bigImgPath;

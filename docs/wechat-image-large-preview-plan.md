@@ -57,15 +57,15 @@
 
 - 图片消息事件从现有 `com.tencent.mm.storage.f9` 对象读取 `field_msgSvrId`，沿父类查找并验证类型为 `long`；将其与 talker、现有 messageId 和事件 key 一起存入有界索引。
 - 在微信主进程尽早 hook CoreStorage getter，从返回对象中定位数据库包装字段和返回 WCDB SQLiteDatabase 的无参方法；若 hook 前已经初始化，首次图片请求只允许调用已验证的静态 getter补获一次。
-- 数据库调用全部使用反射和参数绑定，只执行固定的 `SELECT id, msgSvrId, msgTalker, bigImgPath, hevcPath, midImgPath, offset, totalLen, reserved1 FROM ImgInfo2 WHERE msgSvrId=?`。结果通过 Android `Cursor` 读取并及时关闭。
-- 数据库未就绪、表或列缺失、异常、多行歧义、talker 不一致、`localId <= 0` 均直接回退，不重试其他账户或扫描 `MicroMsg` 目录。
+- 数据库调用全部使用反射和参数绑定，只执行固定的 `SELECT id, msglocalid, msgSvrId, msgTalker, bigImgPath, hevcPath, midImgPath, offset, totalLen, reserved1 FROM ImgInfo2 WHERE msgSvrId=?`。结果通过 Android `Cursor` 读取并及时关闭；图片行 `id`、消息本地 ID `msglocalid`、消息服务端 ID `msgSvrId` 分开保存。
+- 数据库未就绪、表或列缺失、异常、多行歧义、talker 不一致、图片行 `id <= 0` 均直接回退，不重试其他账户或扫描 `MicroMsg` 目录。`msglocalid <= 0` 时不提交主动下载，但保留基础行已有本地图片的读取。
 
 ### C. 普通大图获取
 
 - 请求开始时先检查基础行自己的 `bigImgPath`、`hevcPath`、`midImgPath`。只解析基础行路径，使用现有微信 VFS resolver；多个已存在文件按实际可解码尺寸选择最佳者，不根据字段名猜测质量。
 - 已有可读大图则不联网，直接进入现有安全解码和发布流程。
-- 本地无合格大图且 opt-in 开启时，使用基础行 `localId` 与 talker 构造 `msgIdTalker`，调用已固化的下载方法。调用参数保持经 8.0.72 验证后的形状；任何差异都禁用大图模式，而不是猜测参数。
-- 严禁读取或调用 `reserved1` 指向行的 `localId`。Debug 日志记录 `source=base_row original_row_followed=false`，不记录路径或 talker。
+- 本地无合格大图且 opt-in 开启时，使用基础行的消息本地 ID `msglocalid` 与 `msgTalker` 构造 `MsgIdTalker`，下载方法首参独立使用基础图片行 `id`。2026-10-23 修复此前混用两种 ID 的实现，8.0.72/3085 与 8.0.79/3182 的既有源码已离线核对，完整参数证据见对应适配手册和 8.0.79 findings；两版 8.0.77 的新增列及真实下载仍待复核。调用形状继续按完整签名校验，差异时禁用大图组件。
+- 严禁读取或调用 `reserved1` 指向行的图片 ID。Debug 日志记录基础行选择与 `originalRowFollowed=false`，不记录路径或 talker。
 - 采用非阻塞定时状态机观察基础行：首次 50ms，随后每 100ms，截止时间沿用当前请求开始后的 1.5 秒。最多 4 个并发大图任务、每消息一次提交、相同 `msgSvrId` 去重；不在现有图片解析 worker 中做阻塞轮询。
 - 完成条件同时要求 `offset == totalLen`、`totalLen > 0`、基础行候选文件存在且非空，并通过图片格式/尺寸检查。不要相信单独的完成标志或最终路径字符串。
 - 文件经 VFS 读取；普通 JPEG/PNG/WebP 直接解码。若检测到 WXGF，则调用已验证的 `MMWXGFJNI.wxam2PicBuf(byte[], int, int)`，失败时回退缩略图。输入、解码位图和发布位图继续受现有 20 MiB 源文件及 1,048,576 像素上限约束。
