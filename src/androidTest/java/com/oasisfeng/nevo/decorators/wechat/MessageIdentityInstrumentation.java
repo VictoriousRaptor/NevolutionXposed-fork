@@ -52,7 +52,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "rawPersonOnlyNotification", "nativeMessagingSelf", "rawColonText", "undatedSnapshots",
                 "stablePeerAcrossTalkerAndAvatar", "twoRoundsAndReplay", "appReplyStartsFresh",
                 "appReplyKeepsLaterNotificationReply", "groupRound", "roundPreviewAndUndated",
-                "removedRoundStartsFresh",
+                "removedRoundStartsFresh", "lastReplyDisplayChoice", "lateReadPreservesNewMessages", "dismissForwardsOriginalRead",
+                "replyControllerConsecutiveGroup", "replyControllerLateCallback", "replyControllerAppReplyInterleaving", "replyControllerRemovedTarget",
                 "classifiesRawFirstMessages", "classificationSurvivesNextMessage", "lateTalkerIsIsolated",
                 "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyInputsUseLocalizedReplyLabel",
                 "replyActionSurvivesArchiveRemoval", "recallSequence", "recallWithoutIdentity", "recallSameTextAndTime",
@@ -69,7 +70,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
                 this::stablePeerAcrossTalkerAndAvatar, this::twoRoundsAndReplay, this::appReplyStartsFresh,
                 this::appReplyKeepsLaterNotificationReply, this::groupRound, this::roundPreviewAndUndated,
-                this::removedRoundStartsFresh,
+                this::removedRoundStartsFresh, this::lastReplyDisplayChoice, this::lateReadPreservesNewMessages, this::dismissForwardsOriginalRead,
+                this::replyControllerConsecutiveGroup, this::replyControllerLateCallback, this::replyControllerAppReplyInterleaving, this::replyControllerRemovedTarget,
                 this::classifiesRawFirstMessages, this::classificationSurvivesNextMessage, this::lateTalkerIsIsolated,
                 this::legacyGroupGuessIsRepaired, this::nativeGroupEvidence,
                 this::replyInputsUseLocalizedReplyLabel,
@@ -151,7 +153,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         car.putBundle("car_conversation", conversation);
         n.extras.putBundle("android.car.EXTENSIONS", car);
         check(new Notification.CarExtender(n).getUnreadConversation().getMessages().length == 2, "invalid car fixture");
-        List<Message> messages = NotificationMessages.rebuild(conversation(false), n, Collections.emptyList());
+        List<Message> messages = NotificationMessages.rebuild(conversation(false), n, Collections.emptyList(), true);
         check(messages.size() == 1 && "明天见".contentEquals(messages.get(0).getText()), "stale ticker replaced current text");
         check(messages.get(0).getPerson() != null, "peer became self");
     }
@@ -169,7 +171,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         Notification old = normalized(c, notification("first", 100));
         NotificationMessages.recordReply(old, "my reply", 150, "reply-1");
         Notification latest = notification("new incoming", 200);
-        List<Message> messages = NotificationMessages.rebuild(c, latest, Arrays.asList(old, latest));
+        List<Message> messages = NotificationMessages.rebuild(c, latest, Arrays.asList(old, latest), true);
         check(messages.size() == 2, "previous round was retained");
         check(messages.get(0).getPerson() == null && messages.get(0).getTimestamp() == 150, "reply identity/time changed");
         check(messages.get(1).getPerson() != null, "new incoming became self");
@@ -181,13 +183,13 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         NotificationMessages.recordReply(n, "reply", 150, "reply-roundtrip");
         n = normalized(c, n);
         Notification recovered = Notification.Builder.recoverBuilder(getTargetContext(), n).build();
-        List<Message> first = NotificationMessages.rebuild(c, recovered, Collections.singletonList(n));
+        List<Message> first = NotificationMessages.rebuild(c, recovered, Collections.singletonList(n), true);
         check(first.size() == 2 && first.get(1).getPerson() == null, "recoverBuilder changed reply identity");
         Notification preview = Notification.Builder.recoverBuilder(getTargetContext(), recovered)
                 .setStyle(new Notification.BigPictureStyle().bigPicture(Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888))).build();
         NotificationMessages.copyIdentityExtras(recovered, preview);
         preview.extras = parcel(preview.extras);
-        List<Message> second = NotificationMessages.rebuild(c, preview, Arrays.asList(n, recovered));
+        List<Message> second = NotificationMessages.rebuild(c, preview, Arrays.asList(n, recovered), true);
         check(second.size() == 2, "preview duplicated history");
         check("reply-roundtrip".equals(second.get(1).getExtras().getString(NotificationMessages.REPLY_ID)), "preview lost reply marker");
         check(second.get(1).getPerson() == null && second.get(1).getTimestamp() == 150, "preview changed reply");
@@ -206,7 +208,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         old.key = "old-key";
         Notification archived = normalized(old, notification("old text", 100));
         Conversation current = conversation(false); current.key = "new-key";
-        List<Message> messages = NotificationMessages.rebuild(current, notification("new text", 200), Collections.singletonList(archived));
+        List<Message> messages = NotificationMessages.rebuild(current, notification("new text", 200), Collections.singletonList(archived), true);
         check(messages.size() == 1, "same title mixed different talkers");
         ConversationManager manager = new ConversationManager();
         manager.getConversation(1).setType(Conversation.TYPE_GROUP_CHAT);
@@ -220,7 +222,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         Bundle b = MessagingBuilder.toBundle(m); b.remove("sender");
         n.extras.putParcelableArray(Notification.EXTRA_MESSAGES, new Parcelable[]{b});
         Conversation c = conversation(false);
-        List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList());
+        List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList(), true);
         check(messages.size() == 1 && c.notificationPeerId.equals(messages.get(0).getPerson().getKey()), "raw person-only message duplicated or lost canonical identity");
     }
 
@@ -231,7 +233,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         if (Build.VERSION.SDK_INT >= 28) n.extras.putParcelable(Notification.EXTRA_MESSAGING_PERSON, new android.app.Person.Builder().setName("我").build());
         Bundle b = new Bundle(); b.putCharSequence("text", "reply"); b.putLong("time", 100);
         n.extras.putParcelableArray(Notification.EXTRA_MESSAGES, new Parcelable[]{b});
-        List<Message> messages = NotificationMessages.rebuild(conversation(false), n, Collections.emptyList());
+        List<Message> messages = NotificationMessages.rebuild(conversation(false), n, Collections.emptyList(), true);
         check(messages.size() == 1 && messages.get(0).getPerson() == null, "valid MessagingStyle self contract lost");
     }
 
@@ -244,8 +246,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         Conversation c = conversation(false);
         Notification old = normalized(c, notification("undated", 0));
         Notification copy = Notification.Builder.recoverBuilder(getTargetContext(), old).build();
-        check(NotificationMessages.rebuild(c, copy, Collections.singletonList(old)).size() == 1, "undated snapshot multiplied");
-        List<Message> messages = NotificationMessages.rebuild(c, notification("current", 200), Arrays.asList(old, copy));
+        check(NotificationMessages.rebuild(c, copy, Collections.singletonList(old), true).size() == 1, "undated snapshot multiplied");
+        List<Message> messages = NotificationMessages.rebuild(c, notification("current", 200), Arrays.asList(old, copy), true);
         check(messages.size() == 2 && "current".contentEquals(messages.get(1).getText()), "undated history covered current incoming");
     }
 
@@ -257,8 +259,11 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         return normalized(c, n, Collections.emptyList());
     }
     private Notification normalized(Conversation c, Notification n, List<Notification> archive) {
+        return normalized(c, n, archive, true);
+    }
+    private Notification normalized(Conversation c, Notification n, List<Notification> archive, boolean showLastReply) {
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
-        for (Message m : NotificationMessages.rebuild(c, n, archive)) style.addMessage(m);
+        for (Message m : NotificationMessages.rebuild(c, n, archive, showLastReply)) style.addMessage(m);
         NotificationMessages.stamp(c, n);
         MessagingBuilder.flatIntoExtras(style, n.extras);
         n.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle");
@@ -272,14 +277,14 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         c.key = "resolved-talker";
         c.icon = IconCompat.createWithBitmap(Bitmap.createBitmap(3, 3, Bitmap.Config.ARGB_8888));
         Notification latest = normalized(c, notification("C", 200), Collections.singletonList(old));
-        List<Message> messages = NotificationMessages.rebuild(c, latest, Collections.emptyList());
+        List<Message> messages = NotificationMessages.rebuild(c, latest, Collections.emptyList(), true);
         check(messages.size() == 2, "peer history missing");
         for (Message m : messages) {
             check(stable.equals(m.getPerson().getKey()), "talker changed sender identity");
             check(m.getPerson().getIcon() != null, "updated avatar not shared by old messages");
         }
         Conversation restored = conversation(false);
-        NotificationMessages.rebuild(restored, latest, Collections.emptyList());
+        NotificationMessages.rebuild(restored, latest, Collections.emptyList(), true);
         check(stable.equals(restored.notificationPeerId), "snapshot lost stable sender ID");
         Conversation fresh = conversation(false);
         check(!stable.equals(NotificationMessages.peer(fresh, null).getKey()), "replacement conversation reused identity");
@@ -344,7 +349,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         NotificationMessages.recordReply(a, "B", 150, "group-B");
         Notification next = normalized(c, notification("Bob: C", 200), Collections.singletonList(a));
         next = normalized(c, notification("Carol: D", 300), Collections.singletonList(next));
-        List<Message> messages = NotificationMessages.rebuild(c, next, Collections.emptyList());
+        List<Message> messages = NotificationMessages.rebuild(c, next, Collections.emptyList(), true);
         check(messages.size() == 3 && messages.get(0).getPerson() == null, "group round did not retain reply");
         check("Bob".contentEquals(messages.get(1).getPerson().getName()), "first member lost");
         check("Carol".contentEquals(messages.get(2).getPerson().getName()), "group members merged");
@@ -384,8 +389,205 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         checkTexts(c, fresh, "D");
     }
 
+    private void lastReplyDisplayChoice() {
+        for (boolean show : new boolean[]{false, true}) {
+            Conversation c = conversation(false);
+            Notification a = normalized(c, notification("A", 100));
+            NotificationMessages.recordReply(a, "B1", 110, "B1");
+            NotificationMessages.recordReply(a, "B2", 120, "B2");
+            Notification next = normalized(c, notification("C", 200), Collections.singletonList(a), show);
+            checkTexts(c, next, show ? new String[]{"B1", "B2", "C"} : new String[]{"C"});
+            check(next.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                    "answered replies remained in alert history");
+            Notification restored = Notification.Builder.recoverBuilder(getTargetContext(), next).build();
+            restored.extras = parcel(restored.extras);
+            Notification later = normalized(c, notification("D", 300), Collections.singletonList(restored), show);
+            checkTexts(c, later, show ? new String[]{"B1", "B2", "C", "D"} : new String[]{"C", "D"});
+        }
+    }
+
+    private void lateReadPreservesNewMessages() {
+        Conversation c = conversation(false);
+        Notification first = notification("A", 100);
+        first.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 101);
+        first = normalized(c, first);
+        Notification newer = notification("C", 200);
+        newer.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 102);
+        newer = normalized(c, newer, Collections.singletonList(first));
+        NotificationMessages.clearReadHistory(c, newer, 101, false);
+        checkTexts(c, newer, "C");
+        Notification d = notification("D", 300);
+        d.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 103);
+        d = normalized(c, d, Arrays.asList(first, newer));
+        checkTexts(c, d, "C", "D");
+        NotificationMessages.clearReadHistory(c, first, 101, false);
+        check(NotificationMessages.rebuild(c, first, Collections.emptyList(), false).isEmpty(), "read A was restored from fallback text");
+        first.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 104);
+        NotificationMessages.recordReply(first, "B", 150, "read-B");
+        Notification afterReply = notification("E", 400);
+        afterReply.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 105);
+        afterReply = normalized(c, afterReply, Collections.singletonList(first), true);
+        checkTexts(c, afterReply, "B", "E");
+    }
+
+    private void dismissForwardsOriginalRead() {
+        Context context = getTargetContext();
+        java.util.concurrent.CountDownLatch read = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicLong removedToken = new java.util.concurrent.atomic.AtomicLong();
+        android.content.BroadcastReceiver receiver = new android.content.BroadcastReceiver() {
+            @Override public void onReceive(Context ignored, Intent intent) { read.countDown(); }
+        };
+        String action = "nevo.test.ORIGINAL_READ";
+        androidx.core.content.ContextCompat.registerReceiver(context, receiver, new android.content.IntentFilter(action),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
+        PendingIntent original = PendingIntent.getBroadcast(context, 731,
+                new Intent(action).setPackage(context.getPackageName()), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        MessagingBuilder builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {
+            @Override public void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies) {}
+            @Override public void onNotificationRead(int id, long token) {
+                check(id == 731, "dismiss targeted another notification"); removedToken.set(token);
+            }
+        });
+        Notification first = notification("A", 100);
+        Notification next = notification("C", 200);
+        try {
+            first.deleteIntent = original;
+            first.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 101);
+            builder.wrapDeleteIntent(731, first);
+            Notification rebuilt = Notification.Builder.recoverBuilder(context, first).build();
+            NotificationMessages.copyIdentityExtras(first, rebuilt);
+            builder.wrapDeleteIntent(731, rebuilt);
+            first = rebuilt;
+            next.deleteIntent = original;
+            next.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 102);
+            builder.wrapDeleteIntent(731, next);
+            check(!first.deleteIntent.equals(next.deleteIntent), "new notification replaced the old delete generation");
+            first.deleteIntent.send();
+            check(read.await(5, java.util.concurrent.TimeUnit.SECONDS), "original read action was not forwarded");
+            check(removedToken.get() == 101, "dismiss used the newer notification token");
+        } catch (Exception failure) { throw new AssertionError(failure); }
+        finally {
+            builder.close(); context.unregisterReceiver(receiver); original.cancel();
+            if (first.deleteIntent != null) first.deleteIntent.cancel();
+            if (next.deleteIntent != null) next.deleteIntent.cancel();
+        }
+    }
+
+    /** Exercise the real Local controller; replace only the final Android notification delivery. */
+    private final class ReplyHistoryFixture extends WeChatDecorator.Local implements AutoCloseable {
+        final int id = 73109;
+        final boolean show;
+        final MessagingBuilder.Controller controller;
+        Conversation conversation;
+        ReplyHistoryFixture(boolean show) {
+            super("test");
+            this.show = show;
+            clearArchivedNotifications(id);
+            try {
+                java.lang.reflect.Field field = WeChatDecorator.Local.class.getDeclaredField("mReplyController");
+                field.setAccessible(true);
+                controller = (MessagingBuilder.Controller) field.get(this);
+            } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        }
+        @Override boolean showLastReply() { return show; }
+        void incoming(String text, long time) {
+            List<Notification> archive = getArchivedNotifications(id);
+            Notification n = notification(text, time);
+            n.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, WeChatNotificationRemoval.nextToken());
+            cache(id, n);
+            conversation = controller.replyTarget(id).conversation();
+            conversation.title = "Alice";
+            normalized(conversation, n, archive, show);
+        }
+        @Override void repostIfActive(int id, Notification notification, long expectedToken, long readToken) {
+            cache(id, normalized(conversation, notification, Collections.emptyList(), show));
+        }
+        void texts(String... expected) { checkTexts(conversation, getArchivedNotification(id), expected); }
+        Notification latest() { return getArchivedNotification(id); }
+        @Override public void close() { clearArchivedNotifications(id); }
+    }
+
+    private void replyControllerConsecutiveGroup() {
+        for (boolean show : new boolean[]{false, true}) for (boolean parallel : new boolean[]{false, true}) {
+            try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
+                fixture.incoming("A", 100);
+                MessagingBuilder.ReplyTarget first = fixture.controller.replyTarget(fixture.id);
+                fixture.controller.onReplySent(fixture.id, first, "B1", 110, "controller-B1");
+                MessagingBuilder.ReplyTarget second = parallel ? first : fixture.controller.replyTarget(fixture.id);
+                fixture.controller.onReplySent(fixture.id, second, "B2", 120, "controller-B2");
+                fixture.texts("B1", "B2");
+                fixture.incoming("C", 200);
+                fixture.texts(show ? new String[]{"B1", "B2", "C"} : new String[]{"C"});
+                fixture.controller.onReplySent(fixture.id, first, "B1", 110, "controller-B1");
+                fixture.incoming("D", 300);
+                fixture.texts(show ? new String[]{"B1", "B2", "C", "D"} : new String[]{"C", "D"});
+            }
+        }
+    }
+
+    private void replyControllerLateCallback() {
+        for (boolean show : new boolean[]{false, true})
+            for (boolean priorReply : new boolean[]{false, true})
+                for (boolean undated : new boolean[]{false, true}) {
+            try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
+                fixture.incoming("A", 100);
+                if (priorReply) fixture.controller.onReplySent(fixture.id, fixture.controller.replyTarget(fixture.id),
+                        "B1", 110, "early-controller-B1");
+                MessagingBuilder.ReplyTarget target = fixture.controller.replyTarget(fixture.id);
+                fixture.incoming("C", undated ? 0 : 200);
+                fixture.controller.onReplySent(fixture.id, target, "B", 150, "late-controller-B");
+                java.util.List<String> expected = new java.util.ArrayList<>();
+                if (undated) expected.add("C");
+                if (show) {
+                    if (priorReply) expected.add("B1");
+                    expected.add("B");
+                }
+                if (!undated) expected.add("C");
+                fixture.texts(expected.toArray(new String[0]));
+                fixture.incoming("D", 300);
+                expected.add("D");
+                fixture.texts(expected.toArray(new String[0]));
+                check(fixture.latest().extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                        "late callback left answered reply in input history");
+                fixture.controller.onReplySent(fixture.id, fixture.controller.replyTarget(fixture.id), "E", 310, "later-controller-E");
+                fixture.incoming("F", 400);
+                fixture.controller.onReplySent(fixture.id, target, "B", 150, "late-controller-B");
+                fixture.texts(show ? new String[]{"E", "F"} : new String[]{"F"});
+            }
+        }
+    }
+
+    private void replyControllerAppReplyInterleaving() {
+        for (boolean show : new boolean[]{false, true}) for (boolean appBeforePeer : new boolean[]{false, true}) {
+            try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
+                fixture.incoming("A", 100);
+                fixture.controller.onReplySent(fixture.id, fixture.controller.replyTarget(fixture.id), "B1", 110, "app-boundary-B1");
+                if (appBeforePeer) check(NotificationMessages.markAppReply(fixture.latest(), 7, 140), "app send not marked");
+                MessagingBuilder.ReplyTarget target = fixture.controller.replyTarget(fixture.id);
+                fixture.incoming("C", 0);
+                if (!appBeforePeer) check(NotificationMessages.markAppReply(fixture.latest(), 7, 240), "later app send not marked");
+                fixture.controller.onReplySent(fixture.id, target, "B2", 150, "app-boundary-B2");
+                fixture.incoming("D", 300);
+                fixture.texts(appBeforePeer ? (show ? new String[]{"C", "B2", "D"} : new String[]{"C", "D"})
+                        : new String[]{"D"});
+            }
+        }
+    }
+
+    private void replyControllerRemovedTarget() {
+        try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(true)) {
+            fixture.incoming("A", 100);
+            MessagingBuilder.ReplyTarget target = fixture.controller.replyTarget(fixture.id);
+            fixture.controller.onNotificationRead(fixture.id, target.token());
+            fixture.controller.onReplySent(fixture.id, target, "B", 150, "removed-controller-B");
+            check(fixture.latest() == null, "late reply revived a removed notification");
+            fixture.incoming("C", 200);
+            fixture.texts("C");
+        }
+    }
+
     private void checkTexts(Conversation c, Notification n, String... expected) {
-        List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList());
+        List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList(), true);
         check(messages.size() == expected.length, "unexpected round length: " + messages.size());
         for (int i = 0; i < expected.length; i++) check(expected[i].contentEquals(messages.get(i).getText()), "wrong round content at " + i);
     }
@@ -408,7 +610,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 n.tickerText = withTicker ? body : null;
                 Conversation c = classified(new ConversationManager(), n);
                 check(!c.isGroupChat(), "body/ticker promoted cold-start notification to group");
-                List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList());
+                List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList(), true);
                 check(messages.size() == 1 && "Alice".contentEquals(messages.get(0).getPerson().getName()), "cold-start peer became unknown");
             }
         }
@@ -421,7 +623,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         first = normalized(initial, first);
         Notification second = notification("你好", 200); second.tickerText = "你好";
         Conversation next = classified(manager, second);
-        List<Message> messages = NotificationMessages.rebuild(next, second, Collections.singletonList(first));
+        List<Message> messages = NotificationMessages.rebuild(next, second, Collections.singletonList(first), true);
         check(messages.size() == 2 && !next.isGroupChat(), "second message changed to group");
         for (Message message : messages) {
             check("Alice".contentEquals(message.getPerson().getName()), "peer became unknown");
@@ -469,7 +671,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         Conversation c = classified(manager, old);
         check(!c.isGroupChat(), "module-generated legacy group flag treated as native proof");
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
-        for (Message message : NotificationMessages.rebuild(c, old, Collections.emptyList())) style.addMessage(message);
+        for (Message message : NotificationMessages.rebuild(c, old, Collections.emptyList(), true)) style.addMessage(message);
         style.setGroupConversation(c.isGroupChat()).setConversationTitle(null);
         MessagingBuilder.flatIntoExtras(style, old.extras);
         check("Alice".contentEquals(style.getMessages().get(0).getPerson().getName()), "old unknown placeholder not repaired");

@@ -32,6 +32,7 @@ final class NotificationMessages {
     static final String PEER_ID = "nevo.notificationPeerId";
     static final String ROUND = "nevo.conversationRound";
     private static final String MESSAGE_ROUND = "nevo.messageRound";
+    private static final String MESSAGE_NOTIFICATION_TOKEN = "nevo.messageNotificationToken";
     static final String SERVER_ID = "nevo.wechat.messageServerId";
     static final String RECALLED_IDS = "nevo.wechat.recalledServerIds";
     static final String RECALL_PROMPT = "nevo.wechat.recallPrompt";
@@ -115,7 +116,7 @@ final class NotificationMessages {
         return message;
     }
 
-    static List<Message> rebuild(Conversation conversation, Notification current, List<Notification> archive) {
+    static List<Message> rebuild(Conversation conversation, Notification current, List<Notification> archive, boolean showLastReply) {
         List<MessageIdentityPolicy.Entry<Message>> entries = new ArrayList<>();
         Notification snapshot = current;
         // A normalized notification is already a complete bounded snapshot. Combining every
@@ -129,6 +130,9 @@ final class NotificationMessages {
         if (conversation.notificationPeerId == null) conversation.notificationPeerId = snapshot.extras.getString(PEER_ID);
         peerId(conversation);
         ConversationRound round = readRound(snapshot.extras);
+        long readThrough = Math.max(snapshot.extras.getLong(WeChatNotificationRemoval.READ_THROUGH_TOKEN),
+                current.extras.getLong(WeChatNotificationRemoval.READ_THROUGH_TOKEN));
+        if (readThrough != 0) current.extras.putLong(WeChatNotificationRemoval.READ_THROUGH_TOKEN, readThrough);
         if (snapshot != current) add(entries, conversation, snapshot, true, 0);
         add(entries, conversation, current, false, 1);
         RecallHistory recalls = new RecallHistory();
@@ -139,7 +143,8 @@ final class NotificationMessages {
         recalls.addAll(snapshot.extras.getLongArray(RECALLED_IDS));
         recalls.addAll(current.extras.getLongArray(RECALLED_IDS));
         entries.removeIf(entry -> {
-            boolean removed = entry.value.getExtras().getBoolean(RECALL_PROMPT)
+            long token = entry.value.getExtras().getLong(MESSAGE_NOTIFICATION_TOKEN);
+            boolean removed = (token != 0 && token <= readThrough) || entry.value.getExtras().getBoolean(RECALL_PROMPT)
                     || recalls.contains(entry.value.getExtras().getLong(SERVER_ID));
             if (removed && entry.value.getPerson() == null && entry.replyId != null) round.forgetReply(entry.replyId);
             return removed;
@@ -172,6 +177,7 @@ final class NotificationMessages {
         if (!snapshot.extras.containsKey(ROUND)) for (MessageIdentityPolicy.Entry<Message> entry : entries)
             if ((snapshot == current || entry.source == 0) && entry.value.getPerson() != null)
                 round.latestPeerTime = Math.max(round.latestPeerTime, entry.time);
+        long appReplyToken = round.pendingAppReply ? round.appReplyToken : 0;
         boolean advanced = false;
         if (!current.extras.getBoolean(STORED)) {
             long newest = 0;
@@ -185,8 +191,11 @@ final class NotificationMessages {
             if (entry.source > 0 && entry.time <= 0 && entry.value.getPerson() != null)
                 entry.value.getExtras().putLong(MESSAGE_ROUND, round.cutoff);
         final ConversationRound retainedRound = round;
+        if (advanced && appReplyToken != 0) entries.removeIf(entry -> entry.value.getPerson() != null
+                && entry.value.getExtras().getLong(MESSAGE_NOTIFICATION_TOKEN) != 0
+                && entry.value.getExtras().getLong(MESSAGE_NOTIFICATION_TOKEN) <= appReplyToken);
         entries.removeIf(entry -> !retainedRound.retain(entry.value.getPerson() == null, entry.replyId, entry.time,
-                entry.value.getExtras().getLong(MESSAGE_ROUND, -1)));
+                entry.value.getExtras().getLong(MESSAGE_ROUND, -1), showLastReply));
         List<Message> result = MessageIdentityPolicy.merge(entries, 25);
         // Avoid leaving a recalled latest line in the collapsed/fallback notification text.
         if (current.extras.getBoolean(RECALL_PROMPT) || recalls.contains(current.extras.getLong(SERVER_ID)))
@@ -195,7 +204,7 @@ final class NotificationMessages {
         for (Message message : result) message.getExtras().putLong(MESSAGE_ROUND, round.cutoff);
         writeRound(current.extras, round);
         current.extras.putString(PEER_ID, peerId(conversation));
-        if (round.cutoff > 0 || recalledIds.length > 0) updateInputHistory(current.extras, result, round);
+        if (readThrough != 0 || round.cutoff > 0 || recalledIds.length > 0) updateInputHistory(current.extras, result, round);
         if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=merge inputs=" + entries.size()
                 + " output=" + result.size() + " currentTime=" + current.when);
         return result;
@@ -223,7 +232,10 @@ final class NotificationMessages {
         if (bundles != null) for (Parcelable parcel : bundles) {
             if (!(parcel instanceof Bundle)) continue;
             Message message = read((Bundle) parcel, conversation, context, historical || !context);
-            if (message != null) addEntry(entries, message, source);
+            if (message != null) {
+                stampNotificationToken(message, n);
+                addEntry(entries, message, source);
+            }
         }
         // For a raw notification, EXTRA_TEXT is the current incoming message. Unstructured
         // bundles can be stale history; use only explicitly identified history plus this line.
@@ -237,8 +249,76 @@ final class NotificationMessages {
                         && (!conversation.isGroupChat() || TextUtils.equals(candidate.getPerson().getName(), latest.getPerson().getName())))
                     represented = true;
             }
-            if (latest != null && !represented) addEntry(entries, latest, source + 1);
+            if (latest != null && !represented) {
+                stampNotificationToken(latest, n);
+                addEntry(entries, latest, source + 1);
+            }
         }
+    }
+
+    private static void stampNotificationToken(Message message, Notification notification) {
+        if (!message.getExtras().containsKey(MESSAGE_NOTIFICATION_TOKEN))
+            message.getExtras().putLong(MESSAGE_NOTIFICATION_TOKEN,
+                    notification.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN));
+    }
+
+    static void clearReadHistory(Conversation conversation, Notification notification, long token, boolean showLastReply) {
+        notification.extras.putLong(WeChatNotificationRemoval.READ_THROUGH_TOKEN,
+                Math.max(token, notification.extras.getLong(WeChatNotificationRemoval.READ_THROUGH_TOKEN)));
+        if (!notification.extras.getBoolean(STORED)) return;
+        List<Message> messages = rebuild(conversation, notification, java.util.Collections.emptyList(), showLastReply);
+        notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, MessagingBuilder.getBundleArrayForMessages(messages));
+    }
+
+    /** Preserve a pending reply group while retiring the peer messages it has read. */
+    static boolean recordReadReply(Conversation conversation, Notification notification, MessagingBuilder.ReplyTarget target,
+                                   CharSequence text, long time, String replyId) {
+        long readToken = target.token();
+        List<Message> messages = rebuild(conversation, notification, java.util.Collections.emptyList(), true);
+        ConversationRound round = readRound(notification.extras);
+        if (round.activeReplies.contains(replyId) || round.pendingReplies.contains(replyId) || round.recentReplyIds.contains(replyId)) return false;
+        long generation = WeChatNotificationRemoval.nextToken();
+        long readPeerTime = round.latestPeerTime;
+        long newerPeerToken = 0;
+        for (Message message : messages) {
+            long origin = message.getExtras().getLong(MESSAGE_NOTIFICATION_TOKEN);
+            if (message.getPerson() != null) {
+                if (origin > readToken) newerPeerToken = Math.max(newerPeerToken, origin);
+                else readPeerTime = Math.max(readPeerTime, message.getTimestamp());
+            }
+        }
+        round.acknowledgeAppReply(newerPeerToken);
+        writeRound(notification.extras, round);
+        List<String> answeredReplies = new ArrayList<>(target.pendingReplies());
+        for (Message message : messages) {
+            String id = message.getExtras().getString(REPLY_ID);
+            if (message.getPerson() == null && (round.pendingReplies.contains(id)
+                    || (target.pendingReplies().contains(id) && round.activeReplies.contains(id)))) {
+                if (message.getExtras().getLong(MESSAGE_NOTIFICATION_TOKEN) < newerPeerToken) answeredReplies.add(id);
+                message.getExtras().putLong(MESSAGE_NOTIFICATION_TOKEN, generation);
+            }
+        }
+        notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, MessagingBuilder.getBundleArrayForMessages(messages));
+        notification.extras.putBoolean(STORED, true);
+        clearReadHistory(conversation, notification, readToken, true);
+        notification.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, generation);
+        recordReply(notification, text, time, replyId);
+        if (newerPeerToken != 0) {
+            round = readRound(notification.extras);
+            for (String id : answeredReplies) round.acknowledgeReply(id, readPeerTime);
+            round.acknowledgeReply(replyId, readPeerTime);
+            writeRound(notification.extras, round);
+            for (Parcelable parcel : notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES)) {
+                Bundle metadata = ((Bundle) parcel).getBundle("extras");
+                if (metadata != null && metadata.getLong(MESSAGE_NOTIFICATION_TOKEN) > readToken)
+                    metadata.putLong(MESSAGE_ROUND, round.cutoff);
+            }
+        }
+        return true;
+    }
+
+    static List<String> pendingReplyIds(Notification notification) {
+        return java.util.Collections.unmodifiableList(readRound(notification.extras).pendingReplies);
     }
 
     private static boolean hasUser(Bundle extras) {
@@ -277,6 +357,8 @@ final class NotificationMessages {
         java.util.Set<String> keep = new java.util.HashSet<>(Arrays.asList(STORED, TITLE, KEY, PEER_ID, ROUND,
                 SERVER_ID, RECALLED_IDS, RECALL_PROMPT, WeChatRecallEvents.VERIFIED_KEY,
                 WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN,
+                WeChatNotificationRemoval.READ_THROUGH_TOKEN,
+                MessagingBuilder.ORIGINAL_DELETE_INTENT,
                 ConversationClassification.TYPE, ConversationClassification.SOURCE,
                 Notification.EXTRA_REMOTE_INPUT_HISTORY, NotificationMarkdown.RAW_TEXT,
                 Notification.EXTRA_MESSAGES, "android.messagingUser", "android.selfDisplayName"));
@@ -312,6 +394,8 @@ final class NotificationMessages {
         reply.putLong("time", timestamp);
         Bundle metadata = new Bundle();
         metadata.putString(REPLY_ID, replyId);
+        metadata.putLong(MESSAGE_NOTIFICATION_TOKEN,
+                notification.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN));
         reply.putBundle("extras", metadata);
         Parcelable[] old = notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES);
         Parcelable[] messages = old == null ? new Parcelable[1] : Arrays.copyOf(old, old.length + 1);
@@ -328,6 +412,7 @@ final class NotificationMessages {
         ConversationRound round = readRound(notification.extras);
         if (!notification.extras.containsKey(ROUND)) round.latestPeerTime = Math.max(0, notification.when);
         if (!round.appReply(messageId, time)) return false;
+        round.appReplyToken = notification.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
         writeRound(notification.extras, round);
         return true;
     }
@@ -341,12 +426,15 @@ final class NotificationMessages {
         round.latestPeerTime = data.getLong("latestPeer");
         round.cutoff = data.getLong("cutoff");
         round.lastAppReplyTime = data.getLong("lastAppReplyTime");
+        round.appReplyToken = data.getLong("appReplyToken");
         round.pendingAppReply = data.getBoolean("pendingAppReply");
         round.repliesBeforeAppReply = data.getInt("repliesBeforeAppReply");
         ArrayList<String> active = data.getStringArrayList("active");
         ArrayList<String> pending = data.getStringArrayList("pending");
         if (active != null) round.activeReplies.addAll(active);
         if (pending != null) round.pendingReplies.addAll(pending);
+        ArrayList<String> recentReplies = data.getStringArrayList("recentReplies");
+        if (recentReplies != null) round.recentReplyIds.addAll(recentReplies);
         long[] appIds = data.getLongArray("recentAppReplyIds");
         if (appIds != null) for (long id : appIds) round.recentAppReplyIds.add(id);
         return round;
@@ -357,10 +445,12 @@ final class NotificationMessages {
         data.putLong("latestPeer", round.latestPeerTime);
         data.putLong("cutoff", round.cutoff);
         data.putLong("lastAppReplyTime", round.lastAppReplyTime);
+        data.putLong("appReplyToken", round.appReplyToken);
         data.putBoolean("pendingAppReply", round.pendingAppReply);
         data.putInt("repliesBeforeAppReply", round.repliesBeforeAppReply);
         data.putStringArrayList("active", new ArrayList<>(round.activeReplies));
         data.putStringArrayList("pending", new ArrayList<>(round.pendingReplies));
+        data.putStringArrayList("recentReplies", new ArrayList<>(round.recentReplyIds));
         long[] appIds = new long[round.recentAppReplyIds.size()];
         for (int i = 0; i < appIds.length; i++) appIds[i] = round.recentAppReplyIds.get(i);
         data.putLongArray("recentAppReplyIds", appIds);

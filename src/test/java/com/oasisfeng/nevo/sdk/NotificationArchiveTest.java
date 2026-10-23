@@ -14,6 +14,21 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.Assert.*;
 
 public class NotificationArchiveTest {
+    @Test public void confirmedRemovalDropsOnlyItsGenerationAndPredecessors() {
+        NotificationArchive<Integer, Long> archive = new NotificationArchive<>(120, 20);
+        archive.add(1, 101L); archive.add(1, 101L); archive.add(1, 102L); archive.add(2, 201L);
+        List<Long> held = archive.snapshot(1);
+        assertFalse(archive.removeThrough(1, token -> token == 999L));
+        assertTrue(archive.removeThrough(1, token -> token == 101L));
+        assertEquals(Arrays.asList(102L), archive.snapshot(1));
+        assertEquals(Long.valueOf(201L), archive.latest(2));
+        assertEquals(2, archive.size());
+        assertEquals(Arrays.asList(101L, 101L, 102L), held);
+        assertFalse(archive.removeThrough(1, token -> token == 101L));
+        assertTrue(archive.removeThrough(1, token -> token == 102L));
+        assertNull(archive.latest(1));
+        assertEquals(1, archive.size());
+    }
     @Test public void repeatedRepliesRemovalAndNextNotificationKeepAccurateCount() {
         NotificationArchive<Integer, String> archive = new NotificationArchive<>(120, 20);
         for (int round = 0; round < 100; round++) {

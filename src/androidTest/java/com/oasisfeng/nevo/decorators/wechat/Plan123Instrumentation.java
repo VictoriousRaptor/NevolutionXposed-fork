@@ -670,13 +670,13 @@ final class Plan123Instrumentation {
     }
     private static Notification normalize(Conversation c, Notification n, Notification old) {
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
-        List<Message> messages = NotificationMessages.rebuild(c, n, old == null ? Collections.emptyList() : Collections.singletonList(old));
+        List<Message> messages = NotificationMessages.rebuild(c, n, old == null ? Collections.emptyList() : Collections.singletonList(old), true);
         for (Message message : messages) style.addMessage(message);
         NotificationMessages.stamp(c, n); MessagingBuilder.flatIntoExtras(style, n.extras);
         n.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle"); return n;
     }
     private static void texts(Conversation c, Notification n, String... expected) {
-        List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList());
+        List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList(), true);
         check(messages.size() == expected.length, "unexpected history length " + messages.size());
         for (int i = 0; i < expected.length; i++) check(expected[i].contentEquals(messages.get(i).getText()), "history mismatch at " + i);
     }

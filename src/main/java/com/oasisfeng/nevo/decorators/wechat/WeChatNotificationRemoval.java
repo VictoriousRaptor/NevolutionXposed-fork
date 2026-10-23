@@ -11,8 +11,9 @@ public final class WeChatNotificationRemoval {
 	public static final String EXTRA_NOTIFICATION_ID = "nevo.wechat.removedNotificationId";
 	public static final String EXTRA_ROUND_TOKEN = "nevo.wechat.removedRoundToken";
 	public static final String NOTIFICATION_ROUND_TOKEN = "nevo.wechat.roundToken";
+	static final String READ_THROUGH_TOKEN = "nevo.wechat.readThroughToken";
 
-	private static final AtomicLong TOKENS = new AtomicLong(System.nanoTime());
+	private static final AtomicLong TOKENS = new AtomicLong(Math.max(0, System.nanoTime()));
 
 	/** A process-local generation is sufficient because the archived notifications are process-local too. */
 	public static long nextToken() {

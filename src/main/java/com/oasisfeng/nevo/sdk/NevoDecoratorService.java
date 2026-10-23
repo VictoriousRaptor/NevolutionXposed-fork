@@ -110,6 +110,10 @@ public abstract class NevoDecoratorService {
 			return cache.removeIfLatest(key, matches);
 		}
 
+		protected static boolean clearArchivedNotificationsThrough(int key, Predicate<Notification> matches) {
+			return cache.removeThrough(key, matches);
+		}
+
 		private static final String KEY_ACTIONS_SERIALIZED = "nevo.actionsSerialized";
 
 		/** Marks a notification whose RemoteInput actions are already parceled by a full rebuild. */

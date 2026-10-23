@@ -59,6 +59,21 @@ final class NotificationArchive<K, V> {
         return true;
     }
 
+    /** Remove a confirmed generation and its predecessors, preserving newer notifications. */
+    synchronized boolean removeThrough(K key, Predicate<V> matches) {
+        List<V> history = histories.get(key);
+        if (history == null) return false;
+        int end = -1;
+        for (int i = 0; i < history.size(); i++) if (matches.test(history.get(i))) end = i;
+        if (end < 0) return false;
+        if (end == history.size() - 1) remove(key);
+        else {
+            histories.put(key, Collections.unmodifiableList(new ArrayList<>(history.subList(end + 1, history.size()))));
+            size -= end + 1;
+        }
+        return true;
+    }
+
     synchronized void replace(K key, V original, V replacement) {
         Objects.requireNonNull(replacement);
         List<V> history = histories.get(key);

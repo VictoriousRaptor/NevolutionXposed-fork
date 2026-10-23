@@ -72,6 +72,8 @@ class MessagingBuilder {
 	private static final String ACTION_REPLY = "REPLY";
 	private static final String ACTION_MENTION = "MENTION";
 	private static final String ACTION_ZOOM = "ZOOM";
+	private static final String ACTION_DISMISS = "DISMISS";
+	static final String ORIGINAL_DELETE_INTENT = "nevo.originalDeleteIntent";
 	private static final String ACTION_SYNTHETIC_REPLY = "SYNTHETIC_REPLY";
 	private static final String SCHEME_ID = "id";
 	private static final String EXTRA_REPLY_ACTION = "pending_intent";
@@ -165,10 +167,41 @@ class MessagingBuilder {
 		return messaging;
 	}
 
-	private static void appendKnownMessages(final MessagingStyle messaging, final Conversation conversation,
+	private void appendKnownMessages(final MessagingStyle messaging, final Conversation conversation,
 			final Notification n, final List<Notification> archive) {
-		for (Message message : NotificationMessages.rebuild(conversation, n, archive)) messaging.addMessage(message);
+		for (Message message : NotificationMessages.rebuild(conversation, n, archive, mController.showLastReply())) messaging.addMessage(message);
 	}
+
+	/** The immutable, generation-specific delete action also works without the SystemUI bridge. */
+	void wrapDeleteIntent(int id, Notification notification) {
+		final Bundle extras = notification.extras;
+		if (!extras.containsKey(ORIGINAL_DELETE_INTENT))
+			extras.putParcelable(ORIGINAL_DELETE_INTENT, notification.deleteIntent);
+		final long token = extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
+		final PendingIntent original = extras.getParcelable(ORIGINAL_DELETE_INTENT);
+		final Intent intent = new Intent(ACTION_DISMISS).setPackage(mContext.getPackageName())
+				.setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), Long.toString(token)))
+				.putExtra(ORIGINAL_DELETE_INTENT, original);
+		notification.deleteIntent = PendingIntent.getBroadcast(mContext, 0, intent,
+				FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+	}
+
+	private final BroadcastReceiver mDismissReceiver = new BroadcastReceiver() {
+		@Override public void onReceive(Context context, Intent intent) {
+			final Uri data = intent.getData();
+			if (data == null) return;
+			final int id;
+			final long token;
+			try {
+				id = Integer.parseInt(data.getSchemeSpecificPart());
+				token = Long.parseLong(data.getFragment());
+			} catch (NumberFormatException invalid) { return; }
+			mController.onNotificationRead(id, token);
+			final PendingIntent original = intent.getParcelableExtra(ORIGINAL_DELETE_INTENT);
+			if (original != null) try { original.send(mContext, 0, addTargetPackageAndWakeUp(original)); }
+			catch (PendingIntent.CanceledException canceled) { Log.w(TAG, "Dismiss read action is cancelled: " + id); }
+		}
+	};
 	/** @return appropriate PendingIntent flags, including FLAG_MUTABLE on Android 12+ for RemoteInput. */
 	private static int pendingIntentFlags() {
 		return SDK_INT >= S ? (FLAG_UPDATE_CURRENT | FLAG_MUTABLE) : FLAG_UPDATE_CURRENT;
@@ -320,6 +353,7 @@ class MessagingBuilder {
 		final String part = data.getSchemeSpecificPart();
 		final long replyTimestamp = System.currentTimeMillis();
 		final String replyId = NotificationMessages.newReplyId();
+		final ReplyTarget replyTarget = mController.replyTarget(Integer.parseInt(part));
 		long replyReservation = 0;
 		try {
 			final Intent input_data = addTargetPackageAndWakeUp(reply_action);
@@ -336,12 +370,7 @@ class MessagingBuilder {
 				}
 				if (SDK_INT >= N) {
 					final int id = Integer.parseInt(part);
-					mController.recastNotification(id, n -> {
-						// 清除 pre-applied 标记，允许重新处理
-						com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "pre-applied", null);
-						com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "applied", null);
-						NotificationMessages.recordReply(n, text, replyTimestamp, replyId);
-					});
+					mController.onReplySent(id, replyTarget, text, replyTimestamp, replyId);
 					markRead(id);
 				}
 			}, null);
@@ -415,7 +444,7 @@ class MessagingBuilder {
 		extras.putBoolean(EXTRA_IS_GROUP_CONVERSATION, messaging.isGroupConversation());
 	}
 
-	private static Bundle[] getBundleArrayForMessages(final List<Message> messages) {
+	static Bundle[] getBundleArrayForMessages(final List<Message> messages) {
 		final int N = messages.size();
 		final Bundle[] bundles = new Bundle[N];
 		for (int i = 0; i < N; i ++) bundles[i] = toBundle(messages.get(i));
@@ -444,8 +473,20 @@ class MessagingBuilder {
 		return user.toAndroidPerson();
 	}
 
+	record ReplyTarget(long token, Conversation conversation, List<String> pendingReplies) {}
+
 	interface Controller {
 		void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies);
+		default boolean showLastReply() { return false; }
+		default ReplyTarget replyTarget(int id) { return null; }
+		default void onNotificationRead(int id, long token) {}
+		default void onReplySent(int id, ReplyTarget target, CharSequence text, long time, String replyId) {
+			recastNotification(id, n -> {
+				com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "pre-applied", null);
+				com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "applied", null);
+				NotificationMessages.recordReply(n, text, time, replyId);
+			});
+		}
 		default long beginNotificationReply(int id) { return 0; }
 		default void abortNotificationReply(long reservation) {}
 	}
@@ -483,6 +524,10 @@ class MessagingBuilder {
 		{
 			final IntentFilter filter = new IntentFilter(ACTION_ZOOM); filter.addDataScheme(SCHEME_ID);
 			ContextCompat.registerReceiver(context, mZoomReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
+		}
+		{
+			final IntentFilter filter = new IntentFilter(ACTION_DISMISS); filter.addDataScheme(SCHEME_ID);
+			ContextCompat.registerReceiver(context, mDismissReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
 		}
 	}
 
@@ -693,6 +738,7 @@ class MessagingBuilder {
 		}
 		logReply("synthetic_receiver", "notificationId=" + notif_id + " inputLength=" + reply_text.length());
 		final boolean dispatched;
+		final ReplyTarget replyTarget = mController.replyTarget(notif_id);
 		final long replyReservation = mController.beginNotificationReply(notif_id);
 		try {
 			// 直接调用 MMAutoMessageReplyReceiver.onReceive，绕过广播系统
@@ -717,12 +763,8 @@ class MessagingBuilder {
 		}
 		logReply("synthetic_dispatched", "notificationId=" + notif_id);
 		final String finalReplyText = reply_text;
-		mController.recastNotification(notif_id, n -> {
-			// 清除 pre-applied 标记，允许重新处理
-			com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "pre-applied", null);
-			com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "applied", null);
-			NotificationMessages.recordReply(n, finalReplyText, replyTimestamp, replyId);
-		});
+		mController.onReplySent(notif_id, replyTarget, finalReplyText, replyTimestamp, replyId);
+		markRead(notif_id);
 	}};
 
 	// M4: 跟踪注册状态，防止重复注销或泄漏
@@ -734,6 +776,7 @@ class MessagingBuilder {
 		try { mContext.unregisterReceiver(mReplyReceiver); } catch (final RuntimeException ignored) {}
 		try { mContext.unregisterReceiver(mSyntheticReplyReceiver); } catch (final RuntimeException ignored) {}
 		try { mContext.unregisterReceiver(mZoomReceiver); } catch (final RuntimeException ignored) {}
+		try { mContext.unregisterReceiver(mDismissReceiver); } catch (final RuntimeException ignored) {}
 		mMarkReadPendingIntents.clear();
 		mPendingReplies.clear();
 	}

@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicLong;
 final class ImagePreviewLoader {
 	private static final String TOKEN = "nevo.wechat.imageRequest";
 	private static final String READY = "nevo.wechat.imageReady";
+	private static final String NOTIFICATION_TOKEN = "nevo.wechat.imageNotificationToken";
 	private static final AtomicLong SEQUENCE = new AtomicLong(SystemClock.elapsedRealtimeNanos());
 	private final Handler main = new Handler(Looper.getMainLooper());
 	private final WeChatImageEvents events;
@@ -83,7 +84,31 @@ final class ImagePreviewLoader {
 			largePreview.cancel(request.token);
 		}
 		previews.remove(key);
+		clearPresentation(notification);
+	}
+
+	/** Cancel only image work belonging to the confirmed read generation, not a later image. */
+	synchronized void discardRead(int id, Notification notification, long readToken) {
+		String prefix = id + ":";
+		for (Request request : pending.values()) {
+			if (!request.key.startsWith(prefix) || request.notificationToken == 0 || request.notificationToken > readToken) continue;
+			if (pending.remove(request.key, request)) {
+				if (request.future != null) request.future.cancel(false);
+				largePreview.cancel(request.token);
+				probes.remove(request.token);
+			}
+		}
+		previews.entrySet().removeIf(entry -> entry.getKey().startsWith(prefix)
+				&& entry.getValue().request.notificationToken != 0 && entry.getValue().request.notificationToken <= readToken);
+		probes.entrySet().removeIf(entry -> entry.getValue().key.startsWith(prefix)
+				&& entry.getValue().notificationToken != 0 && entry.getValue().notificationToken <= readToken);
+		long origin = notification.extras.getLong(NOTIFICATION_TOKEN);
+		if (origin != 0 && origin <= readToken) clearPresentation(notification);
+	}
+
+	private static void clearPresentation(Notification notification) {
 		notification.extras.remove(TOKEN);
+		notification.extras.remove(NOTIFICATION_TOKEN);
 		notification.extras.remove(READY);
 		notification.extras.remove(Notification.EXTRA_PICTURE);
 		if (notification.bigContentView != null
@@ -127,6 +152,7 @@ final class ImagePreviewLoader {
 			return;
 		}
 		n.extras.putLong(TOKEN, request.token);
+		n.extras.putLong(NOTIFICATION_TOKEN, request.notificationToken);
 		log("continuity", "request=" + request.token + " pending=" + pending.containsKey(key));
 		if (preview != null) main.postDelayed(() -> reattach(context, manager, tag, id, preview), 150);
 	}
@@ -170,6 +196,7 @@ final class ImagePreviewLoader {
 				&& Objects.equals(old.talker(), talker.talker()) && TextUtils.equals(old.title, n.extras.getCharSequence(Notification.EXTRA_TITLE))
 				&& TextUtils.equals(old.text, n.extras.getCharSequence(Notification.EXTRA_TEXT))) {
 			n.extras.putLong(TOKEN, old.token);
+			n.extras.putLong(NOTIFICATION_TOKEN, old.notificationToken);
 			return;
 		}
 		if (pending.size() >= 8 && !pending.containsKey(key)) { log("fallback", "reason=request_limit"); return; }
@@ -180,6 +207,7 @@ final class ImagePreviewLoader {
 		Request request = new Request(key, talker, n, messageIdentity(messages));
 		pending.put(key, request);
 		n.extras.putLong(TOKEN, request.token);
+		n.extras.putLong(NOTIFICATION_TOKEN, request.notificationToken);
 		log("queued", "request=" + request.token + " id=" + id + " when=" + request.when);
 		try {
 			request.future = worker.schedule(() -> resolve(context, manager, tag, id, request), 0, TimeUnit.MILLISECONDS);
@@ -334,7 +362,7 @@ final class ImagePreviewLoader {
 	}
 
 	private void probe(Request request) {
-		if (!BuildConfig.DEBUG) return;
+		if (!BuildConfig.DEBUG || probes.get(request.token) != request) return;
 		long now = SystemClock.elapsedRealtime();
 		if (now - request.started >= 120000) {
 			probes.remove(request.token);
@@ -371,6 +399,7 @@ final class ImagePreviewLoader {
 			return;
 		}
 		if (worker.getQueue().size() >= 16) { probes.remove(request.token); return; }
+		if (probes.get(request.token) != request) return;
 		worker.schedule(() -> probe(request), Math.min(2000, 120000 - (now - request.started)), TimeUnit.MILLISECONDS);
 	}
 
@@ -606,6 +635,7 @@ final class ImagePreviewLoader {
 		private final TalkerSource talkerSource;
 		final long token = SEQUENCE.incrementAndGet(), received = System.currentTimeMillis();
 		final long when, started = SystemClock.elapsedRealtime();
+		final long notificationToken;
 		int attempts;
 		boolean diagnosed, pathFailureLogged;
 		boolean largeLookupLogged, largeSubmitAttempted, largeDownloadComplete, publishing;
@@ -620,6 +650,7 @@ final class ImagePreviewLoader {
 			this.key = key;
 			this.talkerSource = talkerSource;
 			when = n.when;
+			notificationToken = n.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
 			title = n.extras.getCharSequence(Notification.EXTRA_TITLE);
 			text = n.extras.getCharSequence(Notification.EXTRA_TEXT);
 		}

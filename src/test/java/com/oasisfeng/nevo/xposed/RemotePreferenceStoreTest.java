@@ -11,6 +11,13 @@ import java.util.Map;
 import org.junit.Test;
 
 public class RemotePreferenceStoreTest {
+	@Test public void lastReplyDefaultsOffAndPreservesExplicitChoiceAcrossUpgrade() {
+		String key = RemotePreferenceStore.KEY_SHOW_LAST_REPLY;
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.emptyMap(), Collections.emptyMap()).get(key));
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.migratedLocalValues(Collections.emptyMap(), 5).get(key));
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.migratedLocalValues(Collections.singletonMap(key, true), 5).get(key));
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.merge(Collections.emptyMap(), Collections.singletonMap(key, true)).get(key));
+	}
 	@Test public void localValueWinsOverRemoteValue() {
 		Map<String, Boolean> local = Collections.singletonMap("WeChatDecorator.enabled", false);
 		Map<String, Boolean> remote = Collections.singletonMap("WeChatDecorator.enabled", true);
