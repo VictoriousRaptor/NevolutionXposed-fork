@@ -26,7 +26,13 @@ After the build job passes, master pushes and manual master runs build and verif
 and publish it with SHA256SUMS.txt. Tags use v<versionName>-build.<run number> so multiple
 master updates at the same app version have distinct releases. Reruns preserve
 an already published release. For reference, v3.2.0 used Android versionCode 13; the current app
-version is 3.3.0 with versionCode 15. Bump versionCode for the next app version. CI run numbers do not alter Android versionCode.
+version is 3.3.1 with versionCode 16. Bump versionCode for the next app version. CI run numbers do not alter Android versionCode.
+
+Version 3.3.1 requests read handling as soon as a valid notification reply is
+submitted, independently of the send outcome. Failed dispatches do not add a
+successful reply to notification history. Notification dismissal directly uses
+WeChat's native read PendingIntent; local history removal continues through the
+SystemUI removal callback.
 
 Configure these Actions repository secrets separately in each publishing repo:
 

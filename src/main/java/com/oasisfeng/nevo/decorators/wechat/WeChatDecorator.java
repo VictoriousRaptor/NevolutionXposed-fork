@@ -163,7 +163,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 							mConversationManager.getConversation(id), NotificationMessages.pendingReplyIds(latest));
 				}
 			}
-			@Override public void onNotificationRead(int id, long token) { clearReadNotifications(id, token, true); }
+			@Override public void onReplyRead(int id, MessagingBuilder.ReplyTarget target) { Local.this.onReplyRead(id, target); }
 			@Override public void onReplySent(int id, MessagingBuilder.ReplyTarget target, CharSequence text, long time, String replyId) {
 				Local.this.onReplySent(id, target, text, time, replyId);
 			}
@@ -260,6 +260,20 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (refresh && latest != null) repostIfActive(id, latest.clone(),
 					latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), token);
 			return true;
+		}
+
+		private synchronized void onReplyRead(int id, MessagingBuilder.ReplyTarget target) {
+			Notification latest = getArchivedNotification(id);
+			if (latest == null || target == null || target.token() == 0
+					|| target.conversation() != mConversationManager.getConversation(id)) return;
+			Notification read = latest.clone();
+			Conversation conversation = mConversationManager.snapshot(target.conversation(), read);
+			NotificationMessages.readForReply(conversation, read, target.token(), showLastReply());
+			if (!clearReadNotifications(id, target.token(), false)) return;
+			NotificationMessages.stamp(conversation, read);
+			// Keep an empty current snapshot for a later send callback; a user removal can still delete it.
+			if (getArchivedNotification(id) == null) cache(id, read);
+			else replaceCachedNotification(id, latest, read);
 		}
 
 		private synchronized void onReplySent(int id, MessagingBuilder.ReplyTarget target, CharSequence text, long time, String replyId) {
@@ -407,7 +421,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 				extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN,
 						WeChatNotificationRemoval.nextToken());
 			cache(id, n);
-			if (WeChatMessage.isChat(n.tickerText) && ensureMessagingBuilder()) mMessagingBuilder.wrapDeleteIntent(id, n);
 			n.color = PRIMARY_COLOR;        // Tint the small icon
 
 			String channel_id = SDK_INT >= O ? n.getChannelId() : null;

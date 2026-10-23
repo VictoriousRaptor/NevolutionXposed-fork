@@ -52,8 +52,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "rawPersonOnlyNotification", "nativeMessagingSelf", "rawColonText", "undatedSnapshots",
                 "stablePeerAcrossTalkerAndAvatar", "twoRoundsAndReplay", "appReplyStartsFresh",
                 "appReplyKeepsLaterNotificationReply", "groupRound", "roundPreviewAndUndated",
-                "removedRoundStartsFresh", "lastReplyDisplayChoice", "lateReadPreservesNewMessages", "dismissForwardsOriginalRead",
+                "removedRoundStartsFresh", "lastReplyDisplayChoice", "lateReadPreservesNewMessages", "dismissUsesNativeRead",
                 "replyControllerConsecutiveGroup", "replyControllerLateCallback", "replyControllerAppReplyInterleaving", "replyControllerRemovedTarget",
+                "replyReadWithoutSend", "nativeReplyReadBeforeFailure", "syntheticReplyReadBeforeFailure",
                 "classifiesRawFirstMessages", "classificationSurvivesNextMessage", "lateTalkerIsIsolated",
                 "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyInputsUseLocalizedReplyLabel",
                 "replyActionSurvivesArchiveRemoval", "recallSequence", "recallWithoutIdentity", "recallSameTextAndTime",
@@ -70,8 +71,11 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
                 this::stablePeerAcrossTalkerAndAvatar, this::twoRoundsAndReplay, this::appReplyStartsFresh,
                 this::appReplyKeepsLaterNotificationReply, this::groupRound, this::roundPreviewAndUndated,
-                this::removedRoundStartsFresh, this::lastReplyDisplayChoice, this::lateReadPreservesNewMessages, this::dismissForwardsOriginalRead,
+                this::removedRoundStartsFresh, this::lastReplyDisplayChoice, this::lateReadPreservesNewMessages, this::dismissUsesNativeRead,
                 this::replyControllerConsecutiveGroup, this::replyControllerLateCallback, this::replyControllerAppReplyInterleaving, this::replyControllerRemovedTarget,
+                this::replyReadWithoutSend,
+                () -> ReplyReadInstrumentation.nativeReplyReadBeforeFailure(getTargetContext()),
+                () -> ReplyReadInstrumentation.syntheticReplyReadBeforeFailure(getTargetContext()),
                 this::classifiesRawFirstMessages, this::classificationSurvivesNextMessage, this::lateTalkerIsIsolated,
                 this::legacyGroupGuessIsRepaired, this::nativeGroupEvidence,
                 this::replyInputsUseLocalizedReplyLabel,
@@ -430,10 +434,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         checkTexts(c, afterReply, "B", "E");
     }
 
-    private void dismissForwardsOriginalRead() {
+    private void dismissUsesNativeRead() {
         Context context = getTargetContext();
-        java.util.concurrent.CountDownLatch read = new java.util.concurrent.CountDownLatch(1);
-        java.util.concurrent.atomic.AtomicLong removedToken = new java.util.concurrent.atomic.AtomicLong();
+        java.util.concurrent.CountDownLatch read = new java.util.concurrent.CountDownLatch(2);
         android.content.BroadcastReceiver receiver = new android.content.BroadcastReceiver() {
             @Override public void onReceive(Context ignored, Intent intent) { read.countDown(); }
         };
@@ -442,34 +445,32 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
         PendingIntent original = PendingIntent.getBroadcast(context, 731,
                 new Intent(action).setPackage(context.getPackageName()), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        MessagingBuilder builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {
-            @Override public void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies) {}
-            @Override public void onNotificationRead(int id, long token) {
-                check(id == 731, "dismiss targeted another notification"); removedToken.set(token);
-            }
-        });
-        Notification first = notification("A", 100);
-        Notification next = notification("C", 200);
+        WeChatDecorator.Local local = new WeChatDecorator.Local("WeChatDecorator");
         try {
-            first.deleteIntent = original;
-            first.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 101);
-            builder.wrapDeleteIntent(731, first);
-            Notification rebuilt = Notification.Builder.recoverBuilder(context, first).build();
-            NotificationMessages.copyIdentityExtras(first, rebuilt);
-            builder.wrapDeleteIntent(731, rebuilt);
-            first = rebuilt;
-            next.deleteIntent = original;
-            next.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 102);
-            builder.wrapDeleteIntent(731, next);
-            check(!first.deleteIntent.equals(next.deleteIntent), "new notification replaced the old delete generation");
-            first.deleteIntent.send();
-            check(read.await(5, java.util.concurrent.TimeUnit.SECONDS), "original read action was not forwarded");
-            check(removedToken.get() == 101, "dismiss used the newer notification token");
+            local.onCreate(context.getSharedPreferences("identity-test", Context.MODE_PRIVATE));
+            android.app.NotificationManager manager = context.getSystemService(android.app.NotificationManager.class);
+            String[] texts = { "A", "[动画表情]" };
+            Notification[] notifications = new Notification[texts.length];
+            for (int i = 0; i < texts.length; i++) {
+                Notification.CarExtender.UnreadConversation unread = new Notification.CarExtender.Builder("Alice")
+                        .addMessage(texts[i]).setLatestTimestamp(100).setReadPendingIntent(original).build();
+                Notification n = new Notification.Builder(context, "identity-test").setSmallIcon(android.R.drawable.ic_dialog_info)
+                        .setContentTitle("Alice").setContentText(texts[i]).setTicker("Alice: " + texts[i]).setWhen(100)
+                        .extend(new Notification.CarExtender().setUnreadConversation(unread)).build();
+                local.apply(manager, null, 731 + i, n);
+                check(original.equals(n.deleteIntent), "delete action does not target native read directly");
+                Notification rebuilt = Notification.Builder.recoverBuilder(context, n).build();
+                NotificationMessages.copyIdentityExtras(n, rebuilt);
+                local.apply(manager, null, 731 + i, rebuilt);
+                check(original.equals(rebuilt.deleteIntent), "rebuild replaced native read with a proxy");
+                notifications[i] = rebuilt;
+            }
+            local.onDestroy();
+            for (Notification n : notifications) n.deleteIntent.send();
+            check(read.await(5, java.util.concurrent.TimeUnit.SECONDS), "native read depends on the decorator receiver");
         } catch (Exception failure) { throw new AssertionError(failure); }
         finally {
-            builder.close(); context.unregisterReceiver(receiver); original.cancel();
-            if (first.deleteIntent != null) first.deleteIntent.cancel();
-            if (next.deleteIntent != null) next.deleteIntent.cancel();
+            local.onDestroy(); context.unregisterReceiver(receiver); original.cancel();
         }
     }
 
@@ -504,6 +505,21 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         }
         void texts(String... expected) { checkTexts(conversation, getArchivedNotification(id), expected); }
         Notification latest() { return getArchivedNotification(id); }
+        MessagingBuilder.ReplyTarget read() {
+            MessagingBuilder.ReplyTarget target = controller.replyTarget(id);
+            controller.onReplyRead(id, target);
+            return target;
+        }
+        void removed(long token) {
+            try {
+                java.lang.reflect.Field field = WeChatDecorator.Local.class.getDeclaredField("mRoundResetReceiver");
+                field.setAccessible(true);
+                ((android.content.BroadcastReceiver) field.get(this)).onReceive(getTargetContext(),
+                        new Intent(WeChatNotificationRemoval.ACTION_RESET_ROUND)
+                                .putExtra(WeChatNotificationRemoval.EXTRA_NOTIFICATION_ID, id)
+                                .putExtra(WeChatNotificationRemoval.EXTRA_ROUND_TOKEN, token));
+            } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        }
         @Override public void close() { clearArchivedNotifications(id); }
     }
 
@@ -511,9 +527,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         for (boolean show : new boolean[]{false, true}) for (boolean parallel : new boolean[]{false, true}) {
             try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
                 fixture.incoming("A", 100);
-                MessagingBuilder.ReplyTarget first = fixture.controller.replyTarget(fixture.id);
+                MessagingBuilder.ReplyTarget first = fixture.read();
                 fixture.controller.onReplySent(fixture.id, first, "B1", 110, "controller-B1");
-                MessagingBuilder.ReplyTarget second = parallel ? first : fixture.controller.replyTarget(fixture.id);
+                MessagingBuilder.ReplyTarget second = parallel ? first : fixture.read();
                 fixture.controller.onReplySent(fixture.id, second, "B2", 120, "controller-B2");
                 fixture.texts("B1", "B2");
                 fixture.incoming("C", 200);
@@ -531,9 +547,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 for (boolean undated : new boolean[]{false, true}) {
             try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
                 fixture.incoming("A", 100);
-                if (priorReply) fixture.controller.onReplySent(fixture.id, fixture.controller.replyTarget(fixture.id),
+                if (priorReply) fixture.controller.onReplySent(fixture.id, fixture.read(),
                         "B1", 110, "early-controller-B1");
-                MessagingBuilder.ReplyTarget target = fixture.controller.replyTarget(fixture.id);
+                MessagingBuilder.ReplyTarget target = fixture.read();
                 fixture.incoming("C", undated ? 0 : 200);
                 fixture.controller.onReplySent(fixture.id, target, "B", 150, "late-controller-B");
                 java.util.List<String> expected = new java.util.ArrayList<>();
@@ -549,7 +565,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 fixture.texts(expected.toArray(new String[0]));
                 check(fixture.latest().extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
                         "late callback left answered reply in input history");
-                fixture.controller.onReplySent(fixture.id, fixture.controller.replyTarget(fixture.id), "E", 310, "later-controller-E");
+                fixture.controller.onReplySent(fixture.id, fixture.read(), "E", 310, "later-controller-E");
                 fixture.incoming("F", 400);
                 fixture.controller.onReplySent(fixture.id, target, "B", 150, "late-controller-B");
                 fixture.texts(show ? new String[]{"E", "F"} : new String[]{"F"});
@@ -561,9 +577,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         for (boolean show : new boolean[]{false, true}) for (boolean appBeforePeer : new boolean[]{false, true}) {
             try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
                 fixture.incoming("A", 100);
-                fixture.controller.onReplySent(fixture.id, fixture.controller.replyTarget(fixture.id), "B1", 110, "app-boundary-B1");
+                fixture.controller.onReplySent(fixture.id, fixture.read(), "B1", 110, "app-boundary-B1");
                 if (appBeforePeer) check(NotificationMessages.markAppReply(fixture.latest(), 7, 140), "app send not marked");
-                MessagingBuilder.ReplyTarget target = fixture.controller.replyTarget(fixture.id);
+                MessagingBuilder.ReplyTarget target = fixture.read();
                 fixture.incoming("C", 0);
                 if (!appBeforePeer) check(NotificationMessages.markAppReply(fixture.latest(), 7, 240), "later app send not marked");
                 fixture.controller.onReplySent(fixture.id, target, "B2", 150, "app-boundary-B2");
@@ -577,12 +593,34 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
     private void replyControllerRemovedTarget() {
         try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(true)) {
             fixture.incoming("A", 100);
-            MessagingBuilder.ReplyTarget target = fixture.controller.replyTarget(fixture.id);
-            fixture.controller.onNotificationRead(fixture.id, target.token());
+            MessagingBuilder.ReplyTarget target = fixture.read();
+            fixture.removed(target.token());
             fixture.controller.onReplySent(fixture.id, target, "B", 150, "removed-controller-B");
             check(fixture.latest() == null, "late reply revived a removed notification");
             fixture.incoming("C", 200);
             fixture.texts("C");
+        }
+    }
+
+    private void replyReadWithoutSend() {
+        for (boolean show : new boolean[]{false, true}) for (boolean priorReply : new boolean[]{false, true}) {
+            try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
+                fixture.incoming("A", 100);
+                if (priorReply) fixture.controller.onReplySent(fixture.id, fixture.read(), "B1", 110, "prior-success");
+                fixture.read();
+                fixture.texts(priorReply ? new String[]{"B1"} : new String[0]);
+                fixture.incoming("C", 200);
+                fixture.texts(priorReply && show ? new String[]{"B1", "C"} : new String[]{"C"});
+            }
+        }
+        try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(true)) {
+            fixture.incoming("A", 100);
+            MessagingBuilder.ReplyTarget target = fixture.controller.replyTarget(fixture.id);
+            fixture.incoming("C", 0);
+            fixture.controller.onReplyRead(fixture.id, target);
+            fixture.texts("C");
+            fixture.incoming("D", 300);
+            fixture.texts("C", "D");
         }
     }
 

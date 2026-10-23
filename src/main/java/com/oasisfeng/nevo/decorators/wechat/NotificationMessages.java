@@ -270,6 +270,20 @@ final class NotificationMessages {
         notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, MessagingBuilder.getBundleArrayForMessages(messages));
     }
 
+    /** A user sending a reply has read its incoming generation even if dispatch later fails. */
+    static void readForReply(Conversation conversation, Notification notification, long token, boolean showLastReply) {
+        List<Message> messages = rebuild(conversation, notification, java.util.Collections.emptyList(), true);
+        ConversationRound round = readRound(notification.extras);
+        long generation = WeChatNotificationRemoval.nextToken();
+        for (Message message : messages) if (message.getPerson() == null
+                && round.pendingReplies.contains(message.getExtras().getString(REPLY_ID))
+                && message.getExtras().getLong(MESSAGE_NOTIFICATION_TOKEN) <= token)
+            message.getExtras().putLong(MESSAGE_NOTIFICATION_TOKEN, generation);
+        notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, MessagingBuilder.getBundleArrayForMessages(messages));
+        notification.extras.putBoolean(STORED, true);
+        clearReadHistory(conversation, notification, token, showLastReply);
+    }
+
     /** Preserve a pending reply group while retiring the peer messages it has read. */
     static boolean recordReadReply(Conversation conversation, Notification notification, MessagingBuilder.ReplyTarget target,
                                    CharSequence text, long time, String replyId) {
@@ -358,7 +372,6 @@ final class NotificationMessages {
                 SERVER_ID, RECALLED_IDS, RECALL_PROMPT, WeChatRecallEvents.VERIFIED_KEY,
                 WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN,
                 WeChatNotificationRemoval.READ_THROUGH_TOKEN,
-                MessagingBuilder.ORIGINAL_DELETE_INTENT,
                 ConversationClassification.TYPE, ConversationClassification.SOURCE,
                 Notification.EXTRA_REMOTE_INPUT_HISTORY, NotificationMarkdown.RAW_TEXT,
                 Notification.EXTRA_MESSAGES, "android.messagingUser", "android.selfDisplayName"));

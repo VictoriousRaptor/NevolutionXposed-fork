@@ -72,8 +72,6 @@ class MessagingBuilder {
 	private static final String ACTION_REPLY = "REPLY";
 	private static final String ACTION_MENTION = "MENTION";
 	private static final String ACTION_ZOOM = "ZOOM";
-	private static final String ACTION_DISMISS = "DISMISS";
-	static final String ORIGINAL_DELETE_INTENT = "nevo.originalDeleteIntent";
 	private static final String ACTION_SYNTHETIC_REPLY = "SYNTHETIC_REPLY";
 	private static final String SCHEME_ID = "id";
 	private static final String EXTRA_REPLY_ACTION = "pending_intent";
@@ -172,36 +170,6 @@ class MessagingBuilder {
 		for (Message message : NotificationMessages.rebuild(conversation, n, archive, mController.showLastReply())) messaging.addMessage(message);
 	}
 
-	/** The immutable, generation-specific delete action also works without the SystemUI bridge. */
-	void wrapDeleteIntent(int id, Notification notification) {
-		final Bundle extras = notification.extras;
-		if (!extras.containsKey(ORIGINAL_DELETE_INTENT))
-			extras.putParcelable(ORIGINAL_DELETE_INTENT, notification.deleteIntent);
-		final long token = extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
-		final PendingIntent original = extras.getParcelable(ORIGINAL_DELETE_INTENT);
-		final Intent intent = new Intent(ACTION_DISMISS).setPackage(mContext.getPackageName())
-				.setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), Long.toString(token)))
-				.putExtra(ORIGINAL_DELETE_INTENT, original);
-		notification.deleteIntent = PendingIntent.getBroadcast(mContext, 0, intent,
-				FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-	}
-
-	private final BroadcastReceiver mDismissReceiver = new BroadcastReceiver() {
-		@Override public void onReceive(Context context, Intent intent) {
-			final Uri data = intent.getData();
-			if (data == null) return;
-			final int id;
-			final long token;
-			try {
-				id = Integer.parseInt(data.getSchemeSpecificPart());
-				token = Long.parseLong(data.getFragment());
-			} catch (NumberFormatException invalid) { return; }
-			mController.onNotificationRead(id, token);
-			final PendingIntent original = intent.getParcelableExtra(ORIGINAL_DELETE_INTENT);
-			if (original != null) try { original.send(mContext, 0, addTargetPackageAndWakeUp(original)); }
-			catch (PendingIntent.CanceledException canceled) { Log.w(TAG, "Dismiss read action is cancelled: " + id); }
-		}
-	};
 	/** @return appropriate PendingIntent flags, including FLAG_MUTABLE on Android 12+ for RemoteInput. */
 	private static int pendingIntentFlags() {
 		return SDK_INT >= S ? (FLAG_UPDATE_CURRENT | FLAG_MUTABLE) : FLAG_UPDATE_CURRENT;
@@ -301,6 +269,8 @@ class MessagingBuilder {
 		}
 		final RemoteInput remoteInput = convs.getRemoteInput();
 		final Action replyAction = buildNativeReplyAction(id, onReply, remoteInput);
+		final PendingIntent onRead = convs.getReadPendingIntent();
+		if (onRead != null) mMarkReadPendingIntents.put(id, onRead);
 
 		final Action[] existing = n.actions;
 		final List<Action> merged = new ArrayList<>();
@@ -340,6 +310,9 @@ class MessagingBuilder {
 			logReply("native_drop", "reason=missing_input resultKey=" + result_key + " availableKeys=" + results.keySet());
 			return;
 		}
+		final int id;
+		try { id = Integer.parseInt(data.getSchemeSpecificPart()); }
+		catch (NumberFormatException invalid) { logReply("native_drop", "reason=invalid_id"); return; }
 		logReply("native_receiver", "notificationId=" + data.getSchemeSpecificPart() + " resultKey=" + result_key + " inputLength=" + input.length());
 		// M3: 防止无限循环 — 使用 id:text 作为 key，避免 hashCode 碰撞
 		final String replyKey = data.getSchemeSpecificPart() + ":" + input.toString();
@@ -353,14 +326,15 @@ class MessagingBuilder {
 		final String part = data.getSchemeSpecificPart();
 		final long replyTimestamp = System.currentTimeMillis();
 		final String replyId = NotificationMessages.newReplyId();
-		final ReplyTarget replyTarget = mController.replyTarget(Integer.parseInt(part));
+		final ReplyTarget replyTarget = mController.replyTarget(id);
+		readBeforeReply(id, replyTarget);
 		long replyReservation = 0;
 		try {
 			final Intent input_data = addTargetPackageAndWakeUp(reply_action);
 			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder(result_key).build() }, input_data, results);
 			logReply("native_remote_input_attached", "resultKey=" + result_key + " inputLength=" + text.length());
 
-			replyReservation = mController.beginNotificationReply(Integer.parseInt(part));
+			replyReservation = mController.beginNotificationReply(id);
 			final long reservation = replyReservation;
 			reply_action.send(mContext, 0, input_data, (pendingIntent, intent, _result_code, _result_data, _result_extras) -> {
 				logReply("native_pending_intent_callback", "notificationId=" + part + " resultCode=" + _result_code);
@@ -369,9 +343,7 @@ class MessagingBuilder {
 					return;
 				}
 				if (SDK_INT >= N) {
-					final int id = Integer.parseInt(part);
 					mController.onReplySent(id, replyTarget, text, replyTimestamp, replyId);
-					markRead(id);
 				}
 			}, null);
 		} catch (final PendingIntent.CanceledException e) {
@@ -411,6 +383,15 @@ class MessagingBuilder {
 			if (BuildConfig.DEBUG) Log.d(TAG, "bitmap " + extras.getParcelable(Notification.EXTRA_PICTURE));
 		});
 	} };
+
+	/** @param id the notification id */
+	private void readBeforeReply(int id, ReplyTarget target) {
+		logReply("read_requested", "notificationId=" + id);
+		try { mController.onReplyRead(id, target); }
+		catch (RuntimeException failure) { Log.w(TAG, "Reply read history failed: " + id, failure); }
+		try { markRead(id); }
+		catch (RuntimeException failure) { Log.w(TAG, "Reply read action failed: " + id, failure); }
+	}
 
 	/** @param id the notification id */
 	void markRead(final int id) {
@@ -479,7 +460,7 @@ class MessagingBuilder {
 		void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies);
 		default boolean showLastReply() { return false; }
 		default ReplyTarget replyTarget(int id) { return null; }
-		default void onNotificationRead(int id, long token) {}
+		default void onReplyRead(int id, ReplyTarget target) {}
 		default void onReplySent(int id, ReplyTarget target, CharSequence text, long time, String replyId) {
 			recastNotification(id, n -> {
 				com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "pre-applied", null);
@@ -524,10 +505,6 @@ class MessagingBuilder {
 		{
 			final IntentFilter filter = new IntentFilter(ACTION_ZOOM); filter.addDataScheme(SCHEME_ID);
 			ContextCompat.registerReceiver(context, mZoomReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
-		}
-		{
-			final IntentFilter filter = new IntentFilter(ACTION_DISMISS); filter.addDataScheme(SCHEME_ID);
-			ContextCompat.registerReceiver(context, mDismissReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
 		}
 	}
 
@@ -739,6 +716,7 @@ class MessagingBuilder {
 		logReply("synthetic_receiver", "notificationId=" + notif_id + " inputLength=" + reply_text.length());
 		final boolean dispatched;
 		final ReplyTarget replyTarget = mController.replyTarget(notif_id);
+		readBeforeReply(notif_id, replyTarget);
 		final long replyReservation = mController.beginNotificationReply(notif_id);
 		try {
 			// 直接调用 MMAutoMessageReplyReceiver.onReceive，绕过广播系统
@@ -751,7 +729,7 @@ class MessagingBuilder {
 			final Bundle remoteInputResults = new Bundle();
 			remoteInputResults.putCharSequence(DEFAULT_AUTO_REPLY_RESULT_KEY, reply_text);
 			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY).build() }, reply_intent, remoteInputResults);
-			dispatched = MainHook.invokeMMAutoReply(context, reply_intent);
+			dispatched = dispatchSyntheticReply(context, reply_intent);
 		} catch (final RuntimeException e) {
 			mController.abortNotificationReply(replyReservation);
 			Log.w(TAG, "NX_REPLY stage=synthetic_dispatch_failed notificationId=" + notif_id, e);
@@ -764,8 +742,11 @@ class MessagingBuilder {
 		logReply("synthetic_dispatched", "notificationId=" + notif_id);
 		final String finalReplyText = reply_text;
 		mController.onReplySent(notif_id, replyTarget, finalReplyText, replyTimestamp, replyId);
-		markRead(notif_id);
 	}};
+
+	boolean dispatchSyntheticReply(Context context, Intent intent) {
+		return MainHook.invokeMMAutoReply(context, intent);
+	}
 
 	// M4: 跟踪注册状态，防止重复注销或泄漏
 	private volatile boolean mClosed = false;
@@ -776,7 +757,6 @@ class MessagingBuilder {
 		try { mContext.unregisterReceiver(mReplyReceiver); } catch (final RuntimeException ignored) {}
 		try { mContext.unregisterReceiver(mSyntheticReplyReceiver); } catch (final RuntimeException ignored) {}
 		try { mContext.unregisterReceiver(mZoomReceiver); } catch (final RuntimeException ignored) {}
-		try { mContext.unregisterReceiver(mDismissReceiver); } catch (final RuntimeException ignored) {}
 		mMarkReadPendingIntents.clear();
 		mPendingReplies.clear();
 	}
