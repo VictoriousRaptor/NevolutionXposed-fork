@@ -39,15 +39,6 @@
 			android:title="@string/decorator_wechat_image_preview_large_title"/>
 	</PreferenceCategory>
 
-	<PreferenceCategory
-		android:title="@string/settings_optional_category">
-		<CheckBoxPreference 
-			android:key="MediaDecorator.enabled"
-			android:defaultValue="false"
-			android:summary="@string/decorator_media_description"
-			android:title="@string/decorator_media_title"/>
-	</PreferenceCategory>
-
 	<Preference
 		android:selectable="false"
 		android:summary="@string/settings_restart_summary"

@@ -19,7 +19,6 @@ package com.oasisfeng.nevo.decorators.wechat;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -37,7 +36,6 @@ import android.util.Log;
 
 import java.io.File;
 import java.util.List;
-import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -378,16 +376,11 @@ public class WeChatDecorator extends NevoDecoratorService {
 				}
 			}
 
-			// Log.d(TAG, "deleteIntent " + n.deleteIntent);
-			final Bundle extras = n.extras,
-				extensions = extras.getBundle("android.car.EXTENSIONS");
-			if (extensions != null) {
-				Bundle conversation = extensions.getBundle("car_conversation");
-				PendingIntent onRead = (PendingIntent)conversation.get("on_read");
-				// Log.d(TAG, "on_read " + onRead);
-				n.deleteIntent = onRead;
-			}
-			// Log.d(TAG, "deleteIntent " + n.deleteIntent);
+			final Bundle extras = n.extras;
+			final Bundle extensions = extras.getBundle("android.car.EXTENSIONS");
+			final Bundle carConversation = extensions == null ? null : extensions.getBundle("car_conversation");
+			if (carConversation != null) n.deleteIntent = carConversation.getParcelable("on_read");
+			final Notification.CarExtender.UnreadConversation originalCar = new Notification.CarExtender(n).getUnreadConversation();
 			CharSequence title = extras.getCharSequence(Notification.EXTRA_TITLE);
 			if (extras.getBoolean(NotificationMessages.STORED) && extras.getString(NotificationMessages.TITLE) != null)
 				title = extras.getString(NotificationMessages.TITLE);
@@ -400,7 +393,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 			final String storedKey = extras.getBoolean(NotificationMessages.STORED)
 					|| extras.getBoolean(WeChatRecallEvents.VERIFIED_KEY) ? extras.getString(NotificationMessages.KEY) : null;
 			final boolean sameTalker = ConversationTypePolicy.sameKnownTalker(previous.knownKey(), storedKey);
-			final Notification.CarExtender.UnreadConversation originalCar = new Notification.CarExtender(n).getUnreadConversation();
 			final android.app.PendingIntent replyTarget = originalCar == null ? null : originalCar.getReplyPendingIntent();
 			// An unchanged native reply target whose talker was resolved is stronger than a refreshed click target.
 			final boolean sameResolvedReply = previous.knownKey() != null && previous.replyIntent != null
@@ -634,16 +626,20 @@ public class WeChatDecorator extends NevoDecoratorService {
 			return channel;
 		}
 
-		@RequiresApi(O) private NotificationChannel cloneChannel(final NotificationChannel channel, final String id, final String new_name) {
+		@RequiresApi(O) static NotificationChannel cloneChannel(final NotificationChannel channel, final String id, final String new_name) {
 			final NotificationChannel clone = new NotificationChannel(id, new_name, channel.getImportance());
 			clone.setGroup(channel.getGroup());
 			clone.setDescription(channel.getDescription());
 			clone.setLockscreenVisibility(channel.getLockscreenVisibility());
-			clone.setSound(Optional.ofNullable(channel.getSound()).orElse(getDefaultSound()), channel.getAudioAttributes());
+			clone.setSound(channel.getSound(), channel.getAudioAttributes());
 			clone.setBypassDnd(channel.canBypassDnd());
 			clone.setLightColor(channel.getLightColor());
+			clone.enableLights(channel.shouldShowLights());
 			clone.setShowBadge(channel.canShowBadge());
-			clone.setVibrationPattern(channel.getVibrationPattern());
+			if (SDK_INT >= 35 && channel.getVibrationEffect() != null)
+				clone.setVibrationEffect(channel.getVibrationEffect());
+			else clone.setVibrationPattern(channel.getVibrationPattern());
+			clone.enableVibration(channel.shouldVibrate());
 			return clone;
 		}
 

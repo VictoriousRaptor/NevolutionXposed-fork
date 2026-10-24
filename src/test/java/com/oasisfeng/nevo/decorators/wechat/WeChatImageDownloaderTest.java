@@ -14,7 +14,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
 
 public class WeChatImageDownloaderTest {
 	@Test public void uniqueRowIsTheBaseRow() {
@@ -43,17 +42,17 @@ public class WeChatImageDownloaderTest {
 	@Test public void completionRequiresTheSameBaseRowAndAllBytes() {
 		WeChatImageDownloader.BaseRow base = row(10, 1000, "chat", "/base", "", 0);
 		WeChatImageDownloader.BaseRow partial = new WeChatImageDownloader.BaseRow(
-				10, 42, 1000, "chat", "/base", "", "", 9, 10, 0);
+				10, 1000, "chat", "/base", "", "", 9, 10, 0);
 		WeChatImageDownloader.BaseRow complete = new WeChatImageDownloader.BaseRow(
-				10, 42, 1000, "chat", "/base", "", "", 10, 10, 0);
+				10, 1000, "chat", "/base", "", "", 10, 10, 0);
 		assertFalse(partial.isComplete(base));
 		assertFalse(complete.isComplete(row(11, 1000, "chat", "/wrong", "", 0)));
 	}
 
-	@Test public void databaseMessageIdIsUsedOnlyForTheMessagePair() throws Exception {
-		String[] columns = {"id", "msglocalid", "msgSvrId", "msgTalker", "bigImgPath", "hevcPath",
+	@Test public void imageIdIsUsedForDownloadAndMessagePair() throws Exception {
+		String[] columns = {"id", "msgSvrId", "msgTalker", "bigImgPath", "hevcPath",
 				"midImgPath", "offset", "totalLen", "reserved1"};
-		Object[] values = {10L, 42L, 1000L, "chat", "", "", "", 0L, 0L, 20L};
+		Object[] values = {10L, 1000L, "chat", "", "", "", 0L, 0L, 20L};
 		Cursor cursor = (Cursor) Proxy.newProxyInstance(Cursor.class.getClassLoader(), new Class<?>[]{Cursor.class},
 				(proxy, method, args) -> {
 					switch (method.getName()) {
@@ -81,20 +80,8 @@ public class WeChatImageDownloaderTest {
 		submit.setAccessible(true);
 		assertEquals(7, submit.invoke(downloader, base));
 		assertEquals(10L, service.imageId);
-		assertEquals(42L, service.message.id);
+		assertEquals(10L, service.message.id);
 		assertEquals("chat", service.message.talker);
-	}
-
-	@Test public void missingMessageLocalIdSkipsDownloadButKeepsTheBaseRow() throws Exception {
-		WeChatImageDownloader downloader = new WeChatImageDownloader();
-		set(downloader, "available", true);
-		for (long localId : new long[]{0, -1}) {
-			WeChatImageDownloader.BaseRow base = new WeChatImageDownloader.BaseRow(
-					10, localId, 1000, "chat", "/base", "", "", 10, 10, 0);
-			assertSame(base, WeChatImageDownloader.selectBaseRow(Collections.singletonList(base), "chat"));
-			assertTrue(base.isComplete(base));
-			assertFalse(downloader.request(base, 1, Long.MAX_VALUE, ignored -> {}));
-		}
 	}
 
 	private static void set(WeChatImageDownloader downloader, String name, Object value) throws Exception {
@@ -129,7 +116,7 @@ public class WeChatImageDownloaderTest {
 
 	private static WeChatImageDownloader.BaseRow row(long id, long serverId, String talker,
 			String bigPath, String hevcPath, long reserved1) {
-		return new WeChatImageDownloader.BaseRow(id, 42, serverId, talker, bigPath, hevcPath, "", 0, 0, reserved1);
+		return new WeChatImageDownloader.BaseRow(id, serverId, talker, bigPath, hevcPath, "", 0, 0, reserved1);
 	}
 
 	private static java.util.List<String> paths(WeChatImageDownloader.BaseRow row) {

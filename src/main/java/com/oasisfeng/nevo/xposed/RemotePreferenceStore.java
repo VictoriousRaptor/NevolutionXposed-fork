@@ -15,9 +15,10 @@ import io.github.libxposed.service.XposedService;
 final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenceChangeListener {
 	static final String GROUP = "settings";
 	private static final String SCHEMA_VERSION_KEY = "settings_schema_version";
-	static final int CURRENT_SCHEMA_VERSION = 7;
+	static final int CURRENT_SCHEMA_VERSION = 8;
 	/** Key of the removed MIUI decorator; purged from local and remote storage on migration. */
 	private static final String OBSOLETE_MIUI_KEY = "MIUIDecorator.enabled";
+	private static final String OBSOLETE_MEDIA_KEY = "MediaDecorator.enabled";
 	static final String KEY_IMAGE_PREVIEW = "WeChatDecorator.image_preview";
 	static final String KEY_IMAGE_PREVIEW_LARGE = "WeChatDecorator.image_preview_large";
 	static final String KEY_MARKDOWN = "WeChatDecorator.markdown";
@@ -29,8 +30,7 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 			KEY_IMAGE_PREVIEW_LARGE,
 			KEY_MARKDOWN,
 			KEY_SHOW_LAST_REPLY,
-			KEY_PRESERVE_EMOJI,
-			"MediaDecorator.enabled"
+			KEY_PRESERVE_EMOJI
 	};
 
 	private static final String TAG = "RemotePreferenceStore";
@@ -53,6 +53,7 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 			editor.putBoolean(entry.getKey(), entry.getValue());
 		editor.remove("WeChatDecorator.miui_fix");
 		editor.remove(OBSOLETE_MIUI_KEY);
+		editor.remove(OBSOLETE_MEDIA_KEY);
 		editor.putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
 		editor.apply();
 	}
@@ -110,14 +111,16 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 			localEditor.putBoolean(entry.getKey(), entry.getValue());
 			remoteEditor.putBoolean(entry.getKey(), entry.getValue());
 		}
-		localEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
-		remoteEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
+		localEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).remove(OBSOLETE_MEDIA_KEY)
+				.putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
+		remoteEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).remove(OBSOLETE_MEDIA_KEY)
+				.putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
 		localEditor.apply();
 		remoteEditor.apply();
 	}
 
 	static void applySchemaMigration(Map<String, Boolean> values, int schemaVersion) {
-		if (schemaVersion < 1) values.put("MediaDecorator.enabled", false);
+		values.remove(OBSOLETE_MEDIA_KEY);
 		if (schemaVersion < 2) values.put(KEY_IMAGE_PREVIEW, false);
 		if (schemaVersion < 3) values.remove(OBSOLETE_MIUI_KEY);
 		if (schemaVersion < 4) values.put(KEY_IMAGE_PREVIEW_LARGE, false);

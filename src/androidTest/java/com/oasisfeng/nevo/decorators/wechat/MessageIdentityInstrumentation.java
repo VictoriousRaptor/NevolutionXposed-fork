@@ -47,7 +47,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             return;
         }
         com.oasisfeng.nevo.sdk.NevoDecoratorService.setAppContext(getTargetContext());
-        String[] names = { "personAndAttachmentRoundTrip", "staleTickerAndCarHistory", "unknownAndGroupNames",
+        String[] names = { "carExtensionWithoutConversation", "channelMigrationPreservesSettings",
+                "personAndAttachmentRoundTrip", "staleTickerAndCarHistory", "unknownAndGroupNames",
                 "replyThenIncoming", "repeatedRebuildAndPreview", "untrustedMissingSender", "reusedNotificationId",
                 "rawPersonOnlyNotification", "nativeMessagingSelf", "rawColonText", "undatedSnapshots",
                 "stablePeerAcrossTalkerAndAvatar", "twoRoundsAndReplay", "appReplyStartsFresh",
@@ -67,7 +68,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "markdownCodeStylesAndParcel", "markdownCodeSourceAndReply",
                 "markdownFrameworkCodeCleanup", "markdownRestorationScope", "markdownPartialCodeStyles",
                 "imagePreviewFitStartAndActions", "imagePreviewDiscardClearsLayout" };
-        Runnable[] tests = { this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
+        Runnable[] tests = { () -> NotificationCompatibilityInstrumentation.carExtensionWithoutConversation(getTargetContext()),
+                NotificationCompatibilityInstrumentation::channelMigrationPreservesSettings,
+                this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
                 this::replyThenIncoming, this::repeatedRebuildAndPreview, this::untrustedMissingSender, this::reusedNotificationId,
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
                 this::stablePeerAcrossTalkerAndAvatar, this::twoRoundsAndReplay, this::appReplyStartsFresh,

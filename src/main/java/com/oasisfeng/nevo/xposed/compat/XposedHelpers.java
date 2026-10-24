@@ -1,6 +1,5 @@
 package com.oasisfeng.nevo.xposed.compat;
 
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.HashMap;
@@ -64,37 +63,6 @@ public final class XposedHelpers {
 	public static Object findAndHookMethod(Class<?> clazz, String methodName, Object... parameterTypesAndCallback) {
 		ParsedHook parsed = parseHook(parameterTypesAndCallback);
 		return XposedBridge.hookMethod(findMethodExact(clazz, methodName, parsed.parameterTypes), parsed.callback);
-	}
-
-	public static Object callMethod(Object receiver, String methodName, Object... args) {
-		if (receiver == null) throw new NullPointerException("receiver");
-		Class<?>[] types = runtimeTypes(args);
-		Method method = findMethodBestMatch(receiver.getClass(), methodName, types);
-		try {
-			return method.invoke(receiver, args);
-		} catch (ReflectiveOperationException e) {
-			throw new IllegalStateException(e);
-		}
-	}
-
-	public static Object newInstance(Class<?> clazz, Object... args) {
-		Constructor<?> best = null;
-		int bestScore = Integer.MAX_VALUE;
-		Class<?>[] types = runtimeTypes(args);
-		for (Constructor<?> constructor : clazz.getDeclaredConstructors()) {
-			int score = score(constructor.getParameterTypes(), types);
-			if (score < bestScore) {
-				best = constructor;
-				bestScore = score;
-			}
-		}
-		if (best == null) throw new NoSuchMethodError(clazz.getName() + " constructor");
-		try {
-			best.setAccessible(true);
-			return best.newInstance(args);
-		} catch (ReflectiveOperationException e) {
-			throw new IllegalStateException(e);
-		}
 	}
 
 	public static void setObjectField(Object receiver, String fieldName, Object value) {
@@ -169,12 +137,6 @@ public final class XposedHelpers {
 			}
 		}
 		return new ParsedHook(parameterTypes, callback);
-	}
-
-	private static Class<?>[] runtimeTypes(Object[] args) {
-		Class<?>[] types = new Class<?>[args.length];
-		for (int i = 0; i < args.length; i++) types[i] = args[i] == null ? null : args[i].getClass();
-		return types;
 	}
 
 	private static int score(Class<?>[] declared, Class<?>[] requested) {

@@ -26,9 +26,16 @@ After the build job passes, master pushes and manual master runs build and verif
 and publish it with SHA256SUMS.txt. Tags use v<versionName>-build.<run number> so multiple
 master updates at the same app version have distinct releases. Reruns preserve
 an already published release. For reference, v3.2.0 used Android versionCode 13; the current app
-version is 3.3.1 with versionCode 16. Bump versionCode for the next app version. CI run numbers do not alter Android versionCode.
+version is 3.4.0 with versionCode 17. Version 3.3.1 used versionCode 16.
+Bump versionCode for the next app version. CI run numbers do not alter Android versionCode.
 
-Version 3.3.1 requests read handling as soon as a valid notification reply is
+Version 3.4.0 removes the standalone media-notification decorator and its setting,
+preserves native read actions in partial car-conversation bundles, copies channel
+sound/light/vibration settings during migration, and reuses stable WXGF conversion
+results in a bounded single-slot cache. See [3.4.0 notes](release-3.4.0.md) for
+validation scope and pending device checks.
+
+Since version 3.3.1, the module requests read handling as soon as a valid notification reply is
 submitted, independently of the send outcome. Failed dispatches do not add a
 successful reply to notification history. Notification dismissal directly uses
 WeChat's native read PendingIntent; local history removal continues through the
@@ -51,5 +58,5 @@ Fork secrets are not copied to the upstream repository when the PR is merged.
 
 GitHub Actions must be enabled in the fork. The release job requests contents:
 write for creating tags and releases; the build job has read-only permissions.
-The workflow uses JDK 17, Android 34, Build Tools 34.0.0 and the project's checked
+The workflow uses JDK 17, Android SDK Platform 37.0, Build Tools 36.0.0 and the project's checked
 Gradle distribution checksum. Hosted runners use the official Gradle URL.

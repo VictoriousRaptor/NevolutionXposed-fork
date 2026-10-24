@@ -49,7 +49,6 @@ public class MainHook extends XposedModule {
 	private android.content.SharedPreferences pref;
 	private String processName;
 	private final NevoDecoratorService wechat = new com.oasisfeng.nevo.decorators.wechat.WeChatDecorator();
-	private final NevoDecoratorService media = new com.oasisfeng.nevo.decorators.media.MediaDecorator();
 
 	private static Class<?> sMMAutoMessageReplyReceiverClass = null;
 	private static volatile com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved sReplyProfile = null;
@@ -164,15 +163,7 @@ public class MainHook extends XposedModule {
 	}
 
 	private void hookSystemUI(PackageHookContext loadPackageParam) {
-		final XC_MethodHook onNotificationPosted = new XC_MethodHook() { // 捕获通知到达
-			@Override
-			protected void beforeHookedMethod(MethodHookParam param) {
-				StatusBarNotification sbn = (StatusBarNotification)param.args[0];
-				// RankingMap rankingMap = (RankingMap)param.args[1];
-				if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationPosted");
-				onNotificationPosted(sbn);
-			}
-		}, onNotificationRemoved = new XC_MethodHook() { // 捕获通知移除
+		final XC_MethodHook onNotificationRemoved = new XC_MethodHook() { // 捕获通知移除
 			@Override
 			protected void beforeHookedMethod(MethodHookParam param) {
 				StatusBarNotification sbn = (StatusBarNotification)param.args[0];
@@ -190,7 +181,7 @@ public class MainHook extends XposedModule {
 					reason = 0;
 				}
 				if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationRemoved");
-				onNotificationRemoved(sbn, reason);
+				notifyWeChatRoundRemoved(sbn, reason);
 			}
 		}, nls = new XC_MethodHook() { // 捕获NotificationListenerService的具体实现
 			@Override
@@ -201,9 +192,7 @@ public class MainHook extends XposedModule {
 				try {
 					final Class<?> clazz = nls.getClass();
 					if (BuildConfig.DEBUG) Log.d(TAG, "NL clazz: " + clazz + " " + loadPackageParam.packageName);
-					Method method = XposedHelpers.findMethodExact(clazz, "onNotificationPosted", 
-							StatusBarNotification.class, RankingMap.class);
-					XposedBridge.hookMethod(method, onNotificationPosted);
+					Method method;
 					// Try Android 16+ signature first, then fall back to older signature
 					try {
 						method = XposedHelpers.findMethodBestMatch(clazz, "onNotificationRemoved", StatusBarNotification.class, RankingMap.class,
@@ -242,52 +231,11 @@ public class MainHook extends XposedModule {
 					Context context = (Context)param.getResult();
 					if (ref.compareAndSet(null, context)) {
 						if (BuildConfig.DEBUG) Log.d(TAG, "onCreate " + context);
-						onCreate(context);
+						NevoDecoratorService.setAppContext(context);
 					}
 				}
 			});
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log("ContextImpl hook failed"); }
-		try {
-			final SystemUIDecorator media = this.media.getSystemUIDecorator();
-			if (media instanceof HookSupport && isDecoratorEnabled("MediaDecorator"))
-				((HookSupport) media).hook(loadPackageParam);
-		} catch (Throwable e) {
-			XposedBridge.rethrowFrameworkError(e);
-			XposedBridge.log(this.media + " hook failed: " + e.getMessage());
-		}
-	}
-
-	/**
-	 * SystemUI hooks are installed before {@code onCreate(pref)} runs, so the remote setting is
-	 * read directly instead of relying on the decorator's flag; unknown state means "disabled".
-	 */
-	private boolean isDecoratorEnabled(String prefKey) {
-		final android.content.SharedPreferences preferences = pref;
-		return preferences != null && preferences.getBoolean(prefKey + ".enabled", false);
-	}
-	
-	private void onCreate(Context context) {
-		NevoDecoratorService.setAppContext(context);
-
-		final SystemUIDecorator media = this.media.getSystemUIDecorator();
-		media.onCreate(pref);
-	}
-
-	private void onNotificationPosted(StatusBarNotification sbn) {
-		if (XposedHelpers.getAdditionalInstanceField(sbn, "applied") != null) {
-			if (BuildConfig.DEBUG) Log.d(TAG, "skip " + sbn);
-			return;
-		}
-		XposedHelpers.setAdditionalInstanceField(sbn, "applied", true);
-
-		final SystemUIDecorator media = this.media.getSystemUIDecorator();
-		if (!media.isDisabled()) media.onNotificationPosted(sbn);
-	}
-
-	private void onNotificationRemoved(StatusBarNotification sbn, int reason) {
-		notifyWeChatRoundRemoved(sbn, reason);
-		final SystemUIDecorator media = this.media.getSystemUIDecorator();
-		if (!media.isDisabled()) media.onNotificationRemoved(sbn, reason);
 	}
 
 	// This runs in the SystemUI host process, whose manifest grants INTERACT_ACROSS_USERS_FULL.

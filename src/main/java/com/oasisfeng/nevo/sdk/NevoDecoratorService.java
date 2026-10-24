@@ -3,15 +3,12 @@ package com.oasisfeng.nevo.sdk;
 import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.Notification.Action;
-import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.service.notification.NotificationListenerService;
-import android.service.notification.StatusBarNotification;
 import android.util.Log;
-import android.widget.RemoteViews;
 
 import androidx.annotation.Keep;
 
@@ -26,14 +23,11 @@ import com.oasisfeng.nevo.xposed.BuildConfig;
 public abstract class NevoDecoratorService {
 	private static final int MAX_NUM_ARCHIVED = 20;
 
-	public static final String EXTRAS_BIG_CONTENT_VIEW_OVERRIDE = "nevo.bigContentView";
-	public static final String EXTRAS_CONTENT_VIEW_OVERRIDE = "nevo.contentView";
 	/** Valid constant values for {@link android.app.Notification#EXTRA_TEMPLATE} */
 	public static final String TEMPLATE_BIG_TEXT	= "android.app.Notification$BigTextStyle";
 	public static final String TEMPLATE_BIG_PICTURE	= "android.app.Notification$BigPictureStyle";
 	public static final String TEMPLATE_CUSTOM		= "android.app.Notification$DecoratedCustomViewStyle";
 	public static final String TEMPLATE_INBOX		= "android.app.Notification$InboxStyle";
-	public static final String TEMPLATE_MEDIA		= "android.app.Notification$MediaStyle";
 	public static final String TEMPLATE_MESSAGING	= "android.app.Notification$MessagingStyle";
 
 	private static final String TAG = "NevoDecoratorService";
@@ -134,24 +128,6 @@ public abstract class NevoDecoratorService {
 			cache.replace(id, original, replacement);
 		}
 	
-		public static RemoteViews overrideBigContentView(Notification n, RemoteViews remoteViews) {
-			n.extras.putParcelable(EXTRAS_BIG_CONTENT_VIEW_OVERRIDE, remoteViews);
-			return remoteViews;
-		}
-	
-		public static RemoteViews overridedBigContentView(Notification n) {
-			return n.extras.getParcelable(EXTRAS_BIG_CONTENT_VIEW_OVERRIDE);
-		}
-	
-		public static RemoteViews overrideContentView(Notification n, RemoteViews remoteViews) {
-			n.extras.putParcelable(EXTRAS_CONTENT_VIEW_OVERRIDE, remoteViews);
-			return remoteViews;
-		}
-	
-		public static RemoteViews overridedContentView(Notification n) {
-			return (RemoteViews)n.extras.getParcelable(EXTRAS_CONTENT_VIEW_OVERRIDE);
-		}
-	
 		public static void setChannelId(Notification n, String channelId) {
 			XposedHelpers.setObjectField(n, "mChannelId", channelId);
 		}
@@ -204,7 +180,7 @@ public abstract class NevoDecoratorService {
 	}
 
 	/**
-	 * 在系统UI（SystemUI）中执行的通知处理。
+	 * SystemUI listener access retained for in-process diagnostics.
 	 */
 	public static class SystemUIDecorator {
 		// Retained for in-process diagnostics and manual notification cancellation.
@@ -218,29 +194,6 @@ public abstract class NevoDecoratorService {
 			return mNLS.get();
 		}
 	
-		protected final String prefKey;
-		private boolean disabled;
-
-		protected SystemUIDecorator(String prefKey) { this.prefKey = prefKey; }
-
-		public boolean isDisabled() { return disabled; }
-		public void setDisabled(boolean disabled) { this.disabled = disabled; }
-	
-		@Keep public void onCreate(SharedPreferences pref) {
-			this.disabled = !pref.getBoolean(prefKey  + ".enabled", true);
-			if (BuildConfig.DEBUG) Log.d(TAG, prefKey + ".disabled " + this.disabled);
-		}
-	
-		@Keep public void onDestroy() {}
-	
-		@Keep public Decorating onNotificationPosted(final StatusBarNotification sbn) {
-			if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationPosted(" + sbn + ")");
-			return Decorating.Unprocessed;
-		}
-		@Keep public void onNotificationRemoved(final StatusBarNotification evolving, final int reason) {
-			if (BuildConfig.DEBUG) Log.d(TAG, "onNotificationRemoved(" + evolving + ", " + reason + ")");
-		}
-
 		protected final void cancelNotification(String key) {
 			if (BuildConfig.DEBUG) Log.d(TAG, "cancelNotification " + key);
 			final NotificationListenerService listener = getNLS();
@@ -260,11 +213,5 @@ public abstract class NevoDecoratorService {
 	@Keep public final LocalDecorator getLocalDecorator(String packageName) {
 		if (localDecorator == null) localDecorator = createLocalDecorator(packageName); // 不同package在不同进程，无需映射packageName
 		return localDecorator;
-	}
-	private SystemUIDecorator systemUIDecorator;
-	@Keep public SystemUIDecorator createSystemUIDecorator() { return null; }
-	@Keep public final SystemUIDecorator getSystemUIDecorator() {
-		if (systemUIDecorator == null) systemUIDecorator = createSystemUIDecorator();
-		return systemUIDecorator;
 	}
 }

@@ -1,13 +1,12 @@
 <resources>
 	<string name="app_name">NevolutionXposed</string>
-	<string name="xposed_description">Enhances WeChat and media notifications with modern libxposed API 102.</string>
+	<string name="xposed_description">Enhances WeChat notifications with modern libxposed API 102.</string>
 
 	<string name="settings_title">NevolutionXposed settings</string>
 	<string name="wechat_image_preview_description">Received image preview</string>
 	<string name="settings_core_category">Core feature</string>
-	<string name="settings_optional_category">Optional enhancements</string>
 	<string name="settings_apply_title">Applying changes</string>
-	<string name="settings_restart_summary">Restart the affected target process after changing a setting. WeChat enhancement is enabled by default; optional system-wide enhancements are disabled by default.</string>
+	<string name="settings_restart_summary">Restart the affected target process after changing a setting. WeChat enhancement is enabled by default.</string>
 
 	<!-- decorators-misc -->
 
@@ -54,7 +53,5 @@
 
 	<!-- decorator-media -->
 
-	<string name="decorator_media_title">Media</string>
-	<string name="decorator_media_description">Make media-notification greate(Android-O style) again.</string>
 
 </resources>

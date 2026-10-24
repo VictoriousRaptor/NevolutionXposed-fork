@@ -44,6 +44,7 @@ final class ImagePreviewLoader {
 	private final Handler main = new Handler(Looper.getMainLooper());
 	private final WeChatImageEvents events;
 	private final WeChatImageDownloader largePreview = new WeChatImageDownloader();
+	private final CandidateCache wxgfCache = new CandidateCache();
 	private final ScheduledThreadPoolExecutor worker = new ScheduledThreadPoolExecutor(1, runnable -> {
 		Thread thread = new Thread(runnable, "NX-image-preview");
 		thread.setDaemon(true);
@@ -80,6 +81,7 @@ final class ImagePreviewLoader {
 		String key = id + ":" + tag;
 		Request request = pending.remove(key);
 		if (request != null) {
+			wxgfCache.close(request.cacheOwner);
 			if (request.future != null) request.future.cancel(false);
 			largePreview.cancel(request.token);
 		}
@@ -93,6 +95,7 @@ final class ImagePreviewLoader {
 		for (Request request : pending.values()) {
 			if (!request.key.startsWith(prefix) || request.notificationToken == 0 || request.notificationToken > readToken) continue;
 			if (pending.remove(request.key, request)) {
+				wxgfCache.close(request.cacheOwner);
 				if (request.future != null) request.future.cancel(false);
 				largePreview.cancel(request.token);
 				probes.remove(request.token);
@@ -145,6 +148,7 @@ final class ImagePreviewLoader {
 				request.messages, messageIdentity(messages), imageCount(messages));
 		if (!safe) {
 			pending.remove(key, request);
+			wxgfCache.close(request.cacheOwner);
 			if (request.future != null) request.future.cancel(false);
 			previews.remove(key);
 			log("continuity_rejected", "request=" + request.token + " activeToken="
@@ -201,8 +205,11 @@ final class ImagePreviewLoader {
 		}
 		if (pending.size() >= 8 && !pending.containsKey(key)) { log("fallback", "reason=request_limit"); return; }
 		if (worker.getQueue().size() >= 16) { log("fallback", "reason=queue_limit"); return; }
-		if (old != null && old.future != null) old.future.cancel(false);
-		if (old != null) largePreview.cancel(old.token);
+		if (old != null) {
+			wxgfCache.close(old.cacheOwner);
+			if (old.future != null) old.future.cancel(false);
+			largePreview.cancel(old.token);
+		}
 		previews.remove(key);
 		Request request = new Request(key, talker, n, messageIdentity(messages));
 		pending.put(key, request);
@@ -213,6 +220,7 @@ final class ImagePreviewLoader {
 			request.future = worker.schedule(() -> resolve(context, manager, tag, id, request), 0, TimeUnit.MILLISECONDS);
 		} catch (RejectedExecutionException overloaded) {
 			pending.remove(key, request);
+			wxgfCache.close(request.cacheOwner);
 			log("fallback", "request=" + request.token + " reason=queue_full");
 		}
 	}
@@ -275,6 +283,7 @@ final class ImagePreviewLoader {
 				}
 			}
 			Candidate best = scan.best;
+			wxgfCache.retain(request.cacheOwner, best);
 			int valid = scan.valid;
 			if (!request.diagnosed) {
 				request.diagnosed = true;
@@ -292,6 +301,7 @@ final class ImagePreviewLoader {
 						+ " fileChanged=" + (best.file.length() != best.size || best.file.lastModified() != best.modified));
 				retryOrFinish(context, manager, tag, id, request, "decode_or_file_changed"); return;
 			}
+			wxgfCache.close(request.cacheOwner);
 			request.publishing = true;
 			claimed.put(event.key, request.token);
 			while (claimed.size() > 64) claimed.remove(claimed.keySet().iterator().next());
@@ -333,21 +343,28 @@ final class ImagePreviewLoader {
 				if (BuildConfig.DEBUG) candidateLog(request, path, "reason=file_unavailable " + fileState);
 				continue;
 			}
-			BitmapFactory.Options options = bounds(file);
-			byte[] decodedBytes = null;
-			if (largePreviewEnabled && (options.outWidth <= 0 || options.outHeight <= 0)) {
-				decodedBytes = largePreview.decodeWxgf(file, size, modified);
-				if (decodedBytes != null) options = bounds(decodedBytes);
-			}
-			if (BuildConfig.DEBUG) candidateLog(request, path, fileState + " source=" + options.outWidth + "x" + options.outHeight
-					+ " mime=" + options.outMimeType + " wxgf=" + (decodedBytes != null));
-			if (options.outWidth <= 0 || options.outHeight <= 0 || options.outMimeType == null
-					|| !options.outMimeType.startsWith("image/")) continue;
-			scan.valid++;
-			if (scan.best == null || ImagePreviewPolicy.isBetter(options.outWidth, options.outHeight, path.quality,
-					scan.best.width, scan.best.height, scan.best.quality, target.width, target.height))
-				scan.best = new Candidate(file, size, modified, options.outWidth, options.outHeight, options.outMimeType,
+			Candidate candidate = wxgfCache.get(request.cacheOwner, file, size, modified);
+			if (candidate == null) {
+				BitmapFactory.Options options = bounds(file);
+				byte[] decodedBytes = null;
+				if (largePreviewEnabled && (options.outWidth <= 0 || options.outHeight <= 0)) {
+					decodedBytes = largePreview.decodeWxgf(file, size, modified);
+					if (decodedBytes != null) options = bounds(decodedBytes);
+				}
+				if (BuildConfig.DEBUG) candidateLog(request, path, fileState + " source=" + options.outWidth + "x" + options.outHeight
+						+ " mime=" + options.outMimeType + " wxgf=" + (decodedBytes != null));
+				if (options.outWidth <= 0 || options.outHeight <= 0 || options.outMimeType == null
+						|| !options.outMimeType.startsWith("image/")) continue;
+				candidate = new Candidate(file, size, modified, options.outWidth, options.outHeight, options.outMimeType,
 						path.quality, decodedBytes);
+			} else if (candidate.quality != path.quality) {
+				candidate = new Candidate(file, size, modified, candidate.width, candidate.height, candidate.mime,
+						path.quality, candidate.decodedBytes);
+			}
+			scan.valid++;
+			if (scan.best == null || ImagePreviewPolicy.isBetter(candidate.width, candidate.height, path.quality,
+					scan.best.width, scan.best.height, scan.best.quality, target.width, target.height))
+				scan.best = candidate;
 		}
 		return scan;
 	}
@@ -440,6 +457,7 @@ final class ImagePreviewLoader {
 
 	private void finish(Request request, String reason) {
 		pending.remove(request.key, request);
+		wxgfCache.close(request.cacheOwner);
 		largePreview.cancel(request.token);
 		log("fallback", "request=" + request.token + " reason=" + reason + " scans=0");
 	}
@@ -533,6 +551,7 @@ final class ImagePreviewLoader {
 			log("publish_failed", "request=" + request.token + " type=" + failure.getClass().getSimpleName());
 		} finally {
 			pending.remove(request.key, request);
+			wxgfCache.close(request.cacheOwner);
 			largePreview.cancel(request.token);
 		}
 	}
@@ -589,7 +608,7 @@ final class ImagePreviewLoader {
 		}
 	}
 
-	private static final class Candidate {
+	static final class Candidate {
 		final File file;
 		final long size, modified;
 		final int width, height;
@@ -601,6 +620,42 @@ final class ImagePreviewLoader {
 			this.file = file; this.size = size; this.modified = modified;
 			this.width = width; this.height = height; this.mime = mime; this.quality = quality;
 			this.decodedBytes = decodedBytes;
+		}
+	}
+
+	/** One converted candidate across all requests; JNI work always runs outside this lock. */
+	static final class CandidateCache {
+		static final class Owner { private boolean closed; }
+		private Owner owner;
+		private Candidate candidate;
+
+		synchronized Candidate get(Owner request, File file, long size, long modified) {
+			if (request.closed || owner != request || candidate == null || !candidate.file.equals(file)) return null;
+			if (candidate.size == size && candidate.modified == modified) return candidate;
+			candidate = null;
+			owner = null;
+			return null;
+		}
+
+		synchronized void retain(Owner request, Candidate best) {
+			if (request.closed) return;
+			if (best != null && best.decodedBytes != null && best.decodedBytes.length > 0
+					&& best.decodedBytes.length <= MAX_SOURCE_BYTES && best.size > 0 && best.size <= MAX_SOURCE_BYTES
+					&& best.file.length() == best.size && best.file.lastModified() == best.modified) {
+				owner = request;
+				candidate = best;
+			} else if (owner == request) {
+				owner = null;
+				candidate = null;
+			}
+		}
+
+		synchronized void close(Owner request) {
+			request.closed = true;
+			if (owner == request) {
+				owner = null;
+				candidate = null;
+			}
 		}
 	}
 
@@ -624,6 +679,7 @@ final class ImagePreviewLoader {
 	}
 
 	private static final class Request {
+		final CandidateCache.Owner cacheOwner = new CandidateCache.Owner();
 		final List<String> messages;
 		volatile String eventKey;
 		List<ImageEventIndex.Path> probePaths;

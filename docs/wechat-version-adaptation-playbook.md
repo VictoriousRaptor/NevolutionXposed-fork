@@ -4,6 +4,21 @@
 
 配合脚本：`tools/collect-device-info.ps1`（只读取设备与 APK，不在手机上做任何修改）。
 
+## 2026-10-24 上游遗留实现清理（3.4.0 / code 17）
+
+本轮变更汇入模块 3.4.0，Android `versionCode` 从 16 递增为 17，设置 schema 为 8。[版本说明](release-3.4.0.md)汇总变更与验证边界；以下旧版本构建记录保留原版本与产物身份。
+
+- 移除独立媒体通知样式增强及其开关、布局、取色和 Palette 依赖。SystemUI 不再 hook `Method.isAnnotationPresent(Class)`、`Method.getAnnotation(Class)`，也不再为媒体装饰安装监听器的 `onNotificationPosted(StatusBarNotification, RankingMap): void` BEFORE 回调。设置 schema 升为 8，本地和远端均清除旧媒体键，不再同步或恢复该选择。微信图片/视频/文件/表情消息的原生布局、回复动作与相关测试继续保留。
+- SystemUI 作用域保留。`NotificationListenerService` 所有已声明构造函数 AFTER、NLS 弱引用及 `setNLS/getNLS/cancelNotification` 诊断入口继续保留；实际监听器的 removed BEFORE hook（既有四参数优先及三参数回退）、移除原因提取和显式轮次广播不变。`ContextImpl.createAppContext` AFTER 仍仅捕获首个上下文供移除广播使用。Markdown hook 的签名、开关和失败回退不变；旧记录中的 posted/媒体分发说明仅代表当时状态。
+- 读取 CarExtender 原生 `on_read` 前先检查扩展及会话 bundle；没有会话时保留原 `deleteIntent`，不再因仅含颜色/图标的扩展抛空指针。即使 participants/messages 不完整，也继续接受会话中已有的原生删除动作，避免把完整会话解析的门槛扩大到划除已读。回复目标继续使用平台 `getUnreadConversation()` 的完整解析，原生回复、合成回复和移除后的本地历史清理仍各自沿用既有条件。
+- 仅在旧渠道向新渠道迁移时，原样复制声音（包括静音 `null`）、灯光开关和振动开关。API 35+ 的非空振动 effect 原样复制，其余沿用 pattern；复制后恢复显式振动开关，避免存留 pattern 意外重新启用振动。不创建新版本门禁或修改现有渠道 ID。
+- WXGF 扫描仅缓存最终最佳转换候选，整个加载器最多保留一份、20 MiB。命中须同时匹配请求身份及当前候选的绝对路径、大小和修改时间；候选仍须在本轮路径列表中，质量取本轮来源值。文件变化、普通图片胜出或候选消失会失效。JNI 转换在锁外；取消、替换、失败、完成解码及发布结束均关闭对应缓存写入，迟到结果不能复活；旧请求清理不能误清新请求缓存。1.5 秒等待、输入文件/像素预算、最终文件变化检查、通知 token 及发布校验不变。Debug 继续使用匿名 candidate/retry 日志，不增加文件路径或消息内容日志。
+- 微信回复、图片、应用内回复和撤回画像的版本名/版本号匹配语义、完整签名校验与未知版本关闭行为均不变。已有本地下载器 ID 改动按用户要求保留，并同步主机测试；本轮没有重新判断该改动的微信运行时语义。自己的头像仅登记[未确定待办](project-modification-plan.md#8-自己的头像来源核实待办未确定)，读取和缓存代码不改。
+
+回归覆盖：设置升级移除旧键且保留微信选项；无车载会话仍保留原删除动作，不完整会话仍使用已有原生 `on_read`；静音、默认振动、关闭但保留 pattern、灯光和 API 35+ effect 的渠道复制；稳定 WXGF 跨轮复用、元数据变化失效、单槽替换、旧请求清理隔离及取消后的迟到转换。Android framework 回归仅编译不代表已执行；本轮未授权安装、重启或真实微信验收，不复用历史设备结果作为本轮证据。
+
+版本升级前（3.3.1 / code 16）的本地验证：167 项主机单元测试全部通过，失败/错误/跳过均为 0；使用 `-PrequireReleaseSigning=true` 离线构建 Debug 和 androidTest APK，两包签名均与当前 release 密钥证书一致，签名及 zipalign 校验通过。应用源码 Lint 为 0 errors / 31 warnings，明确排除 `lintAnalyzeDebugAndroidTest`、`lintAnalyzeDebugUnitTest`，不声称测试源码 Lint 已完成。实际 Debug APK 的 DEX/资源中未检出独立媒体实现、Palette 类和专用布局。新增两个 framework 回归入口仅编译，没有安装、运行仪器测试或验证微信运行时；WXGF 主机测试验证缓存契约，不是实际 JNI 次数或耗时测量。本地证据及 APK 保存在忽略目录 `.debug-artifacts/remove-media-review-20261024/`。3.4.0 的重新构建结果单独记录于版本说明。
+
 ## 1. 适用场景与决策原则
 
 触发条件（满足任一即开始适配）：
@@ -118,6 +133,8 @@ ART 内联处理：安装 hook 前通过 libxposed API 102 的 `deoptimize(Execu
 2026-10-13 验收分层：134 项主机测试、签名构建及 Release lint 通过；PJZ110 Android 16 上 46/46 framework 仪器用例实际通过，包含新增三项清理恢复回归。用户手动重启系统界面后确认界面生效，测试 APK 已卸载，保留修复版。当前日志缓冲区没有保留专用 ready/restored 记录，未额外确认两个进程的 hook 调用现场；所有通知形态、明暗主题、真实回复投递和其他 OEM 尚未逐项验收。源码、设备测试、用户界面确认与缺失的日志证据分别记录于[专题文档](wechat-notification-markdown.md)。
 
 ### 3.2 图片事件（8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.79/3182）
+
+2026-10-24 当前工作区说明：按用户要求保留本轮开始前已有的下载器改动，SQL 不再读取 `msglocalid`，`MsgIdTalker` 与下载方法首参都使用选中基础行的 `id`，对应主机测试已同步。下述 2026-10-23 记录保留原始离线推断和验收边界，不代表当前 ID 取值；本轮没有重新核实这些 ID 在各微信版本运行时的含义或真实下载行为。
 
 2026-10-23 普通大图下载身份修复：固定 SQL 增加读取 `ImgInfo2.msglocalid`，与图片行 `id` 分开保存。下载接口 `b(long, MsgIdTalker, int, Object, int, <版本回调接口>, int, boolean): int` 的首参仍为选中基础行的图片 `id`，`com.tencent.mm.plugin.msg.MsgIdTalker(long, String)` 则使用 `msglocalid` 和该行的 `msgTalker`；不使用服务端 ID 或 `reserved1` 代替消息本地 ID。缺少列时查询失败并回退，`msglocalid <= 0` 时不提交下载，但仍可读取该基础行已有的本地图片。仍只在微信主进程、图片总开关及大图开关启用后请求；四组版本名与版本码必须同时匹配，完整运行时方法/返回类型校验及 hook 时机保持原有规则，回复、应用内回复和撤回门禁各自独立。
 

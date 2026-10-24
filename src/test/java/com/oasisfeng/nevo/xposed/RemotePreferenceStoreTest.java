@@ -34,10 +34,10 @@ public class RemotePreferenceStoreTest {
 	}
 
 	@Test public void remoteValueIsKeptWhenLocalValueIsMissing() {
-		Map<String, Boolean> remote = Collections.singletonMap("MediaDecorator.enabled", false);
+		Map<String, Boolean> remote = Collections.singletonMap(RemotePreferenceStore.KEY_IMAGE_PREVIEW, true);
 
-		assertEquals(Boolean.FALSE,
-				RemotePreferenceStore.merge(Collections.emptyMap(), remote).get("MediaDecorator.enabled"));
+		assertEquals(Boolean.TRUE,
+				RemotePreferenceStore.merge(Collections.emptyMap(), remote).get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
 	}
 
 	@Test public void missingValuesUseSafeFeatureDefaults() {
@@ -48,7 +48,6 @@ public class RemotePreferenceStoreTest {
 		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
 		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW_LARGE));
 		assertEquals(Boolean.FALSE, merged.get(RemotePreferenceStore.KEY_MARKDOWN));
-		assertEquals(Boolean.FALSE, merged.get("MediaDecorator.enabled"));
 		assertFalse(merged.containsKey("MIUIDecorator.enabled"));
 	}
 
@@ -75,37 +74,39 @@ public class RemotePreferenceStoreTest {
 		Map<String, Boolean> values = new LinkedHashMap<>();
 		values.put("WeChatDecorator.enabled", false);
 		values.put("MIUIDecorator.enabled", true);
-		values.put("MediaDecorator.enabled", true);
 
 		RemotePreferenceStore.applySchemaMigration(values, 0);
 
 		assertEquals(Boolean.FALSE, values.get("WeChatDecorator.enabled"));
-		assertEquals(Boolean.FALSE, values.get("MediaDecorator.enabled"));
 		assertNull(values.get("MIUIDecorator.enabled"));	// The MIUI decorator was removed.
 	}
 
 	@Test public void currentSchemaKeepsExplicitUserChoices() {
 		Map<String, Boolean> values = new LinkedHashMap<>();
 		values.put("WeChatDecorator.enabled", false);
-		values.put("MediaDecorator.enabled", true);
+		values.put(RemotePreferenceStore.KEY_IMAGE_PREVIEW, true);
 
 		RemotePreferenceStore.applySchemaMigration(values, RemotePreferenceStore.CURRENT_SCHEMA_VERSION);
 
 		assertEquals(Boolean.FALSE, values.get("WeChatDecorator.enabled"));
-		assertEquals(Boolean.TRUE, values.get("MediaDecorator.enabled"));
+		assertEquals(Boolean.TRUE, values.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW));
 	}
 
-	@Test public void schemaThreeUpgradeKeepsMediaChoice() {
+	@Test public void schemaThreeUpgradeKeepsImagePreviewChoice() {
 		Map<String, Boolean> stored = new LinkedHashMap<>();
 		stored.put("WeChatDecorator.enabled", false);
 		stored.put("WeChatDecorator.image_preview", true);
-		stored.put("MediaDecorator.enabled", true);
 		Map<String, Boolean> values = RemotePreferenceStore.migratedLocalValues(stored, 3);
 
 		assertEquals(Boolean.FALSE, values.get("WeChatDecorator.enabled"));
 		assertEquals(Boolean.TRUE, values.get("WeChatDecorator.image_preview"));
-		assertEquals(Boolean.TRUE, values.get("MediaDecorator.enabled"));
 		assertEquals(Boolean.FALSE, values.get(RemotePreferenceStore.KEY_IMAGE_PREVIEW_LARGE));
+	}
+
+	@Test public void removedPreferenceIsDiscardedDuringUpgradeAndSync() {
+		Map<String, Boolean> stored = Collections.singletonMap("MediaDecorator.enabled", true);
+		assertFalse(RemotePreferenceStore.migratedLocalValues(stored, 7).containsKey("MediaDecorator.enabled"));
+		assertFalse(RemotePreferenceStore.merge(Collections.emptyMap(), stored).containsKey("MediaDecorator.enabled"));
 	}
 
 	@Test public void mergeReturnsOnlyKnownKeysInStableOrder() {
