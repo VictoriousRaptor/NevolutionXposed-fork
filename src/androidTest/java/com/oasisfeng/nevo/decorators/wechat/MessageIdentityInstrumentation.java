@@ -55,7 +55,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "appReplyKeepsLaterNotificationReply", "groupRound", "roundPreviewAndUndated",
                 "removedRoundStartsFresh", "lastReplyDisplayChoice", "lateReadPreservesNewMessages", "dismissUsesNativeRead",
                 "replyControllerConsecutiveGroup", "replyControllerLateCallback", "replyControllerAppReplyInterleaving", "replyControllerRemovedTarget",
-                "replyControllerWithoutActiveNotification",
+                "replyControllerWithoutActiveNotification", "replyControllerRetainsPeerUntilNext",
                 "replyReadWithoutSend", "nativeReplyReadBeforeFailure", "syntheticReplyReadBeforeFailure", "nativeReplyDoesNotReuseReadTarget",
                 "classifiesRawFirstMessages", "classificationSurvivesNextMessage", "lateTalkerIsIsolated",
                 "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyInputsUseLocalizedReplyLabel",
@@ -77,7 +77,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 this::appReplyKeepsLaterNotificationReply, this::groupRound, this::roundPreviewAndUndated,
                 this::removedRoundStartsFresh, this::lastReplyDisplayChoice, this::lateReadPreservesNewMessages, this::dismissUsesNativeRead,
                 this::replyControllerConsecutiveGroup, this::replyControllerLateCallback, this::replyControllerAppReplyInterleaving, this::replyControllerRemovedTarget,
-                this::replyControllerWithoutActiveNotification,
+                this::replyControllerWithoutActiveNotification, this::replyControllerRetainsPeerUntilNext,
                 this::replyReadWithoutSend,
                 () -> ReplyReadInstrumentation.nativeReplyReadBeforeFailure(getTargetContext()),
                 () -> ReplyReadInstrumentation.syntheticReplyReadBeforeFailure(getTargetContext()),
@@ -537,7 +537,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 fixture.controller.onReplySent(fixture.id, first, "B1", 110, "controller-B1");
                 MessagingBuilder.ReplyTarget second = parallel ? first : fixture.read();
                 fixture.controller.onReplySent(fixture.id, second, "B2", 120, "controller-B2");
-                fixture.texts("B1", "B2");
+                fixture.texts("A", "B1", "B2");
                 fixture.incoming("C", 200);
                 fixture.texts(show ? new String[]{"B1", "B2", "C"} : new String[]{"C"});
                 fixture.controller.onReplySent(fixture.id, first, "B1", 110, "controller-B1");
@@ -618,7 +618,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 check(fixture.latest() != null, "successful reply lost without an active notification");
                 fixture.controller.onReplySent(fixture.id, target, "B2", 120, "inactive-B2");
                 if (!peerBeforeCallback) {
-                    fixture.texts("B1", "B2");
+                    fixture.texts("A", "B1", "B2");
                     fixture.incoming("C", 200);
                 }
                 fixture.texts(show ? new String[]{"B1", "B2", "C"} : new String[]{"C"});
@@ -637,7 +637,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 fixture.incoming("A", 100);
                 if (priorReply) fixture.controller.onReplySent(fixture.id, fixture.read(), "B1", 110, "prior-success");
                 fixture.read();
-                fixture.texts(priorReply ? new String[]{"B1"} : new String[0]);
+                fixture.texts(priorReply ? new String[]{"A", "B1"} : new String[]{"A"});
                 fixture.incoming("C", 200);
                 fixture.texts(priorReply && show ? new String[]{"B1", "C"} : new String[]{"C"});
             }
@@ -650,6 +650,36 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             fixture.texts("C");
             fixture.incoming("D", 300);
             fixture.texts("C", "D");
+        }
+    }
+
+    private void replyControllerRetainsPeerUntilNext() {
+        for (boolean show : new boolean[]{false, true}) {
+            try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
+                fixture.incoming("A", 100);
+                MessagingBuilder.ReplyTarget target = fixture.read();
+                fixture.texts("A");
+                fixture.latest().extras = parcel(fixture.latest().extras);
+                fixture.controller.onReplySent(fixture.id, target, "B", 110, "retained-B");
+                fixture.texts("A", "B");
+                fixture.latest().extras = parcel(fixture.latest().extras);
+                fixture.incoming("C", 200);
+                fixture.texts(show ? new String[]{"B", "C"} : new String[]{"C"});
+                check(fixture.latest().extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                        "new peer left an answered reply in input history");
+                fixture.incoming("D", 300);
+                fixture.texts(show ? new String[]{"B", "C", "D"} : new String[]{"C", "D"});
+                fixture.controller.onReplySent(fixture.id, fixture.read(), "E", 310, "retained-E");
+                fixture.incoming("F", 400);
+                fixture.texts(show ? new String[]{"E", "F"} : new String[]{"F"});
+            }
+            try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
+                fixture.incoming("A", 100);
+                fixture.read();
+                fixture.texts("A");
+                fixture.incoming("C", 200);
+                fixture.texts("C");
+            }
         }
     }
 

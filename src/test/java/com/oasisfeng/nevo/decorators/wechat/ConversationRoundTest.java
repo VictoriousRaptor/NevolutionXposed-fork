@@ -5,6 +5,19 @@ import static org.junit.Assert.*;
 
 public class ConversationRoundTest {
 
+    @Test public void replyReadWithoutSuccessfulSendWaitsForTheNextPeer() {
+        ConversationRound round = new ConversationRound();
+        round.incoming(100); round.replyReadToken = 10;
+        assertTrue(round.retain(false, null, 100, 0, false));
+        for (long time : new long[]{0, 90, 100}) assertFalse(round.incoming(time));
+        assertEquals(10, round.replyReadToken);
+        assertTrue(round.incoming(200));
+        assertEquals(0, round.replyReadToken);
+        assertTrue(round.pendingReplies.isEmpty());
+        assertFalse(round.retain(false, null, 100, 0, false));
+        assertTrue(round.retain(false, null, 200, round.cutoff, false));
+        assertFalse(round.incoming(300));
+    }
     @Test public void lateReplyCallbackDoesNotMakeTheNextIncomingDeleteItsPeer() {
         ConversationRound round = new ConversationRound();
         round.incoming(100); round.incoming(200);

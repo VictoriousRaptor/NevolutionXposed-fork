@@ -7,6 +7,7 @@ import java.util.List;
 final class ConversationRound {
     long latestPeerTime;
     long cutoff;
+    long replyReadToken;
     long lastAppReplyTime;
     long appReplyToken;
     boolean pendingAppReply;
@@ -77,9 +78,10 @@ final class ConversationRound {
 
     boolean incoming(long time) {
         if (time <= 0 || time <= latestPeerTime) return false;
-        boolean advanced = pendingAppReply || (!pendingReplies.isEmpty() && latestPeerTime > 0);
+        boolean advanced = pendingAppReply || replyReadToken != 0 || (!pendingReplies.isEmpty() && latestPeerTime > 0);
         if (advanced) {
             cutoff = Math.max(1, latestPeerTime);
+            replyReadToken = 0;
             activeReplies.clear();
             discardAppReplyPrefix();
             activeReplies.addAll(pendingReplies);
