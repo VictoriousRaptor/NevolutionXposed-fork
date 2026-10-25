@@ -2,14 +2,15 @@ package com.oasisfeng.nevo.decorators.wechat;
 
 import android.app.PendingIntent;
 import android.text.TextUtils;
-import android.util.ArrayMap;
-import android.util.SparseArray;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.IntPredicate;
 
 import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
@@ -24,6 +25,11 @@ import static java.util.Objects.requireNonNull;
  * Created by Oasis on 2019-4-11.
  */
 class ConversationManager {
+	private static final int MAX_CONVERSATIONS = 256;
+	private final IntPredicate isArchived;
+
+	ConversationManager() { this(id -> false); }
+	ConversationManager(IntPredicate isArchived) { this.isArchived = isArchived; }
 
 	static class Conversation {
 
@@ -79,12 +85,19 @@ class ConversationManager {
 		Conversation(final int id) { this.id = id; }
 
 		@ConversationType private int mType;
-		private final Map<String, Person> mParticipants = new ArrayMap<>();
+		private final Map<String, Person> mParticipants = new HashMap<>();
 	}
 
 	synchronized Conversation getConversation(final int id) {
 		Conversation conversation = mConversations.get(id);
 		if (conversation == null) mConversations.put(id, conversation = new Conversation(id));
+		if (mConversations.size() > MAX_CONVERSATIONS) {
+			java.util.Iterator<Integer> oldest = mConversations.keySet().iterator();
+			while (mConversations.size() > MAX_CONVERSATIONS && oldest.hasNext()) {
+				int candidate = oldest.next();
+				if (candidate != id && !isArchived.test(candidate)) oldest.remove();
+			}
+		}
 		return conversation;
 	}
 
@@ -98,8 +111,8 @@ class ConversationManager {
 	synchronized List<Integer> idsForTalker(final String talker) {
 		List<Integer> ids = new ArrayList<>();
 		if (talker == null || talker.isEmpty()) return ids;
-		for (int i = 0; i < mConversations.size(); i++)
-			if (talker.equals(mConversations.valueAt(i).knownKey())) ids.add(mConversations.keyAt(i));
+		for (Conversation conversation : mConversations.values())
+			if (talker.equals(conversation.knownKey())) ids.add(conversation.id);
 		return ids;
 	}
 
@@ -137,5 +150,5 @@ class ConversationManager {
 		if (com.oasisfeng.nevo.xposed.BuildConfig.DEBUG) android.util.Log.d("WeChat.Identity", "source=talker_callback accepted=" + accepted);
 	}
 
-	private final SparseArray<Conversation> mConversations = new SparseArray<>();
+	private final LinkedHashMap<Integer, Conversation> mConversations = new LinkedHashMap<>(16, 0.75f, true);
 }

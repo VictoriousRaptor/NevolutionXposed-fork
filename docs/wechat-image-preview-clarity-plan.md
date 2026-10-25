@@ -1,5 +1,7 @@
 # 微信通知图片预览清晰度修复计划
 
+2026-10-24：下文为历史诊断过程。当前路径探针默认关闭，须 Debug 构建显式增加 `-PimageDiagnostics=true`，取消、替换和连续性拒绝时停止旧观察；Release 始终关闭。当前实现及验证边界见[实现总结](wechat-image-preview-implementation-summary.md)。
+
 日期：2026-09-14
 
 状态：2026-09-16 已进入普通大图主动获取阶段；实现总结和性能分析见 `docs/wechat-image-preview-implementation-summary.md`。最新源码 lint 已通过，完整回归场景仍未完成。

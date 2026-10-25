@@ -79,6 +79,7 @@ final class ImagePreviewLoader {
 	/** A recalled message must not leave a picture or allow its pending worker to publish again. */
 	synchronized void discard(String tag, int id, Notification notification) {
 		String key = id + ":" + tag;
+		probes.values().removeIf(probe -> probe.key.equals(key));
 		Request request = pending.remove(key);
 		if (request != null) {
 			wxgfCache.close(request.cacheOwner);
@@ -148,8 +149,10 @@ final class ImagePreviewLoader {
 				request.messages, messageIdentity(messages), imageCount(messages));
 		if (!safe) {
 			pending.remove(key, request);
+			probes.remove(request.token);
 			wxgfCache.close(request.cacheOwner);
 			if (request.future != null) request.future.cancel(false);
+			largePreview.cancel(request.token);
 			previews.remove(key);
 			log("continuity_rejected", "request=" + request.token + " activeToken="
 					+ (previous == null ? 0 : previous.extras.getLong(TOKEN)) + " images=" + imageCount(messages));
@@ -210,6 +213,7 @@ final class ImagePreviewLoader {
 			if (old.future != null) old.future.cancel(false);
 			largePreview.cancel(old.token);
 		}
+		probes.values().removeIf(probe -> probe.key.equals(key));
 		previews.remove(key);
 		Request request = new Request(key, talker, n, messageIdentity(messages));
 		pending.put(key, request);
@@ -370,8 +374,9 @@ final class ImagePreviewLoader {
 	}
 
 	/** Debug-only observation outlives preview resolution, but cannot publish or initiate downloads. */
-	private void startProbe(Request request) {
-		if (!BuildConfig.DEBUG || request.probeStarted) return;
+	private synchronized void startProbe(Request request) {
+		if (!BuildConfig.DEBUG || !BuildConfig.IMAGE_DIAGNOSTICS || request.probeStarted
+				|| pending.get(request.key) != request) return;
 		request.probeStarted = true;
 		if (probes.size() >= 8 || worker.getQueue().size() >= 16) return;
 		probes.put(request.token, request);

@@ -45,6 +45,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'wechat-profile-proposal.ps1')
 
 if (-not (Test-Path -LiteralPath $AdbPath)) { throw "adb not found: $AdbPath" }
 
@@ -295,20 +296,12 @@ if ($ProbeProfile) {
     } elseif (-not $gate -or -not $helper) {
         $report.Add('- proposal: NOT GENERATED (candidates are not unique or a descriptor failed validation)')
     } else {
-        $stamp = Get-Date -Format 'yyyy-MM-dd'
-        $constName = 'RELEASE_' + ($versionName -replace '\.', '_')
-        $label = "wechat-$versionName"
+        $generated = New-WeChatReplyProfileProposal -VersionName $versionName -VersionCode $versionCode `
+            -HelperClass $helper.Full -GateClass $gate.Full -GateMethods $gate.Methods
+        $constName = $generated.ConstantName
         $methodLiterals = (($gate.Methods | ForEach-Object { '"' + $_ + '"' }) -join ', ')
-        $constLines = @(
-            "`t/** Verified against WeChat $versionName/$versionCode on $stamp. */",
-            "`tprivate static final WeChatReplyProfile $constName = new WeChatReplyProfile(",
-            "`t`t`t`"$label`",",
-            "`t`t`tnew String[] { RECEIVER_CLASS },",
-            "`t`t`tnew String[] { `"$($helper.Full)`" },",
-            "`t`t`tnew String[] { `"$($gate.Full)`" },",
-            "`t`t`tnew String[] { $methodLiterals });"
-        )
-        $mappingLine = "`t`tif (`"$versionName`".equals(versionName) || versionCode == ${versionCode}L) return $constName;"
+        $constLines = $generated.ConstLines
+        $mappingLine = $generated.MappingLine
         $proposal = [System.Collections.Generic.List[string]]::new()
         $proposal.Add('// Paste into WeChatReplyProfile.java: the constant next to the other profiles')
         $proposal.Add('// and the mapping line as the first statement of forPackage().')
@@ -321,12 +314,19 @@ if ($ProbeProfile) {
         $repoRel = 'src/main/java/com/oasisfeng/nevo/decorators/wechat/WeChatReplyProfile.java'
         $sourcePath = Join-Path $repoRoot $repoRel
         $existingText = if (Test-Path -LiteralPath $sourcePath) { Get-Content -LiteralPath $sourcePath -Raw } else { $null }
-        if ($existingText -and $existingText -match ('private static final WeChatReplyProfile ' + [regex]::Escape($constName) + '\b')) {
-            $descriptorsMatch = ($existingText -match ('new String\[\] \{ "' + [regex]::Escape($helper.Full) + '" \}')) -and
-                ($existingText -match ('new String\[\] \{ "' + [regex]::Escape($gate.Full) + '" \}')) -and
-                ($existingText -match ('new String\[\] \{ ' + [regex]::Escape($methodLiterals) + ' \}'))
+        $pairPattern = 'if\s*\(\s*"' + [regex]::Escape($versionName) + '"\.equals\(versionName\)\s*&&\s*versionCode\s*==\s*' + $versionCode + 'L\s*\)\s*return\s+(?<constant>\w+)\s*;'
+        $existingPair = if ($existingText) { [regex]::Match($existingText, $pairPattern) } else { $null }
+        $existingConstant = if ($existingPair -and $existingPair.Success) { $existingPair.Groups['constant'].Value } else { $constName }
+        $constantPattern = '(?s)private static final WeChatReplyProfile ' + [regex]::Escape($existingConstant) + '\s*=\s*new WeChatReplyProfile\((?<body>.*?)\);'
+        $existingBlock = if ($existingText) { [regex]::Match($existingText, $constantPattern) } else { $null }
+        if ($existingBlock -and $existingBlock.Success) {
+            $body = $existingBlock.Groups['body'].Value
+            $descriptorsMatch = ($existingPair -and $existingPair.Success) -and
+                ($body -match ('new String\[\] \{ "' + [regex]::Escape($helper.Full) + '" \}')) -and
+                ($body -match ('new String\[\] \{ "' + [regex]::Escape($gate.Full) + '" \}')) -and
+                ($body -match ('new String\[\] \{ ' + [regex]::Escape($methodLiterals) + ' \}'))
             $verdict = if ($descriptorsMatch) { 'already present and matches the probe' } else { 'already present but DIFFERS from the probe, review manually' }
-            $report.Add("- patch: skipped, $constName $verdict")
+            $report.Add("- patch: skipped, $existingConstant $verdict")
         } elseif (Test-Path -LiteralPath $sourcePath) {
             $original = @(Get-Content -LiteralPath $sourcePath)
             $constIdx = -1

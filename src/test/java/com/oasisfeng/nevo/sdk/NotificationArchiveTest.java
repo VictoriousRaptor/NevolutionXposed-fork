@@ -14,6 +14,16 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.Assert.*;
 
 public class NotificationArchiveTest {
+    @Test public void membershipChecksDoNotChangeEvictionOrder() {
+        NotificationArchive<Integer, String> archive = new NotificationArchive<>(2, 1);
+        archive.add(1, "first"); archive.add(2, "second");
+        assertTrue(archive.containsKey(1));
+        archive.add(3, "third");
+        assertNull(archive.latest(1));
+        assertEquals("second", archive.latest(2));
+        assertEquals("third", archive.latest(3));
+    }
+
     @Test public void confirmedRemovalDropsOnlyItsGenerationAndPredecessors() {
         NotificationArchive<Integer, Long> archive = new NotificationArchive<>(120, 20);
         archive.add(1, 101L); archive.add(1, 101L); archive.add(1, 102L); archive.add(2, 201L);

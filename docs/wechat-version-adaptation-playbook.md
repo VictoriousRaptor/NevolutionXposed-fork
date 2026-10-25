@@ -4,6 +4,17 @@
 
 配合脚本：`tools/collect-device-info.ps1`（只读取设备与 APK，不在手机上做任何修改）。
 
+## 2026-10-24 全项目审查修复（3.4.0 / code 17）
+
+- SystemUI 继续通过 `NotificationListenerService` 已声明构造函数 AFTER 捕获实例和更新 NLS 弱引用。实际移除方法优先匹配 `onNotificationRemoved(StatusBarNotification, RankingMap, NotificationStats, int): void`，类型或方法不存在时独立尝试 `onNotificationRemoved(StatusBarNotification, RankingMap, int): void`；目标必须返回 void 且非 static。选定方法仍安装 BEFORE 回调；同一进程按 Method 仅安装一次，失败不记入成功集合，后续构造可重试。两种签名均不可用时记录 `NL hook failed`，不安装移除追踪；NLS 诊断与其他功能继续沿用既有路径。微信主进程和 SystemUI 的作用域、三种移除原因、代次广播及 Markdown 门禁不变。
+- 微信通知栏回复的原生已读动作与当前归档的会话实例、代次和待回应组一起进入 `ReplyTarget`，来源为当前通知的原生 `deleteIntent`。删除旧按 ID 保存动作的表；没有当前动作时不继承旧动作，本地已读与回复派发仍分别处理。会话元数据最多保留 256 个最近使用的 ID；归档仍为全局 120 条、每 ID 20 条，归档中的会话不参与身份淘汰。普通点击/划除不立即丢失身份，淘汰实例的迟到解析仍被拒绝。
+- WXGF 输入只分配一份 expectedSize 缓冲，限定读取长度并检查 EOF；空、截断或多余字节均回退。20 MiB 输入限制、前后大小/修改时间核验、单槽转换缓存、像素预算、1.5 秒等待及发布 token 校验保留。
+- 120 秒路径探针须同时为 Debug 和 `-PimageDiagnostics=true` 才启动，默认关闭；取消、替换、连续性拒绝和已读清理停止对应旧观察，已取消请求不能迟到启动探针。Release 始终关闭。常规匿名诊断日志继续保留，不新增消息正文、账号或文件路径日志。
+- 删除没有当前图片路径生产者的旧 Zoom 动作、接收器和资源；现代 fitStart 预览、动作身份及撤回清理继续使用 ImagePreviewLoader。旧撤回文本正则和两项无消费者 extras 删除，提示判定统一使用 RecallHistory，精确 ID 裁剪不变。展开 minSdk 26 以下的恒定分支；微信 targetSdk 检查及 API 28/31/35 差异保留。
+- 新生成画像使用版本名与版本码同时匹配，常量和 label 均含版本码；碰撞核对限定到该精确组合返回的画像声明。已有 8.0.72/8.0.78 的历史任一匹配规则和各功能现有门禁不变，不借本次修复扩展版本支持。
+
+回归：旧 ID 从有原生已读动作更新为无动作、连续回复与失败派发；同名不同构建和错误版本组合；WXGF 长度边界；四/三参数选择、静态/返回类型拒绝、重复安装及失败重试；会话容量、活跃归档保留和迟到解析拒绝。主机测试及生成代码验证可以离线执行，framework 用例本轮仅编译；没有安装、运行时 hook 日志、真实微信收发或 OEM UI 的新验收。
+
 ## 2026-10-24 上游遗留实现清理（3.4.0 / code 17）
 
 本轮变更汇入模块 3.4.0，Android `versionCode` 从 16 递增为 17，设置 schema 为 8。[版本说明](release-3.4.0.md)汇总变更与验证边界；以下旧版本构建记录保留原版本与产物身份。
@@ -315,8 +326,8 @@ LSPosed 现场发现微信作用域未勾选，补选并重启微信后五条链
 
 - `gate:` 行给出门禁类与方法（顺序即接收器调用顺序）。
 - `helper:` 行给出 `X.b(Intent): Bundle`。
-- 候选唯一且校验通过时，`probe/profile-proposal.java` 给出可直接粘贴的画像常量与 `forPackage()` 映射行。
-- 若报告说 `patch: skipped, RELEASE_x_y_z already present and matches the probe`，说明当前代码已经覆盖该版本，无需改动。
+- 候选唯一且校验通过时，`probe/profile-proposal.java` 给出包含版本码的画像常量与精确 `versionName && versionCode` 映射行。仍须人工核对调用链与目标版本证据后采纳。
+- 若报告说 `patch: skipped, RELEASE_x_y_z_code already present and matches the probe`（历史画像可能使用旧命名），说明该精确组合已存在且声明与探针一致；这不表示真实收发已经验证。
 - 若候选不唯一或方法缺失，**不要**猜：展开 `probe/sources/` 人工核对 `onReceive` 的调用点，必要时在报告中补充证据后再改代码。
 
 ### 步骤 3：核对图片事件锚点
@@ -348,7 +359,7 @@ LSPosed 现场发现微信作用域未勾选，补选并重启微信后五条链
 
 ### 步骤 5：填画像并跑测试
 
-- 直接把 `profile-proposal.java` 的片段粘进 `WeChatReplyProfile.java`（常量 + `forPackage()` 第一行映射），或先 `git apply --check .debug-artifacts/device/<时间戳>/probe/profile-proposal.patch` 再 `git apply`（补丁按 LF 生成，供仓库根目录直接使用）。
+- 核对生成的版本名和版本码后，将 `profile-proposal.java` 的常量与精确映射加入 `WeChatReplyProfile.java`，或先 `git apply --check .debug-artifacts/device/<时间戳>/probe/profile-proposal.patch` 再应用。不得将同时匹配改为任一匹配；不得覆盖另一个构建的已有画像。
 - 在 `WeChatReplyProfileTest` 中补一条该版本的映射断言。涉及独立功能时补对应版本门禁、错误组合及回退验证；撤回相关用例见 `RecallIndexTest`、`RecallHistoryTest` 和 `Plan123Instrumentation`，不要把 instrument APK 编译视为用例执行。
 - 运行：
 

@@ -8,7 +8,6 @@ import android.util.Log;
 import com.oasisfeng.nevo.xposed.BuildConfig;
 import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.lang.reflect.Constructor;
@@ -336,11 +335,15 @@ final class WeChatImageDownloader {
 	}
 
 	private static byte[] readAll(File file, int size) throws Exception {
-		try (FileInputStream input = new FileInputStream(file); ByteArrayOutputStream output = new ByteArrayOutputStream(size)) {
-			byte[] buffer = new byte[8192];
-			int count;
-			while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
-			return output.toByteArray();
+		try (FileInputStream input = new FileInputStream(file)) {
+			byte[] source = new byte[size];
+			int offset = 0;
+			while (offset < size) {
+				int count = input.read(source, offset, size - offset);
+				if (count < 0) return null;
+				offset += count;
+			}
+			return input.read() == -1 ? source : null;
 		}
 	}
 

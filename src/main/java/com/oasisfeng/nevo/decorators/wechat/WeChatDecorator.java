@@ -36,18 +36,14 @@ import android.util.Log;
 
 import java.io.File;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.Nullable;
-import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat.MessagingStyle;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.drawable.IconCompat;
 
 import static android.os.Build.VERSION.SDK_INT;
-import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
 
 import com.oasisfeng.nevo.xposed.compat.PackageHookContext;
@@ -78,8 +74,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 	private static final String OLD_CHANNEL_MISC = "misc";								//   old name for migration
 	private static final String CHANNEL_DND = "message_dnd_mode_channel_id";			// Channel ID used by WeChat for its own DND mode
 	private static final String CHANNEL_GROUP_CONVERSATION = "group";					// WeChat has no separate group for group conversation
-	private static final String RECALL_PATTERN = "(\"(?<recaller>[^\"]+)\" )?撤回了?一条消息";
-	private static final Pattern pattern = Pattern.compile(RECALL_PATTERN);				// [2条]"🦉 " 撤回了一条消息 / [2条]撤回一条消息
 
 	private static final @ColorInt int PRIMARY_COLOR = 0xFF33B332;
 	private static final @ColorInt int LIGHT_COLOR = 0xFF00FF00;
@@ -87,12 +81,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 	// 记录最近一次通话类型（从 id=41 通知获取）
 	private static volatile String sLastCallType = null;  // "语音通话" 或 "视频通话"
 	private static volatile long sLastCallTime = 0;
-	static final String ACTION_SETTINGS_CHANGED = "SETTINGS_CHANGED";
-	static final String ACTION_DEBUG_NOTIFICATION = "DEBUG";
 	private static final String KEY_SILENT_REVIVAL = "nevo.wechat.revival";
-	private static final String EXTRA_RECALL = "nevo.wechat.recall";
-	private static final String EXTRA_RECALLER = "nevo.wechat.recaller";
-	public static final String EXTRA_PICTURE_PATH = "nevo.wechat.picturePath";
 	public static final String EXTRA_SUPPRESSED_RECALL = "nevo.wechat.suppressedRecall";
 
 	static final String TAG = "WeChatDecorator";
@@ -158,7 +147,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 					Notification latest = getArchivedNotification(id);
 					return latest == null ? null : new MessagingBuilder.ReplyTarget(
 							latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN),
-							mConversationManager.getConversation(id), NotificationMessages.pendingReplyIds(latest));
+							mConversationManager.getConversation(id), NotificationMessages.pendingReplyIds(latest), latest.deleteIntent);
 				}
 			}
 			@Override public void onReplyRead(int id, MessagingBuilder.ReplyTarget target) { Local.this.onReplyRead(id, target); }
@@ -171,7 +160,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private boolean mRoundResetReceiverRegistered;
 		/** Resolved once per process; the installed WeChat build never changes while it runs. */
 		private Boolean mWeChatTargetingO;
-		private final ConversationManager mConversationManager = new ConversationManager();
+		private final ConversationManager mConversationManager = new ConversationManager(LocalDecorator::hasArchivedNotifications);
 		private final BroadcastReceiver mRoundResetReceiver = new BroadcastReceiver() {
 			@Override public void onReceive(final Context context, final Intent intent) {
 				if (!WeChatNotificationRemoval.ACTION_RESET_ROUND.equals(intent.getAction())
@@ -419,7 +408,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			cache(id, n);
 			n.color = PRIMARY_COLOR;        // Tint the small icon
 
-			String channel_id = SDK_INT >= O ? n.getChannelId() : null;
+			String channel_id = n.getChannelId();
 			if (CHANNEL_MISC.equals(channel_id)) return Decorating.Unprocessed;	// Misc. notifications on Android 8+.
 			
 			final CharSequence text = extras.getCharSequence(Notification.EXTRA_TEXT);
@@ -472,24 +461,17 @@ public class WeChatDecorator extends NevoDecoratorService {
 				}
 			}
 			// 撤回...
-			String recaller = null;
 			boolean is_recall = extras.getBoolean(NotificationMessages.RECALL_PROMPT);
 			if (content != null && content.contains("撤回")) {
 				if (CHANNEL_MISC.equals(channel_id)) {	// Misc. notifications on Android 8+.
 					return Decorating.Unprocessed;
 				} else if (n.tickerText == null) {		// Legacy misc. notifications.
-					if (SDK_INT >= O && channel_id == null) setChannelId(n, CHANNEL_MISC);
-					Matcher matcher = pattern.matcher(content);
-					if (BuildConfig.DEBUG) Log.d(TAG, "matcher " + matcher.matches());
+					if (channel_id == null) setChannelId(n, CHANNEL_MISC);
 					if (RecallHistory.isPrompt(content)) {
 						// 撤回
-						// Log.d(TAG, matcher.group(0) + ", " + matcher.group(1) + ", " + matcher.group(2) + ", " + matcher.group(3));
 						is_recall = true;
-						recaller = matcher.matches() ? matcher.group("recaller") : null;
-						extras.putBoolean(EXTRA_RECALL, true);
 						extras.putBoolean(NotificationMessages.RECALL_PROMPT, true);
-						extras.putString(EXTRA_RECALLER, recaller);
-						if (BuildConfig.DEBUG) Log.d(TAG, "recall notification detected, recaller=" + (recaller != null));
+						if (BuildConfig.DEBUG) Log.d(TAG, "recall notification detected");
 					} else {
 						// E.g. web login confirmation notification.
 						if (BuildConfig.DEBUG) Log.d(TAG, "Skip further process for non-conversation notification");
@@ -508,17 +490,14 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (is_recall) conversation.setType(conversation.isGroupChat()
 					? Conversation.TYPE_GC_RECALL : Conversation.TYPE_DM_RECALL);
 			final boolean is_group_chat = conversation.isGroupChat();
-			if (SDK_INT >= O) {
-				if (extras.containsKey(KEY_SILENT_REVIVAL)) {
-					setGroup(n, "nevo.group.auto");
-					setGroupAlertBehavior(n, Notification.GROUP_ALERT_SUMMARY);
-				}
-				if (is_group_chat && !CHANNEL_DND.equals(channel_id)) setChannelId(n, CHANNEL_GROUP_CONVERSATION);
-				else if (channel_id == null || (!is_group_chat && CHANNEL_GROUP_CONVERSATION.equals(channel_id)))
-					setChannelId(n, CHANNEL_MESSAGE);
+			if (extras.containsKey(KEY_SILENT_REVIVAL)) {
+				setGroup(n, "nevo.group.auto");
+				setGroupAlertBehavior(n, Notification.GROUP_ALERT_SUMMARY);
 			}
+			if (is_group_chat && !CHANNEL_DND.equals(channel_id)) setChannelId(n, CHANNEL_GROUP_CONVERSATION);
+			else if (channel_id == null || (!is_group_chat && CHANNEL_GROUP_CONVERSATION.equals(channel_id)))
+				setChannelId(n, CHANNEL_MESSAGE);
 			extras.putBoolean(Notification.EXTRA_SHOW_WHEN, true);
-			// if (mPreferences.getBoolean(mPrefKeyWear, false)) n.flags &= ~ Notification.FLAG_LOCAL_ONLY; // TODO
 			setSortKey(n, String.valueOf(Long.MAX_VALUE - n.when + (is_group_chat ? GROUP_CHAT_SORT_KEY_SHIFT : 0))); // Place group chat below other messages
 
 			if (getAppContext() == null) {
@@ -559,7 +538,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			NotificationMarkdown.apply(n, mMarkdownEnabled);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
 
-			if (SDK_INT >= N && extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) != null)
+			if (extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) != null)
 				n.flags |= Notification.FLAG_ONLY_ALERT_ONCE;		// No more alert for direct-replied notification.
 
 			// 维护NotificationChannel
@@ -609,14 +588,14 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 		}
 
-		@RequiresApi(O) private NotificationChannel migrate(NotificationManager nm, final String old_id, final String new_id, final String new_name, final boolean silent) {
+		private NotificationChannel migrate(NotificationManager nm, final String old_id, final String new_id, final String new_name, final boolean silent) {
 			final NotificationChannel channel_message = nm.getNotificationChannel(old_id);
 			nm.deleteNotificationChannel(old_id);
 			if (channel_message != null) return cloneChannel(channel_message, new_id, new_name);
 			else return makeChannel(new_id, new_name, silent);
 		}
 
-		@RequiresApi(O) private NotificationChannel makeChannel(final String channel_id, final String name, final boolean silent) {
+		private NotificationChannel makeChannel(final String channel_id, final String name, final boolean silent) {
 			final NotificationChannel channel = new NotificationChannel(channel_id, name, NotificationManager.IMPORTANCE_HIGH/* Allow heads-up (by default) */);
 			if (silent) channel.setSound(null, null);
 			else channel.setSound(getDefaultSound(), new AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -626,7 +605,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			return channel;
 		}
 
-		@RequiresApi(O) static NotificationChannel cloneChannel(final NotificationChannel channel, final String id, final String new_name) {
+		static NotificationChannel cloneChannel(final NotificationChannel channel, final String id, final String new_name) {
 			final NotificationChannel clone = new NotificationChannel(id, new_name, channel.getImportance());
 			clone.setGroup(channel.getGroup());
 			clone.setDescription(channel.getDescription());

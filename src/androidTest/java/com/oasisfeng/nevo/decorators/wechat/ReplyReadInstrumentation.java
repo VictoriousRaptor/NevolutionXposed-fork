@@ -18,6 +18,26 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** Framework checks use synthetic messages and local targets, without invoking WeChat. */
 final class ReplyReadInstrumentation {
+    static void nativeReplyDoesNotReuseReadTarget(Context context) {
+        try (Fixture fixture = new Fixture(context, 0, false)) {
+            fixture.builder.attachReplyAction(740, fixture.notification());
+            Notification current = fixture.notification();
+            Bundle car = current.extras.getBundle("android.car.EXTENSIONS").getBundle("car_conversation");
+            car.remove("on_read");
+            fixture.currentRead = null;
+            fixture.builder.attachReplyAction(740, current);
+            RemoteInput input = current.actions[0].getRemoteInputs()[0];
+            Intent fill = new Intent();
+            Bundle results = new Bundle();
+            results.putCharSequence(input.getResultKey(), "B");
+            RemoteInput.addResultsToIntent(new RemoteInput[]{input}, fill, results);
+            current.actions[0].actionIntent.send(context, 0, fill);
+            check(fixture.completed.await(5, TimeUnit.SECONDS), "reply outcome was not handled");
+            check(fixture.nativeRead.getCount() == 1, "old notification read target was reused");
+            check(fixture.reads.get() == 1 && fixture.sent.get() == 1, "missing read action blocked reply");
+        } catch (Exception failure) { throw new AssertionError(failure); }
+    }
+
     static void nativeReplyReadBeforeFailure(Context context) {
         for (int result : new int[]{0, 7, -1}) {
             try (Fixture fixture = new Fixture(context, result, false)) {
@@ -60,6 +80,7 @@ final class ReplyReadInstrumentation {
         final CountDownLatch nativeRead = new CountDownLatch(1), completed = new CountDownLatch(1);
         final String readAction = "nevo.test.REPLY_READ", replyAction = "nevo.test.REPLY_SEND";
         final PendingIntent read, reply;
+        PendingIntent currentRead;
         final MessagingBuilder builder;
         final BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context ignored, Intent intent) {
@@ -81,8 +102,12 @@ final class ReplyReadInstrumentation {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             reply = PendingIntent.getBroadcast(context, 741, new Intent(replyAction).setPackage(context.getPackageName()),
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
+            currentRead = read;
             builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {
                 @Override public void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies) {}
+                @Override public MessagingBuilder.ReplyTarget replyTarget(int id) {
+                    return new MessagingBuilder.ReplyTarget(1, null, java.util.Collections.emptyList(), currentRead);
+                }
                 @Override public void onReplyRead(int id, MessagingBuilder.ReplyTarget target) { reads.incrementAndGet(); }
                 @Override public void onReplySent(int id, MessagingBuilder.ReplyTarget target, CharSequence text, long time, String replyId) {
                     sent.incrementAndGet(); completed.countDown();

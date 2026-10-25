@@ -46,6 +46,8 @@ final class NotificationArchive<K, V> {
         return history == null ? null : history.get(history.size() - 1);
     }
 
+    synchronized boolean containsKey(K key) { return histories.containsKey(key); }
+
     synchronized void remove(K key) {
         List<V> removed = histories.remove(key);
         if (removed != null) size -= removed.size();

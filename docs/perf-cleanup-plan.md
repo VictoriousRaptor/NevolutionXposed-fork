@@ -1,5 +1,15 @@
 # NevolutionXposed 性能与冗余清理：结论与遗留项
 
+2026-10-24 全项目审查修复：原生已读动作归属当前 ReplyTarget，删除独立 ID 动作表；会话身份采用最多 256 项 LRU，保留归档中的活跃实例；SystemUI 移除方法完整签名选择支持四参缺失后的三参回退，成功安装按 Method 去重。WXGF 输入改为单次有界分配和精确长度读取。长期图片探针默认关闭，须显式 Debug 构建参数 `-PimageDiagnostics=true`，取消/替换时停止旧观察。删除无生产者的 Zoom 链路、旧撤回正则和无消费者字段、低于 minSdk 的恒定分支及未用资源。画像生成脚本改为精确组合，并修正 README 构建入口，删除自动安装的旧 build.sh。当前行为和回归边界见[适配指南](wechat-version-adaptation-playbook.md)。下文为历史记录。
+
+2026-10-24 精简前验证记录：183 项主机单元测试通过，失败/错误/跳过均为 0；生成画像经本地 Java 编译执行，拒绝错误版本组合并保留同名不同构建的独立映射。Debug 与 androidTest APK 离线构建通过，两包证书均与既有 release 证书一致，签名和 zipalign 校验通过；最终 Debug 的长期图片诊断默认关闭。应用源码 Lint 为 0 errors / 1 warning，余下提示来自 Debug 缩放对比页的像素复数文案；两个测试源码 Lint 分析任务未执行。独立只读复核未发现严重或重要问题；本轮没有设备安装、仪器执行、真实微信收发或性能测量。版本、下载器 ID 语义及自己的头像来源没有调整。
+
+2026-10-25 初次收尾：删除私有读取方法的重复大小检查、请求替换时的重复 probe 删除及未使用的模板导入；移除零长度私有方法测试并同步测试覆盖说明。当时执行的下载器针对性测试为 9 项通过、0 失败，尚未重跑完整单元测试及 APK 构建；后续完整验证见下文。
+
+2026-10-25 Lint 复核：由 `gpt-5.6-luna`（high）子代理执行。完整 `lintDebug` 已尝试，但在 AndroidTest/UnitTest 源码分析阶段数分钟无新增输出后主动中止，未取得完整检查结果，原因未定位。随后显式排除 `lintAnalyzeDebugAndroidTest` 与 `lintAnalyzeDebugUnitTest`，离线重跑应用源码 Lint 成功，结果为 0 errors / 1 warning；唯一警告仍是 `src/debug/res/values/strings.xml:8` 的 `PluralsCandidate`。两次均使用既有 release 签名配置和 `-PrequireReleaseSigning=true`；未修改 Lint 配置或屏蔽警告。报告位于本地 `build/reports/lint-results-debug.*`，运行日志位于忽略目录 `.debug-artifacts/lint-20261025/`。该结果不代表测试源码 Lint 已通过。
+
+2026-10-25 最终验证：完整主机单元测试 182 项通过，失败/错误/跳过均为 0；画像生成测试通过。Debug 与 androidTest APK 编译完成，两包均通过签名及 zipalign 检查，证书与既有 release 证书一致，长期图片诊断保持关闭。完整 `lintDebug` 在只含当前项目文件的本地副本中执行成功，包含 `lintAnalyzeDebug`、`lintAnalyzeDebugAndroidTest`、`lintAnalyzeDebugUnitTest`，无排除任务；结果为 0 errors / 1 warning，仍为上述 Debug 文案提示。副本的 114 个源码及构建文件与工作区逐一哈希一致，复用既有依赖缓存，使用 `--offline --no-daemon --max-workers=1`。此前原目录运行的线程栈显示源码文件遍历，随后报告 4 GiB 堆内存不足；干净副本成功，支持本地目录内容或运行环境相关的判断，但未单独隔离并行度影响，不宣称已定位工具内部根因。报告与诊断材料保存在忽略目录 `.debug-artifacts/lint-final-20261025/`。上述结果取代此前测试源码 Lint 未完成的状态；未安装设备、未执行 framework 真机回归。
+
 2026-10-24：完整移除独立媒体通知增强，包括 `MediaDecorator`、取色、布局、设置、Palette 依赖及专用测试断言；旧设置在 schema 8 从本地和远端清除。SystemUI 不再安装 posted 装饰回调或全局反射注解 hook，保留微信移除广播、上下文捕获、NLS 诊断及 Markdown 链路。微信图片/文件/表情消息的回复功能和测试保留。WXGF 转换结果改为加载器共用的单候选缓存，按请求身份、文件路径/大小/修改时间复用，总保留上限 20 MiB；完成或取消即释放，不改变等待与发布校验。当前修复与验证边界见[适配指南](wechat-version-adaptation-playbook.md)。
 
 2026-10-23 通知历史规则已调整：划除/清空恢复上游直接使用微信原生 `on_read` 作为删除动作的实现，移除微信进程本地删除代理；点击、划除和清空的本地历史清理统一沿用 SystemUI 事件。接收端按确认代次清理及裁掉继承历史，不再仅接受 latest token。默认关闭的最后回复展示、通知栏回复已读边界与最新回归范围见[通知历史策略](notification-history-policy.md)。下文保留各阶段的原始清理范围与验收记录。
@@ -79,7 +89,7 @@
 
 - 保留 `proxyDirectReply()`、`attachReplyAction()`、CarExtender fallback、合成回复和 actions 序列化；这些均服务于标准 SystemUI 的通知内回复，并非 HyperIsland 专属实现。
 - 保留轮次重置广播的通知代次 token、导出动态接收器、定向包名、最新 token 校验及图片样式重建时的 token 复制；它们分别用于跨进程投递、防止旧移除事件误清新轮次和保持图片通知可重置。
-- `MessagingBuilder.close()` 当前没有调用方，不直接删除；在 `WeChatDecorator.Local.onDestroy()` 中调用它，使已有回复/缩放接收器与轮次重置接收器统一注销。
+- 当时保留 `MessagingBuilder.close()` 并在 `WeChatDecorator.Local.onDestroy()` 调用，使接收器统一注销；2026-10-24 全项目审查已删除没有生产者的缩放接收器，回复与轮次重置清理继续保留。
 
 ### 验收条件
 

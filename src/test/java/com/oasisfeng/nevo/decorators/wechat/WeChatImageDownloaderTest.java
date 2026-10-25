@@ -9,13 +9,38 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.Arrays;
 import java.util.Collections;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertArrayEquals;
 
 public class WeChatImageDownloaderTest {
+	@Test public void sourceReadReturnsExactlyTheExpectedBytes() throws Exception {
+		assertArrayEquals(new byte[]{1, 2, 3}, readSource(new byte[]{1, 2, 3}, 3));
+	}
+
+	@Test public void sourceReadRejectsTruncatedFiles() throws Exception {
+		assertNull(readSource(new byte[]{1, 2}, 3));
+	}
+
+	@Test public void sourceReadRejectsBytesBeyondTheExpectedSize() throws Exception {
+		assertNull(readSource(new byte[]{1, 2, 3}, 2));
+	}
+
+	private static byte[] readSource(byte[] bytes, int expectedSize) throws Exception {
+		Path file = Files.createTempFile("nevo-image-source-", ".bin");
+		try {
+			Files.write(file, bytes);
+			Method read = WeChatImageDownloader.class.getDeclaredMethod("readAll", java.io.File.class, int.class);
+			read.setAccessible(true);
+			return (byte[]) read.invoke(null, file.toFile(), expectedSize);
+		} finally { Files.deleteIfExists(file); }
+	}
+
 	@Test public void uniqueRowIsTheBaseRow() {
 		WeChatImageDownloader.BaseRow base = row(10, 1000, "chat", "", "", 0);
 		assertSame(base, WeChatImageDownloader.selectBaseRow(Collections.singletonList(base), "chat"));

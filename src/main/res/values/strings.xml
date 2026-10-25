@@ -10,23 +10,6 @@
 
 	<!-- decorators-misc -->
 
-	<string name="decorators_misc_label">Nevo - Misc</string>
-
-	<string name="decorator_elastic_inbox_title">Elastic List</string>
-	<string name="decorator_elastic_inbox_description">Stretch the single-lined list into multi-lined for list-style notifications, to make the most of the available space when there are only a few lines.</string>
-
-	<string name="decorator_stack_title">Stack</string>
-	<string name="decorator_stack_description">Stack historical messages within the same slot as a list in expanded form.</string>
-
-	<string name="decorator_big_text_title">Multi-line Text</string>
-	<string name="decorator_big_text_description">Expand truncated single-line text into multi-line long text.</string>
-
-	<string name="decorator_no_sticky_title">No Sticky</string>
-	<string name="decorator_no_sticky_description">Hide sticky notifications. (snooze a sticky notification to trigger)</string>
-	<string name="no_sticky_prompt_title">Hide sticky notification?</string>
-	<string name="no_sticky_prompt_sub_text">Click to hide</string>
-	<string name="no_sticky_toast">Notification is hidden until next boot.</string>
-
 	<!-- decorator-wechat -->
 
 	<string name="decorator_wechat_title">WeChat</string>
@@ -43,15 +26,9 @@
 	<string name="decorator_wechat_image_preview_large_description">Works only when “Image preview in notifications” is also enabled, the WeChat version is supported, and the local image does not meet the preview requirement. It asks WeChat to download its normal compressed image and waits up to 1.5 seconds from the notification image request, publishing sooner if ready. On timeout, it uses the best available image, or keeps the original notification if none is ready. Download completion within this limit is not guaranteed. It never requests the original image; a submitted WeChat download may continue in the background. Restart the WeChat process after changing this setting.</string>
 	<string name="self_display_name">我</string>
 	<string name="action_reply">Reply</string>
-	<string name="action_zoom">Zoom</string>
 
 	<string name="channel_message">New Message</string>
 	<string name="channel_group_message">New Group Message</string>
 	<string name="channel_misc">Other Notification</string>
-
-
-
-	<!-- decorator-media -->
-
 
 </resources>

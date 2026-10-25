@@ -40,9 +40,11 @@
 
 PowerShell：
 
+先通过 Gradle 属性或 `ORG_GRADLE_PROJECT_RELEASE_*` 进程环境变量提供既有 release 签名配置；不要把密码或密钥写入仓库。以下命令缺少配置会直接失败，Debug 与 release 使用同一证书，便于覆盖安装。构建不会安装到设备。
+
 ```powershell
-$env:GRADLE_USER_HOME = 'C:\Users\<you>\.gradle'
-.\gradlew.bat clean assembleDebug testDebugUnitTest
+$env:GRADLE_USER_HOME = Join-Path $PWD '.gradle'
+.\gradlew.bat -PrequireReleaseSigning=true testDebugUnitTest assembleDebug assembleDebugAndroidTest --console=plain
 ```
 
 调试 APK 输出到：
@@ -50,6 +52,8 @@ $env:GRADLE_USER_HOME = 'C:\Users\<you>\.gradle'
 ```text
 build/outputs/apk/debug/NevolutionXposed-debug.apk
 ```
+
+长期图片文件探针默认关闭。需要诊断时，可为 Debug 构建追加 `-PimageDiagnostics=true`，显式开启最多 120 秒的文件状态观察；Release 始终关闭。该选项不改变图片预览、下载或发布的版本门禁和超时策略。
 
 ## API 102 架构
 

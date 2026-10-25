@@ -163,6 +163,7 @@ public class MainHook extends XposedModule {
 	}
 
 	private void hookSystemUI(PackageHookContext loadPackageParam) {
+		final NotificationRemovalHooks removalHooks = new NotificationRemovalHooks();
 		final XC_MethodHook onNotificationRemoved = new XC_MethodHook() { // 捕获通知移除
 			@Override
 			protected void beforeHookedMethod(MethodHookParam param) {
@@ -192,27 +193,11 @@ public class MainHook extends XposedModule {
 				try {
 					final Class<?> clazz = nls.getClass();
 					if (BuildConfig.DEBUG) Log.d(TAG, "NL clazz: " + clazz + " " + loadPackageParam.packageName);
-					Method method;
-					// Try Android 16+ signature first, then fall back to older signature
-					try {
-						method = XposedHelpers.findMethodBestMatch(clazz, "onNotificationRemoved", StatusBarNotification.class, RankingMap.class,
-								XposedHelpers.findClass("android.service.notification.NotificationStats", loadPackageParam.classLoader), int.class);
-					} catch (XposedHelpers.ClassNotFoundError e2) {
-						// Android 16 may have changed NotificationStats or its location
-						XposedBridge.log("NotificationStats not found, trying without it");
-						try {
-							method = XposedHelpers.findMethodBestMatch(clazz, "onNotificationRemoved", StatusBarNotification.class, RankingMap.class, int.class);
-						} catch (Throwable e3) {
-							XposedBridge.rethrowFrameworkError(e3);
-							XposedBridge.log("onNotificationRemoved hook failed: " + e3.getMessage());
-							method = null;
-						}
-					}
-					if (method != null) {
-						XposedBridge.hookMethod(method, onNotificationRemoved);
-					} else {
-						XposedBridge.log("WARNING: onNotificationRemoved hook completely failed, notification removal tracking disabled");
-					}
+					Class<?> stats = null;
+					try { stats = XposedHelpers.findClass("android.service.notification.NotificationStats", loadPackageParam.classLoader); }
+					catch (XposedHelpers.ClassNotFoundError unavailable) { /* Three-argument callback remains eligible. */ }
+					Method method = NotificationRemovalHooks.findMethod(clazz, StatusBarNotification.class, RankingMap.class, stats);
+					removalHooks.installOnce(method, selected -> XposedBridge.hookMethod(selected, onNotificationRemoved));
 				} catch (Throwable e) {
 					XposedBridge.rethrowFrameworkError(e);
 					XposedBridge.log("NL hook failed: " + e.getMessage());

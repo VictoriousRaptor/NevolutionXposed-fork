@@ -37,6 +37,7 @@ android {
 		targetSdk 34
 		versionCode 17
 		versionName "3.4.0"
+		buildConfigField 'boolean', 'IMAGE_DIAGNOSTICS', 'false'
 		testInstrumentationRunner "com.oasisfeng.nevo.decorators.wechat.MessageIdentityInstrumentation"
 	}
 
@@ -65,6 +66,7 @@ android {
 			signingConfig signingConfigs.release
 		}
 		debug {
+			buildConfigField 'boolean', 'IMAGE_DIAGNOSTICS', providers.gradleProperty('imageDiagnostics').orElse('false').get().toBoolean().toString()
 			if (releaseSigningConfigured) signingConfig signingConfigs.release
 			debuggable true
 			minifyEnabled false

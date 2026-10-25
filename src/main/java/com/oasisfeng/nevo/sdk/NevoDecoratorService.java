@@ -24,10 +24,6 @@ public abstract class NevoDecoratorService {
 	private static final int MAX_NUM_ARCHIVED = 20;
 
 	/** Valid constant values for {@link android.app.Notification#EXTRA_TEMPLATE} */
-	public static final String TEMPLATE_BIG_TEXT	= "android.app.Notification$BigTextStyle";
-	public static final String TEMPLATE_BIG_PICTURE	= "android.app.Notification$BigPictureStyle";
-	public static final String TEMPLATE_CUSTOM		= "android.app.Notification$DecoratedCustomViewStyle";
-	public static final String TEMPLATE_INBOX		= "android.app.Notification$InboxStyle";
 	public static final String TEMPLATE_MESSAGING	= "android.app.Notification$MessagingStyle";
 
 	private static final String TAG = "NevoDecoratorService";
@@ -62,9 +58,6 @@ public abstract class NevoDecoratorService {
 		return getAppContext().getPackageManager();
 	}
 
-	protected static String getString(int key) {
-		return getPackageContext().getString(key);
-	}
 
 	/**
 	 * 在应用进程中执行的通知预处理，某些功能（NotificationChannel等）在此实现。
@@ -95,7 +88,7 @@ public abstract class NevoDecoratorService {
 		}
 	
 		protected static boolean hasArchivedNotifications(int key) {
-			return cache.latest(key) != null;
+			return cache.containsKey(key);
 		}
 
 		protected static void clearArchivedNotifications(int key) { cache.remove(key); }
@@ -155,7 +148,6 @@ public abstract class NevoDecoratorService {
 		protected LocalDecorator(String prefKey) { this.prefKey = prefKey; }
 
 		public boolean isDisabled() { return disabled; }
-		public void setDisabled(boolean disabled) { this.disabled = disabled; }
 	
 		@Keep public void onCreate(SharedPreferences pref) {
 			this.disabled = !pref.getBoolean(prefKey  + ".enabled", true);
@@ -202,7 +194,6 @@ public abstract class NevoDecoratorService {
 	}
 
 	protected final String prefKey;
-	// private boolean disabled;
 
 	public NevoDecoratorService() {
 		this.prefKey = getClass().getSimpleName();

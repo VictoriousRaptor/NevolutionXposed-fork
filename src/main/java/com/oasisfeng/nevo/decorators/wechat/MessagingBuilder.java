@@ -18,7 +18,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
-import android.util.ArrayMap;
 import android.util.Log;
 
 import com.oasisfeng.nevo.decorators.wechat.ConversationManager.Conversation;
@@ -45,8 +44,6 @@ import static android.app.Notification.EXTRA_TEXT;
 import static android.app.PendingIntent.FLAG_MUTABLE;
 import static android.app.PendingIntent.FLAG_UPDATE_CURRENT;
 import static android.os.Build.VERSION.SDK_INT;
-import static android.os.Build.VERSION_CODES.N;
-import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.S;
 import static androidx.core.app.NotificationCompat.EXTRA_CONVERSATION_TITLE;
@@ -57,8 +54,6 @@ import static androidx.core.app.NotificationCompat.EXTRA_SELF_DISPLAY_NAME;
 import com.oasisfeng.nevo.xposed.BuildConfig;
 import com.oasisfeng.nevo.xposed.R;
 
-import static com.oasisfeng.nevo.sdk.NevoDecoratorService.TEMPLATE_BIG_PICTURE;
-import static com.oasisfeng.nevo.sdk.NevoDecoratorService.TEMPLATE_MESSAGING;
 import static com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator.setActions;
 
 
@@ -71,7 +66,6 @@ class MessagingBuilder {
 
 	private static final String ACTION_REPLY = "REPLY";
 	private static final String ACTION_MENTION = "MENTION";
-	private static final String ACTION_ZOOM = "ZOOM";
 	private static final String ACTION_SYNTHETIC_REPLY = "SYNTHETIC_REPLY";
 	private static final String SCHEME_ID = "id";
 	private static final String EXTRA_REPLY_ACTION = "pending_intent";
@@ -125,7 +119,6 @@ class MessagingBuilder {
 
 		final PendingIntent on_reply = convs.getReplyPendingIntent();
 		if (on_reply == null) {
-			if (convs.getReadPendingIntent() != null) mMarkReadPendingIntents.put(id, convs.getReadPendingIntent());
 			MessagingStyle fromActions = buildFromActions(conversation, id, n, archive);
 			return fromActions != null ? fromActions : buildWithSyntheticReply(conversation, id, n, archive);
 		}
@@ -144,23 +137,13 @@ class MessagingBuilder {
 
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
 		appendKnownMessages(messaging, conversation, n, archive);
-		final PendingIntent on_read = convs.getReadPendingIntent();
-		if (on_read != null) mMarkReadPendingIntents.put(id, on_read);	// Mapped by evolved key,
 
 		final List<Action> actions = new ArrayList<>();
 		// Forward standard notification RemoteInput results through WeChat's original action.
-		if (SDK_INT >= N) {
-			final RemoteInput remoteInput = convs.getRemoteInput();
-			actions.add(buildNativeReplyAction(id, on_reply, remoteInput));
-			if (remoteInput == null)
-				logReply("action_native_fallback", "notificationId=" + id + " resultKey=" + DEFAULT_AUTO_REPLY_RESULT_KEY);
-		}
-		// 放大
-		if (n.extras.containsKey(WeChatDecorator.EXTRA_PICTURE_PATH)) {
-			final Intent intent = new Intent(ACTION_ZOOM).setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null));
-			final Action.Builder zoom_action = new Action.Builder(null, actionZoom, PendingIntent.getBroadcast(mContext, 0, intent.setPackage(mContext.getPackageName()), pendingIntentFlags()));
-			actions.add(zoom_action.build());
-		}
+		final RemoteInput remoteInput = convs.getRemoteInput();
+		actions.add(buildNativeReplyAction(id, on_reply, remoteInput));
+		if (remoteInput == null)
+			logReply("action_native_fallback", "notificationId=" + id + " resultKey=" + DEFAULT_AUTO_REPLY_RESULT_KEY);
 		setActions(n, actions.toArray(new Action[actions.size()]));
 		return messaging;
 	}
@@ -205,9 +188,6 @@ class MessagingBuilder {
 
 		if (BuildConfig.DEBUG) Log.d(TAG, "Found reply action via notification actions fallback");
 
-		final PendingIntent onRead = n.deleteIntent;
-		if (onRead != null) mMarkReadPendingIntents.put(id, onRead);
-
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
 
 		// 用通知里已有的消息、归档通知或当前文本重建消息列表，并补上输入历史里的用户回复
@@ -215,12 +195,6 @@ class MessagingBuilder {
 
 		final List<Action> newActions = new ArrayList<>();
 
-		if (n.extras.containsKey(WeChatDecorator.EXTRA_PICTURE_PATH)) {
-			final Intent intent = new Intent(ACTION_ZOOM).setData(Uri.fromParts(SCHEME_ID, Integer.toString(id), null));
-			final Action.Builder zoom_action = new Action.Builder(null, actionZoom,
-					PendingIntent.getBroadcast(mContext, 0, intent.setPackage(mContext.getPackageName()), pendingIntentFlags()));
-			newActions.add(zoom_action.build());
-		}
 		// Forward standard notification RemoteInput results through WeChat's original action.
 		newActions.add(buildNativeReplyAction(id, onReply, replyRemoteInput));
 
@@ -263,14 +237,12 @@ class MessagingBuilder {
 			return false;
 		}
 		final PendingIntent onReply = convs.getReplyPendingIntent();
-		if (onReply == null || SDK_INT < N) {
+		if (onReply == null) {
 			logReply("action_media_reply_skipped", "notificationId=" + id + " reason=no_reply_intent");
 			return false;
 		}
 		final RemoteInput remoteInput = convs.getRemoteInput();
 		final Action replyAction = buildNativeReplyAction(id, onReply, remoteInput);
-		final PendingIntent onRead = convs.getReadPendingIntent();
-		if (onRead != null) mMarkReadPendingIntents.put(id, onRead);
 
 		final Action[] existing = n.actions;
 		final List<Action> merged = new ArrayList<>();
@@ -342,9 +314,7 @@ class MessagingBuilder {
 					mController.abortNotificationReply(reservation);
 					return;
 				}
-				if (SDK_INT >= N) {
-					mController.onReplySent(id, replyTarget, text, replyTimestamp, replyId);
-				}
+				mController.onReplySent(id, replyTarget, text, replyTimestamp, replyId);
 			}, null);
 		} catch (final PendingIntent.CanceledException e) {
 			mController.abortNotificationReply(replyReservation);
@@ -361,46 +331,21 @@ class MessagingBuilder {
 		}
 	} };
 
-	private final BroadcastReceiver mZoomReceiver = new BroadcastReceiver() { @Override public void onReceive(final Context context, final Intent proxy_intent) {
-		final String action = proxy_intent.getAction();
-		final Uri data = proxy_intent.getData(); final Bundle results = RemoteInput.getResultsFromIntent(proxy_intent);
-		final String key = data.getSchemeSpecificPart();
-		// final Bundle addition = new Bundle();
-		mController.recastNotification(Integer.parseInt(key), n -> {
-			final Bundle extras = n.extras;
-			if (BuildConfig.DEBUG) Log.d(TAG, "bitmap " + extras.getParcelable(Notification.EXTRA_PICTURE));
-			if (TEMPLATE_MESSAGING.equals(extras.getString(Notification.EXTRA_TEMPLATE))) {
-				final String path = extras.getString(WeChatDecorator.EXTRA_PICTURE_PATH);
-				final BitmapFactory.Options options = new BitmapFactory.Options();
-				options.inPreferredConfig = SDK_INT >= O ? Bitmap.Config.HARDWARE : Bitmap.Config.ARGB_8888;
-				// extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_BIG_PICTURE);
-				extras.putParcelable(Notification.EXTRA_PICTURE, BitmapFactory.decodeFile(path, options));
-				// extras.putCharSequence(Notification.EXTRA_SUMMARY_TEXT, text);
-				extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_BIG_PICTURE);
-			} else {
-				extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING); // TODO
-			}
-			if (BuildConfig.DEBUG) Log.d(TAG, "bitmap " + extras.getParcelable(Notification.EXTRA_PICTURE));
-		});
-	} };
-
 	/** @param id the notification id */
 	private void readBeforeReply(int id, ReplyTarget target) {
 		logReply("read_requested", "notificationId=" + id);
 		try { mController.onReplyRead(id, target); }
 		catch (RuntimeException failure) { Log.w(TAG, "Reply read history failed: " + id, failure); }
-		try { markRead(id); }
+		try { markRead(target == null ? null : target.readAction()); }
 		catch (RuntimeException failure) { Log.w(TAG, "Reply read action failed: " + id, failure); }
 	}
 
-	/** @param id the notification id */
-	void markRead(final int id) {
-		final PendingIntent action = mMarkReadPendingIntents.remove(id);
+	private void markRead(@Nullable final PendingIntent action) {
 		if (action == null) return;
 		try {
 			action.send(mContext, 0, addTargetPackageAndWakeUp(action));
 		} catch (final PendingIntent.CanceledException e) {
-			Log.w(TAG, "Mark-read action is already cancelled: " + id);
+			Log.w(TAG, "Mark-read action is already cancelled");
 		}
 	}
 
@@ -445,7 +390,7 @@ class MessagingBuilder {
 		}
 		if (message.getDataMimeType() != null) bundle.putString(KEY_DATA_MIME_TYPE, message.getDataMimeType());
 		if (message.getDataUri() != null) bundle.putParcelable(KEY_DATA_URI, message.getDataUri());
-		if (SDK_INT >= O && ! message.getExtras().isEmpty()) bundle.putBundle(KEY_EXTRAS_BUNDLE, message.getExtras());
+		if (! message.getExtras().isEmpty()) bundle.putBundle(KEY_EXTRAS_BUNDLE, message.getExtras());
 		//if (message.isRemoteInputHistory()) bundle.putBoolean(KEY_REMOTE_INPUT_HISTORY, message.isRemoteInputHistory());
 		return bundle;
 	}
@@ -454,7 +399,7 @@ class MessagingBuilder {
 		return user.toAndroidPerson();
 	}
 
-	record ReplyTarget(long token, Conversation conversation, List<String> pendingReplies) {}
+	record ReplyTarget(long token, Conversation conversation, List<String> pendingReplies, PendingIntent readAction) {}
 
 	interface Controller {
 		void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies);
@@ -484,7 +429,6 @@ class MessagingBuilder {
 		final Context pkgCtx = moduleContext != null ? moduleContext : context;
 		if (BuildConfig.DEBUG) Log.d(TAG, "pkgCtx=" + pkgCtx + " moduleContext=" + moduleContext);
 		actionReply = moduleString(moduleContext, R.string.action_reply, "回复");
-		actionZoom = moduleString(moduleContext, R.string.action_zoom, "缩放");
 		mController = controller;
 		String selfName = "我";
 		if (moduleContext != null) {
@@ -502,10 +446,7 @@ class MessagingBuilder {
 			final IntentFilter filter = new IntentFilter(ACTION_SYNTHETIC_REPLY); filter.addDataScheme(SCHEME_ID);
 			ContextCompat.registerReceiver(context, mSyntheticReplyReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
 		}
-		{
-			final IntentFilter filter = new IntentFilter(ACTION_ZOOM); filter.addDataScheme(SCHEME_ID);
-			ContextCompat.registerReceiver(context, mZoomReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
-		}
+
 	}
 
 	private static String moduleString(@Nullable Context context, int resource, String fallback) {
@@ -667,7 +608,7 @@ class MessagingBuilder {
 		final PendingIntent replyPendingIntent = PendingIntent.getBroadcast(mContext, id, replyIntent, pendingIntentFlags());
 		final RemoteInput.Builder remoteInputBuilder = new RemoteInput.Builder("synthetic_reply_result_key")
 				.setAllowFreeFormInput(true);
-		if (SDK_INT >= N) remoteInputBuilder.setLabel(actionReply);
+		remoteInputBuilder.setLabel(actionReply);
 		final Action.Builder replyActionBuilder = new Action.Builder(null, actionReply, replyPendingIntent)
 				.addRemoteInput(remoteInputBuilder.build())
 				.setAllowGeneratedReplies(true);
@@ -756,16 +697,12 @@ class MessagingBuilder {
 		mClosed = true;
 		try { mContext.unregisterReceiver(mReplyReceiver); } catch (final RuntimeException ignored) {}
 		try { mContext.unregisterReceiver(mSyntheticReplyReceiver); } catch (final RuntimeException ignored) {}
-		try { mContext.unregisterReceiver(mZoomReceiver); } catch (final RuntimeException ignored) {}
-		mMarkReadPendingIntents.clear();
 		mPendingReplies.clear();
 	}
 
 	private final Context mContext;
-	private final String actionReply, actionZoom;
-	// private final SharedPreferences mPreferences;
+	private final String actionReply;
 	private final Controller mController;
 	private final Person mUserSelf;
-	private final Map<Integer, PendingIntent> mMarkReadPendingIntents = new ArrayMap<>();
 	private static final String TAG = WeChatDecorator.TAG;
 }
