@@ -533,7 +533,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 					imagePreviews.keepPreview(getAppContext(), nm, tag, id, n, conversation.key, messages);
 				}
 			}
-			messaging.setGroupConversation(is_group_chat).setConversationTitle(is_group_chat ? title : null);
+			messaging.setGroupConversation(is_group_chat).setConversationTitle(title);
 			MessagingBuilder.flatIntoExtras(messaging, extras);
 			NotificationMarkdown.apply(n, mMarkdownEnabled);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
