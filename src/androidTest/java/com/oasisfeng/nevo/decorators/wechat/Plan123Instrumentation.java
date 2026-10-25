@@ -111,10 +111,18 @@ final class Plan123Instrumentation {
     }
 
     static void replyAlertsAfterIncoming(Context context) {
-        WeChatDecorator.Local local = new WeChatDecorator.Local("WeChatDecorator");
-        local.onCreate(context.getSharedPreferences("reply-alert-test", Context.MODE_PRIVATE));
+        for (boolean showLastReply : new boolean[]{false, true}) replyAlertsAfterIncoming(context, showLastReply);
+    }
+
+    private static void replyAlertsAfterIncoming(Context context, boolean showLastReply) {
+        android.content.SharedPreferences preferences = context.getSharedPreferences("reply-alert-test", Context.MODE_PRIVATE);
+        android.content.SharedPreferences.Editor settings = preferences.edit().remove(WeChatDecorator.PREF_SHOW_LAST_REPLY);
+        if (showLastReply) settings.putBoolean(WeChatDecorator.PREF_SHOW_LAST_REPLY, true);
+        check(settings.commit(), "reply display setting not saved");
+        ReplyAlertFixture local = new ReplyAlertFixture();
         android.app.NotificationManager manager = context.getSystemService(android.app.NotificationManager.class);
         try {
+            local.onCreate(preferences);
             Notification a = raw(context, "A", 100, 1);
             local.apply(manager, null, 830, a);
             NotificationMessages.recordReply(a, "B1", 110, "alert-reply-1");
@@ -126,7 +134,8 @@ final class Plan123Instrumentation {
 
             Notification c = raw(context, "C", 200, 2);
             local.apply(manager, null, 830, c);
-            texts(conversation(false), c, "B1", "B2", "C");
+            if (showLastReply) texts(conversation(false), c, "B1", "B2", "C");
+            else texts(conversation(false), c, "C");
             check(c.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
                     "answered replies remained in input history");
             check((c.flags & Notification.FLAG_ONLY_ALERT_ONCE) == 0, "incoming message was muted after reply");
@@ -143,14 +152,31 @@ final class Plan123Instrumentation {
 
             Notification d = raw(context, "D", 300, 3);
             local.apply(manager, null, 830, d);
-            texts(conversation(false), d, "B1", "B2", "C", "D");
+            if (showLastReply) texts(conversation(false), d, "B1", "B2", "C", "D");
+            else texts(conversation(false), d, "C", "D");
             check((d.flags & Notification.FLAG_ONLY_ALERT_ONCE) == 0, "later incoming message was still muted");
 
             Notification silent = raw(context, "E", 400, 4);
             silent.flags |= Notification.FLAG_ONLY_ALERT_ONCE;
             local.apply(manager, null, 830, silent);
             check((silent.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0, "original silent update flag was cleared");
-        } finally { local.onDestroy(); }
+        } finally {
+            local.close();
+            check(preferences.edit().remove(WeChatDecorator.PREF_SHOW_LAST_REPLY).commit(), "reply display setting not cleared");
+        }
+    }
+
+    /** Each preference branch owns its archived reply identities, even if the branch fails. */
+    private static final class ReplyAlertFixture extends WeChatDecorator.Local implements AutoCloseable {
+        ReplyAlertFixture() {
+            super("WeChatDecorator");
+            clearArchivedNotifications(830);
+        }
+
+        @Override public void close() {
+            try { clearArchivedNotifications(830); }
+            finally { onDestroy(); }
+        }
     }
 
     static void replyEligibility(Context context) {

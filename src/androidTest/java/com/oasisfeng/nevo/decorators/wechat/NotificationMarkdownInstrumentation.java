@@ -167,8 +167,8 @@ final class NotificationMarkdownInstrumentation {
             Notification.MessagingStyle.Message message = new Notification.MessagingStyle.Message(
                     NotificationMarkdown.render(original), 100, (android.app.Person) null);
             message.getExtras().putAll(codeMetadata(raw));
-            Method cleanup = message.getClass().getDeclaredMethod("ensureColorContrastOrStripStyling", int.class);
-            cleanup.setAccessible(true);
+            NotificationMarkdownHookProfile profile = NotificationMarkdownHookProfile.resolve(
+                    message.getClass(), Notification.MessagingStyle.class, Bundle.class, android.widget.RemoteViews.class);
             Field textField = message.getClass().getDeclaredField("mText");
             textField.setAccessible(true);
             Method toBundle = message.getClass().getDeclaredMethod("toBundle");
@@ -176,7 +176,8 @@ final class NotificationMarkdownInstrumentation {
             Method fromBundle = message.getClass().getDeclaredMethod("getMessageFromBundle", Bundle.class);
             fromBundle.setAccessible(true);
             for (int round = 0; round < 3; round++) {
-                cleanup.invoke(message, 0xffeeeeee);
+                if (profile.textField == null) profile.callers[0].invoke(message, 0xffeeeeee);
+                else profile.cleanup.invoke(message);
                 CharSequence cleaned = message.getText();
                 CharSequence restored = NotificationMarkdown.restoreCodeStyles(cleaned, message.getExtras());
                 check(cleaned.toString().contentEquals(restored), "restoration changed message characters");

@@ -25,6 +25,8 @@
 
 现新增 `NotificationMarkdownHooks`，在微信主进程及 SystemUI 的消息清理方法完成后，仅恢复本模块代码范围中的字体和灰底。原方法继续执行；其他被清理的 span 不恢复。需完整签名校验、两个功能开关开启、消息带 `nevo.markdown.owner=com.tencent.mm` 和原文标记，且清理后的文字与解析结果完全一致；不一致、超限、缺少标记、没有代码或 hook 不可用时保留原生输出。已存在的代码 span 不重复添加，文字和身份元数据不改变。Android/OEM 其他清理路径仍需独立验证，完整 hook、日志与失败语义见[适配指南](wechat-version-adaptation-playbook.md)。
 
+2026-10-25：Android 17 / API 37 的 framework 测试报告表明旧入口 `Message.ensureColorContrastOrStripStyling(int)` 不存在。[AOSP Android 17 固定源码](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/core/java/android/app/Notification.java) 已改为 `Message.stripNonStyleSpans(): void`，并缩短消息序列化调用者的参数列表。生产 hook 和仪器测试现在共用完整签名画像：保留 Android 16 的返回值恢复路径；新布局在无参数清理完成后读取正文，仅在需要恢复样式时写回已验证类型和修饰符的 `mText: CharSequence`。选择依据是完整运行时签名，不是系统或微信版本号；缺少任何必要方法/域或取消优化失败仍回退原生输出。就绪日志通过 `layout=return_value/message_field` 区分布局。
+
 单条消息最多解析 4096 个 UTF-16 字符、128 个样式范围、12 层嵌套及 65536 步工作量；任一上限触发时整条保留原文，不输出部分删过标记的消息。运行时解析异常也回退原文。emoji 的样式范围使用 Android 的 UTF-16 下标；删除配对标记及围栏头尾行，保留正文和已有文本 span。
 
 ## 原文与展示链路
@@ -40,6 +42,8 @@
 该功能新增一处 framework AFTER hook，不读取微信数据库，不改变混淆类或微信版本画像。8.0.72、8.0.77、8.0.78 和 legacy 通知重建路径均沿用原有门禁；回复、图片、应用内回复、撤回各自的版本匹配和运行时签名门禁保持独立，见[适配指南](wechat-version-adaptation-playbook.md)。
 
 ## 验证与回退
+
+2026-10-25 本轮修复补充新布局及非法签名/正文域拒绝检查，191 项主机测试全部通过；既有 release 密钥签名的 Debug、androidTest 和 Release 构建通过，三包签名证书一致。与修改源码哈希相同的干净副本完成全部 `lintDebug`，0 errors / 1 warning，问题编号/级别/描述与当日干净副本基线一致。Android 17 / API 37、微信 8.0.79 (3182) 环境的完整 framework 仪器测试 64/64 通过，包含按生产画像调用实际清理方法、恢复代码样式及三轮 bundle/Parcel 往返；已安装微信 descriptor 检查 40 项通过。测试包及 runner 已卸载并核验，最终签名 Release 已安装，拉回 APK 哈希与本地产物一致。未主动重启微信/SystemUI，不能据此确认两个注入进程的 hook 安装、反优化效果或真实通知字体/底纹；descriptor 通过也不等同真实微信功能验收。下文 Android 16 的历史结果不替代本轮验证。日志与产物仅保存在忽略目录 `.debug-artifacts/reply-fixture-device-20261025/`，提交前主机验证见 `.debug-artifacts/commit-20261025-device-report-fixes/`。
 
 2026-10-13 修复新增三项 framework 用例：调用实际消息清理方法，再恢复代码范围并做三轮 native bundle/Parcel 往返；缺少标记、owner 不符、正文已改变、没有代码或解析超限时保持原生结果；只补缺失的背景且不重复添加已有等宽字体。既有关闭开关用例额外检查 owner 标记也被移除。现有 runner 共注册 46 项 framework 用例，已在连接的 PJZ110 Android 16 手机上实际运行，46/46 通过。
 
