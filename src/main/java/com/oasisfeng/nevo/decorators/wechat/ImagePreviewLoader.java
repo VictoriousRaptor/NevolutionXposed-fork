@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -19,6 +20,7 @@ import androidx.core.app.NotificationCompat;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.xposed.BuildConfig;
 import com.oasisfeng.nevo.xposed.R;
+import com.oasisfeng.nevo.xposed.compat.XposedBridge;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -549,7 +551,7 @@ final class ImagePreviewLoader {
 						+ " pendingMatches=" + (pending.get(request.key) == request));
 				return;
 			}
-			Notification result = buildPreviewNotification(context, current, bitmap, request.token);
+			Notification result = buildPreviewNotification(context, XposedBridge.getModuleApplicationInfo(), current, bitmap, request.token);
 			manager.notify(tag, id, result);
 			log("published", "request=" + request.token + " style=FitStart actions="
 					+ (result.actions == null ? 0 : result.actions.length) + " picture=" + pictureSize(result));
@@ -570,9 +572,9 @@ final class ImagePreviewLoader {
 		return picture == null ? "none" : picture.getWidth() + "x" + picture.getHeight();
 	}
 
-	static Notification buildPreviewNotification(Context context, Notification current, Bitmap bitmap, long token) {
+	static Notification buildPreviewNotification(Context context, ApplicationInfo moduleInfo, Notification current, Bitmap bitmap, long token) {
 		// The notification belongs to WeChat, but these layout resources belong to the installed module.
-		RemoteViews expanded = new RemoteViews(BuildConfig.APPLICATION_ID, R.layout.wechat_image_preview);
+		RemoteViews expanded = ImagePreviewRemoteViews.create(moduleInfo, R.layout.wechat_image_preview);
 		expanded.setTextViewText(R.id.wechat_preview_title, current.extras.getCharSequence(Notification.EXTRA_TITLE));
 		expanded.setImageViewBitmap(R.id.wechat_preview_image, bitmap);
 		Notification result = Notification.Builder.recoverBuilder(context, current)
@@ -593,7 +595,7 @@ final class ImagePreviewLoader {
 				|| previews.get(id + ":" + tag) != preview
 				|| SystemClock.elapsedRealtime() - preview.publishedAt >= PREVIEW_KEEP_MS) return;
 		try {
-			Notification result = buildPreviewNotification(context, current, preview.bitmap, preview.request.token);
+			Notification result = buildPreviewNotification(context, XposedBridge.getModuleApplicationInfo(), current, preview.bitmap, preview.request.token);
 			manager.notify(tag, id, result);
 			log("reattached", "request=" + preview.request.token + " id=" + id + " style=FitStart");
 		} catch (Exception failure) {

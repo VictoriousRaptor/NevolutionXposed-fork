@@ -404,6 +404,7 @@ final class NotificationMessages {
                 WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN,
                 WeChatNotificationRemoval.READ_THROUGH_TOKEN,
                 ConversationClassification.TYPE, ConversationClassification.SOURCE,
+                WeChatNotificationAppearance.OWNER,
                 Notification.EXTRA_REMOTE_INPUT_HISTORY, NotificationMarkdown.RAW_TEXT,
                 Notification.EXTRA_MESSAGES, "android.messagingUser", "android.selfDisplayName"));
         for (String key : new java.util.HashSet<>(identity.keySet())) if (!keep.contains(key)) identity.remove(key);

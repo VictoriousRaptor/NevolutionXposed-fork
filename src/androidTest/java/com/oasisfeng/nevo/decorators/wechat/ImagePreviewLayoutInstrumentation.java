@@ -6,12 +6,15 @@ import android.app.PendingIntent;
 import android.app.RemoteInput;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.RectF;
 import android.os.Parcel;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.RemoteViews;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
 import com.oasisfeng.nevo.xposed.R;
@@ -42,7 +45,7 @@ final class ImagePreviewLayoutInstrumentation {
                         .addRemoteInput(new RemoteInput.Builder("synthetic-input").build()).build()).build();
         current.extras.putString(NotificationMessages.KEY, "synthetic-chat");
         Bitmap bitmap = Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888);
-        Notification preview = roundTrip(ImagePreviewLoader.buildPreviewNotification(owner, current, bitmap, 77));
+        Notification preview = roundTrip(ImagePreviewLoader.buildPreviewNotification(owner, module.getApplicationInfo(), current, bitmap, 77));
         check(ImagePreviewLoader.isPreview(preview), "preview marker lost");
         check("[图片]".contentEquals(preview.extras.getCharSequence(Notification.EXTRA_TEXT)), "placeholder changed");
         check("synthetic-chat".equals(preview.extras.getString(NotificationMessages.KEY)), "identity lost");
@@ -77,12 +80,35 @@ final class ImagePreviewLayoutInstrumentation {
         Notification current = new Notification.Builder(context, "synthetic-preview")
                 .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Synthetic chat")
                 .setContentText("[图片]").build();
-        Notification preview = ImagePreviewLoader.buildPreviewNotification(context, current,
+        Notification preview = ImagePreviewLoader.buildPreviewNotification(context, context.getApplicationInfo(), current,
                 Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888), 78);
         new ImagePreviewLoader(null).discard("synthetic", 778, preview);
         check(!ImagePreviewLoader.isPreview(preview), "discard kept preview marker");
         check(preview.bigContentView == null, "discard kept image layout");
         check(!preview.extras.containsKey(Notification.EXTRA_PICTURE), "discard kept picture");
+    }
+
+    static void modulePackageLookupUnavailable(Context context) {
+        // A nonexistent package guarantees lookup denial even though this runner uses the module UID.
+        ApplicationInfo hidden = new ApplicationInfo(context.getApplicationInfo());
+        hidden.packageName = "synthetic.hidden.preview";
+        try {
+            context.getPackageManager().getApplicationInfo(hidden.packageName, 0);
+            throw new AssertionError("Synthetic hidden package unexpectedly exists");
+        } catch (PackageManager.NameNotFoundException expected) { /* Reproduce the failed lookup. */ }
+        try {
+            new RemoteViews(hidden.packageName, R.layout.wechat_image_preview);
+            throw new AssertionError("Package-name constructor should fail in this environment");
+        } catch (IllegalArgumentException expected) { /* The production bug used this constructor. */ }
+        Notification current = new Notification.Builder(context, "synthetic-preview")
+                .setSmallIcon(android.R.drawable.ic_dialog_info).setContentText("[图片]").build();
+        Notification preview = roundTrip(ImagePreviewLoader.buildPreviewNotification(context, hidden, current,
+                Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888), 79));
+        check(ImagePreviewLoader.isPreview(preview), "blocked lookup prevented image preview creation");
+        check(preview.bigContentView != null && hidden.packageName.equals(preview.bigContentView.getPackage()),
+                "explicit ApplicationInfo was not preserved");
+        check(preview.bigContentView.getLayoutId() == R.layout.wechat_image_preview, "layout id changed");
+        check(preview.extras.containsKey(Notification.EXTRA_PICTURE), "blocked lookup lost picture");
     }
 
     private static Notification roundTrip(Notification notification) {

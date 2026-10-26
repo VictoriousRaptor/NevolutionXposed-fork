@@ -11,6 +11,14 @@ import java.util.Map;
 import org.junit.Test;
 
 public class RemotePreferenceStoreTest {
+	@Test public void expandedAppNameDefaultsHiddenAndKeepsExplicitComparisonChoice() {
+		String key = "WeChatDecorator.hide_expanded_app_name";
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.migratedLocalValues(Collections.emptyMap(), 9).get(key));
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.migratedLocalValues(Collections.singletonMap(key, false), 9).get(key));
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.emptyMap(), Collections.singletonMap(key, false)).get(key));
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.singletonMap(key, false), Collections.singletonMap(key, true)).get(key));
+	}
+
 	@Test public void imageWaitDefaultsAndExistingRemoteChoiceAreSynchronized() {
 		assertEquals("1500", RemotePreferenceStore.mergeImageWaitMillis(null, null));
 		assertEquals("5000", RemotePreferenceStore.mergeImageWaitMillis(null, "5000"));

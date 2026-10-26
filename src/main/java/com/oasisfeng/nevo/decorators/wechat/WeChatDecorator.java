@@ -414,6 +414,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 
 			String channel_id = n.getChannelId();
 			if (CHANNEL_MISC.equals(channel_id)) return Decorating.Unprocessed;	// Misc. notifications on Android 8+.
+			WeChatNotificationAppearance.mark(n);
 			
 			final CharSequence text = extras.getCharSequence(Notification.EXTRA_TEXT);
 			String content = text != null ? text.toString() : null;
@@ -539,6 +540,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 			messaging.setGroupConversation(is_group_chat).setConversationTitle(title);
 			MessagingBuilder.flatIntoExtras(messaging, extras);
+			WeChatNotificationAppearance.mark(n);
 			NotificationMarkdown.apply(n, mMarkdownEnabled);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
 

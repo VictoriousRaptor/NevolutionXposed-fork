@@ -4,6 +4,21 @@
 
 配合脚本：`tools/collect-device-info.ps1`（只读取设备与 APK，不在手机上做任何修改）。
 
+## 2026-10-27 图片展开布局的模块包查询修复
+
+- 现场 Android 17 / 微信 8.0.79 (3182) 已确认：图片事件和缩略图解码成功，但 `RemoteViews(String, int)` 查询模块包时抛出 `IllegalArgumentException: No such package com.oasisfeng.nevo.xposed`，尚未到通知发布。模块安装存在不代表微信进程能够查询模块；此前在模块 UID 下切换微信 Context 的测试没有覆盖这个条件。具体过滤来源未确认，不改动系统可见性或其他模块设置。
+- 首次发布和后续图片重新挂接均通过已 attach 的 libxposed API 102 `XposedInterface.getModuleApplicationInfo(): ApplicationInfo` 获取模块信息，显式传给布局构建。`ImagePreviewRemoteViews` 只按 `RemoteViews(ApplicationInfo, int)` 完整构造签名反射查找、设为可访问后创建；该构造在旧系统中属于隐藏接口，不能直接链接成一个较新 API 的公开调用。minSdk 继续为 26；不以同名或其他参数签名替代，不回退到会重现故障的包名构造，也不添加 RemoteViews hook 或调整隐藏 API 策略。构造缺失、访问被拒或其他异常沿用发布/重新挂接失败路径，保留现有文字通知；Debug 的 `publish_failed` / `reattach_failed` 仅记录异常类型，Release 不新增图片日志。
+- 模块资源所有者、160 dp `fitStart`、`DecoratedCustomViewStyle`、通知身份与代次、RemoteInput/回复动作、静默更新、图片清理和缓存保持原逻辑。图片/普通大图开关、等待值、微信主进程范围及四组版本名与版本码同时匹配的图片画像不变；回复、应用内回复、撤回和头像/展开应用名各自保持独立门禁。
+- 主机回归覆盖包名构造必然失败时的 ApplicationInfo 构造、protected/public 完整签名、错误签名拒绝、构造异常不重试包名及模块信息缺失。新增 framework 场景使用不存在的合成包名，先确认包查询与旧构造失败，再核验显式 ApplicationInfo 的图片通知构建、Parcel、资源包名与布局 ID；原有 fitStart、回复动作和撤回清理回归继续保留。framework 用例仅编译，本轮不安装、不运行设备测试，不把主机通过当作 Android 26 或实际微信/SystemUI 展示验收。
+- 合并后的离线验证为 212 项主机测试全部通过，Debug instrumentation APK 与 Release 构建成功，`lintVitalRelease` 通过；Release 与既有 release 证书一致，zipalign 通过，实际 minSdk 26 且非 debuggable。没有执行完整 Lint、framework 用例或真实收图/重新挂接验收。
+
+## 2026-10-26 私聊原生头像与展开应用头对比
+
+- 新增 framework 渲染 BEFORE hook：`Notification$MessagingStyle.makeMessagingView(int): RemoteViews`，在微信主进程与 SystemUI 中，仅对实际微信包、带模块消息标记的非群聊且非已确认 bot 通知，将原 `getLargeIcon()` 传入系统会话图标布局；重要会话类型保留，无原头像回退。链接/文件等原模板继续沿用微信图标；图片预览保留标记。完整字段/常量校验与作用域见[通知外观说明](wechat-notification-appearance.md)。
+- 新增展开 AFTER hook：`Notification$Builder.createExpandedContentView(): RemoteViews`，方法不存在才回退到 `createBigContentView(): RemoteViews`；要求零参数、实例方法和准确返回类型。克隆最终展开 RemoteViews 后隐藏应用名及对应分隔符，保留会话标题、时间、图标、展开与回复操作。只修改模块消息，排除汇总；签名不符、去优化或安装失败独立保留系统显示，匿名诊断使用 `WeChat.Appearance source=avatar_hook_ready/header_hook_ready`、`avatar_hook_unavailable/header_hook_unavailable` 和回调异常类型。
+- 新增默认开启的 `WeChatDecorator.hide_expanded_app_name` 设置；schema 升为 10，显式关闭选择在迁移/同步时保留，渲染时读取，关闭后待模板重建恢复原应用名。该开关不关闭私聊头像规则，不主动重发通知或操作进程。
+- 不新增或修改微信混淆 hook、版本名/版本码映射；回复、图片、应用内回复、撤回各自门禁和未知版本回退保持独立。主机测试、构建、运行时 hook 与真实微信/OEM 展示分别记录；本轮按用户要求不安装 APK、不运行设备测试、不操作设备或重启进程。framework 回归仅编译，真实头像角标、折叠/展开和开关对比待另行授权验收。
+
 ## 2026-10-26 图片等待设置与下载 ID 恢复
 
 - 新增“图片文件等待时间（毫秒）”：`WeChatDecorator.image_preview_wait_ms`，按数字字符串保存，默认 `1500`，有效范围 `100–30000`。设置页拒绝空值、非整数和越界输入；读取到无效字符串或错误类型时保守使用默认值。设置存储 schema 升为 9；数值独立于既有布尔开关同步到 libxposed `settings` 组，本地显式值优先，本地缺失时保留远端有效值。微信主进程初始化读取设置，修改后需重新初始化微信进程；本轮不自动执行进程重启。

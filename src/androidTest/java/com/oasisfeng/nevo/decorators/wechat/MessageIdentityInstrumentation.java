@@ -67,7 +67,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "markdownStylesAndParcel", "markdownRebuildAndDisable", "markdownIdentityReplyRecall", "markdownBuilderAndPreview",
                 "markdownCodeStylesAndParcel", "markdownCodeSourceAndReply",
                 "markdownFrameworkCodeCleanup", "markdownRestorationScope", "markdownPartialCodeStyles",
-                "imagePreviewFitStartAndActions", "imagePreviewDiscardClearsLayout", "imageWaitPreferenceSync" };
+                "imagePreviewFitStartAndActions", "imagePreviewDiscardClearsLayout", "imagePreviewModulePackageLookupUnavailable", "imageWaitPreferenceSync",
+                "notificationNativeAvatar", "notificationAppearanceScope", "notificationExpandedAppName" };
         Runnable[] tests = { () -> NotificationCompatibilityInstrumentation.carExtensionWithoutConversation(getTargetContext()),
                 NotificationCompatibilityInstrumentation::channelMigrationPreservesSettings,
                 this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
@@ -110,7 +111,11 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 NotificationMarkdownInstrumentation::restorationCompletesPartialStyles,
                 () -> ImagePreviewLayoutInstrumentation.fitStartAndActions(this),
                 () -> ImagePreviewLayoutInstrumentation.discardClearsLayout(getTargetContext()),
-                () -> com.oasisfeng.nevo.xposed.RemotePreferenceStoreInstrumentation.imageWaitSync(getTargetContext()) };
+                () -> ImagePreviewLayoutInstrumentation.modulePackageLookupUnavailable(getTargetContext()),
+                () -> com.oasisfeng.nevo.xposed.RemotePreferenceStoreInstrumentation.imageWaitSync(getTargetContext()),
+                () -> NotificationAppearanceInstrumentation.nativeAvatarAndGroupScope(getTargetContext()),
+                () -> NotificationAppearanceInstrumentation.ownershipAndPreviewMetadata(getTargetContext()),
+                () -> NotificationAppearanceInstrumentation.expandedHeaderClone(this) };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();

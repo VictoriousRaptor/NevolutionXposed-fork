@@ -1,6 +1,7 @@
 package com.oasisfeng.nevo.xposed.compat;
 
 import android.util.Log;
+import android.content.pm.ApplicationInfo;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -21,6 +22,10 @@ public final class XposedBridge {
 
 	public static void attach(XposedModule module) {
 		XposedBridge.module = module;
+	}
+
+	public static ApplicationInfo getModuleApplicationInfo() {
+		return requireModule().getModuleApplicationInfo();
 	}
 
 	public static void log(String message) {

@@ -11,12 +11,13 @@ import java.util.Map;
 
 import io.github.libxposed.service.XposedService;
 import com.oasisfeng.nevo.decorators.wechat.ImagePreviewPolicy;
+import com.oasisfeng.nevo.decorators.wechat.NotificationAppearanceHooks;
 
 @SuppressWarnings("deprecation")
 final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenceChangeListener {
 	static final String GROUP = "settings";
 	private static final String SCHEMA_VERSION_KEY = "settings_schema_version";
-	static final int CURRENT_SCHEMA_VERSION = 9;
+	static final int CURRENT_SCHEMA_VERSION = 10;
 	/** Key of the removed MIUI decorator; purged from local and remote storage on migration. */
 	private static final String OBSOLETE_MIUI_KEY = "MIUIDecorator.enabled";
 	private static final String OBSOLETE_MEDIA_KEY = "MediaDecorator.enabled";
@@ -31,7 +32,8 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 			KEY_IMAGE_PREVIEW_LARGE,
 			KEY_MARKDOWN,
 			KEY_SHOW_LAST_REPLY,
-			KEY_PRESERVE_EMOJI
+			KEY_PRESERVE_EMOJI,
+			NotificationAppearanceHooks.PREF_HIDE_APP_NAME
 	};
 
 	private static final String TAG = "RemotePreferenceStore";
@@ -154,7 +156,7 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 	}
 
 	static boolean defaultValue(String key) {
-		return "WeChatDecorator.enabled".equals(key);
+		return "WeChatDecorator.enabled".equals(key) || NotificationAppearanceHooks.PREF_HIDE_APP_NAME.equals(key);
 	}
 
 	private static boolean isBooleanKey(String key) {
