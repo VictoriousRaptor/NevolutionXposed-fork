@@ -67,7 +67,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "markdownStylesAndParcel", "markdownRebuildAndDisable", "markdownIdentityReplyRecall", "markdownBuilderAndPreview",
                 "markdownCodeStylesAndParcel", "markdownCodeSourceAndReply",
                 "markdownFrameworkCodeCleanup", "markdownRestorationScope", "markdownPartialCodeStyles",
-                "imagePreviewFitStartAndActions", "imagePreviewDiscardClearsLayout" };
+                "imagePreviewFitStartAndActions", "imagePreviewDiscardClearsLayout", "imageWaitPreferenceSync" };
         Runnable[] tests = { () -> NotificationCompatibilityInstrumentation.carExtensionWithoutConversation(getTargetContext()),
                 NotificationCompatibilityInstrumentation::channelMigrationPreservesSettings,
                 this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
@@ -109,7 +109,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 NotificationMarkdownInstrumentation::restorationRejectsUnownedOrChangedText,
                 NotificationMarkdownInstrumentation::restorationCompletesPartialStyles,
                 () -> ImagePreviewLayoutInstrumentation.fitStartAndActions(this),
-                () -> ImagePreviewLayoutInstrumentation.discardClearsLayout(getTargetContext()) };
+                () -> ImagePreviewLayoutInstrumentation.discardClearsLayout(getTargetContext()),
+                () -> com.oasisfeng.nevo.xposed.RemotePreferenceStoreInstrumentation.imageWaitSync(getTargetContext()) };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();

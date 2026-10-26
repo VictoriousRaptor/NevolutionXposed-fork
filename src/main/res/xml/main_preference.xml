@@ -37,6 +37,12 @@
 			android:defaultValue="false"
 			android:summary="@string/decorator_wechat_image_preview_large_description"
 			android:title="@string/decorator_wechat_image_preview_large_title"/>
+		<EditTextPreference
+			android:key="WeChatDecorator.image_preview_wait_ms"
+			android:defaultValue="1500"
+			android:dependency="WeChatDecorator.image_preview"
+			android:dialogTitle="@string/decorator_wechat_image_wait_title"
+			android:title="@string/decorator_wechat_image_wait_title"/>
 	</PreferenceCategory>
 
 	<Preference

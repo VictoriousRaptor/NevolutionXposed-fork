@@ -11,6 +11,21 @@ import java.util.Map;
 import org.junit.Test;
 
 public class RemotePreferenceStoreTest {
+	@Test public void imageWaitDefaultsAndExistingRemoteChoiceAreSynchronized() {
+		assertEquals("1500", RemotePreferenceStore.mergeImageWaitMillis(null, null));
+		assertEquals("5000", RemotePreferenceStore.mergeImageWaitMillis(null, "5000"));
+	}
+
+	@Test public void imageWaitLocalChoiceWinsAndIsNormalized() {
+		assertEquals("7500", RemotePreferenceStore.mergeImageWaitMillis(" 7500 ", "5000"));
+		assertEquals("100", RemotePreferenceStore.mergeImageWaitMillis("100", "5000"));
+	}
+
+	@Test public void invalidImageWaitCannotEnterRemotePreferences() {
+		assertEquals("1500", RemotePreferenceStore.mergeImageWaitMillis("invalid", "5000"));
+		assertEquals("1500", RemotePreferenceStore.mergeImageWaitMillis(null, "30001"));
+	}
+
 	@Test public void preserveEmojiDefaultsOffAndKeepsExplicitChoicesAcrossUpgradeAndSync() {
 		String key = RemotePreferenceStore.KEY_PRESERVE_EMOJI;
 		assertEquals(Boolean.FALSE, RemotePreferenceStore.migratedLocalValues(Collections.emptyMap(), 6).get(key));

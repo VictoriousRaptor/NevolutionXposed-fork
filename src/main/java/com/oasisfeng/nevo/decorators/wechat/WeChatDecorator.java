@@ -183,6 +183,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 			mMarkdownEnabled = pref.getBoolean(NotificationMarkdown.PREF, false);
 			Log.i("WeChat.Markdown", "source=markdown_settings enabled=" + mMarkdownEnabled);
 			imagePreviews.setLargePreviewEnabled(mImagePreviewLargeEnabled);
+			String imageWait = null;
+			try { imageWait = pref.getString(ImagePreviewPolicy.PREF_WAIT_MS, null); }
+			catch (ClassCastException invalidType) { /* Invalid stored values use the default timeout. */ }
+			imagePreviews.setWaitMillis(ImagePreviewPolicy.waitMillis(imageWait));
 
 			mMessagingBuilder = new MessagingBuilder(getAppContext(), mReplyController);		// Must be called after loadPreferences().
 			if (!mRoundResetReceiverRegistered) {
@@ -194,7 +198,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			channelMessage = moduleString(R.string.channel_message, "新消息");
 			channelMisc = moduleString(R.string.channel_misc, "其他通知");
 			imageLog("decorator_ready", "disabled=" + isDisabled() + " image_preview=" + mImagePreviewEnabled
-					+ " image_large=" + mImagePreviewLargeEnabled);
+					+ " image_large=" + mImagePreviewLargeEnabled + " image_wait_ms=" + ImagePreviewPolicy.waitMillis(imageWait));
 		}
 
 		private synchronized void onAppSent(String talker, long messageId, long created) {

@@ -58,6 +58,7 @@ final class ImagePreviewLoader {
 		worker.setRemoveOnCancelPolicy(true);
 	}
 	void setLargePreviewEnabled(boolean enabled) { largePreviewEnabled = enabled; }
+	void setWaitMillis(int value) { waitMillis = value; }
 	void installLargePreview(Context context, ClassLoader loader) {
 		if (largePreviewEnabled) largePreview.install(context, loader);
 	}
@@ -68,6 +69,7 @@ final class ImagePreviewLoader {
 	private final LinkedHashMap<String, Long> claimed = new LinkedHashMap<>();
 	private final Map<Long, Request> probes = new ConcurrentHashMap<>();
 	private volatile boolean largePreviewEnabled;
+	private volatile int waitMillis = ImagePreviewPolicy.DEFAULT_WAIT_MS;
 
 	private static final long PREVIEW_KEEP_MS = 30000;
 	private static final int PREVIEW_CACHE = 4;
@@ -215,11 +217,11 @@ final class ImagePreviewLoader {
 		}
 		probes.values().removeIf(probe -> probe.key.equals(key));
 		previews.remove(key);
-		Request request = new Request(key, talker, n, messageIdentity(messages));
+		Request request = new Request(key, talker, n, messageIdentity(messages), waitMillis);
 		pending.put(key, request);
 		n.extras.putLong(TOKEN, request.token);
 		n.extras.putLong(NOTIFICATION_TOKEN, request.notificationToken);
-		log("queued", "request=" + request.token + " id=" + id + " when=" + request.when);
+		log("queued", "request=" + request.token + " id=" + id + " when=" + request.when + " waitMs=" + request.waitMillis);
 		try {
 			request.future = worker.schedule(() -> resolve(context, manager, tag, id, request), 0, TimeUnit.MILLISECONDS);
 		} catch (RejectedExecutionException overloaded) {
@@ -240,6 +242,8 @@ final class ImagePreviewLoader {
 			request.resolvedTalker = talker;
 			if (request.eventKey != null && !request.eventKey.equals(event.key)) { finish(request, "event_changed"); return; }
 			request.eventKey = event.key;
+			request.deadline = Math.min(request.deadline,
+					ImagePreviewPolicy.deadline(request.started, request.waitMillis, event.observed));
 			request.probePaths = event.paths;
 			startProbe(request);
 			Long owner = claimed.get(event.key);
@@ -273,7 +277,7 @@ final class ImagePreviewLoader {
 					WeChatImageDownloader.BaseRow row = request.largeRow;
 					request.largeSubmitAttempted = true;
 					largePreview.request(row, request.token,
-							request.started + ImagePreviewPolicy.QUALITY_WAIT_MS, completedRow -> {
+							request.deadline, completedRow -> {
 								if (completedRow != null) {
 									request.largeDownloadComplete = true;
 									request.largePaths = completedRow.paths();
@@ -297,7 +301,7 @@ final class ImagePreviewLoader {
 			if (best == null) { retryOrFinish(context, manager, tag, id, request, "file_not_ready"); return; }
 			long elapsed = SystemClock.elapsedRealtime() - request.started;
 			boolean waitForQuality = ImagePreviewPolicy.shouldWaitForQuality(best.width, best.height, best.quality,
-					target.width, target.height, elapsed, request.largeDownloadComplete);
+					target.width, target.height, elapsed, request.largeDownloadComplete, request.deadline - request.started);
 			if (waitForQuality && retry(context, manager, tag, id, request, "waiting_for_quality")) return;
 			Bitmap bitmap = decode(best, target);
 			if (bitmap == null) {
@@ -446,7 +450,7 @@ final class ImagePreviewLoader {
 
 	private boolean retry(Context context, NotificationManager manager, String tag, int id, Request request, String reason) {
 		long elapsed = SystemClock.elapsedRealtime() - request.started;
-		long remaining = ImagePreviewPolicy.QUALITY_WAIT_MS - elapsed;
+		long remaining = request.deadline - SystemClock.elapsedRealtime();
 		if (remaining <= 0 || pending.get(request.key) != request) return false;
 		request.attempts++;
 		if (request.attempts == 1) log("retry", "request=" + request.token + " reason=" + reason);
@@ -697,6 +701,8 @@ final class ImagePreviewLoader {
 		final long token = SEQUENCE.incrementAndGet(), received = System.currentTimeMillis();
 		final long when, started = SystemClock.elapsedRealtime();
 		final long notificationToken;
+		final int waitMillis;
+		long deadline;
 		int attempts;
 		boolean diagnosed, pathFailureLogged;
 		boolean largeLookupLogged, largeSubmitAttempted, largeDownloadComplete, publishing;
@@ -706,7 +712,9 @@ final class ImagePreviewLoader {
 		volatile String resolvedTalker;
 		volatile ScheduledFuture<?> future;
 		final CharSequence title, text;
-		Request(String key, TalkerSource talkerSource, Notification n, List<String> messages) {
+		Request(String key, TalkerSource talkerSource, Notification n, List<String> messages, int waitMillis) {
+			this.waitMillis = waitMillis;
+			deadline = started + waitMillis;
 			this.messages = messages;
 			this.key = key;
 			this.talkerSource = talkerSource;

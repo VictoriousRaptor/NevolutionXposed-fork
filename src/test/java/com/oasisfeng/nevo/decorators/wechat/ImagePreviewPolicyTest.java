@@ -5,6 +5,49 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class ImagePreviewPolicyTest {
+	@Test public void customWaitParsesMillisecondsAndKeepsTheDefault() {
+		assertEquals(1500, ImagePreviewPolicy.waitMillis(null));
+		assertEquals(5000, ImagePreviewPolicy.waitMillis("5000"));
+		assertEquals(100, ImagePreviewPolicy.waitMillis("100"));
+		assertEquals(30000, ImagePreviewPolicy.waitMillis("30000"));
+		assertEquals(2500, ImagePreviewPolicy.waitMillis(" 2500 "));
+	}
+
+	@Test public void invalidWaitUsesTheSafeDefault() {
+		for (String value : new String[]{null, "", "garbage", "1.5", "0", "-1", "99", "30001", "99999999999999"}) {
+			assertFalse(ImagePreviewPolicy.isValidWaitMillis(value));
+			assertEquals(1500, ImagePreviewPolicy.waitMillis(value));
+		}
+		assertTrue(ImagePreviewPolicy.isValidWaitMillis("5000"));
+	}
+
+	@Test public void qualityWaitHonorsBothLongerAndShorterDeadlines() {
+		assertTrue(ImagePreviewPolicy.shouldWaitForQuality(384, 216, ImagePreviewPolicy.QUALITY_THUMBNAIL,
+				1080, 608, 4999, false, 5000));
+		assertFalse(ImagePreviewPolicy.shouldWaitForQuality(384, 216, ImagePreviewPolicy.QUALITY_THUMBNAIL,
+				1080, 608, 5000, false, 5000));
+		assertFalse(ImagePreviewPolicy.shouldWaitForQuality(384, 216, ImagePreviewPolicy.QUALITY_THUMBNAIL,
+				1080, 608, 500, false, 500));
+		assertFalse(ImagePreviewPolicy.shouldWaitForQuality(277, 513, ImagePreviewPolicy.QUALITY_HD,
+				1239, 846, 400, true, 5000));
+	}
+
+	@Test public void maximumWaitFallsBackWhileTheThumbnailIdentityIsStillValid() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("synthetic-chat", 1, 10000, java.util.Collections.singletonList("synthetic-thumb"), 1000);
+		long started = 2000;
+		long deadline = ImagePreviewPolicy.deadline(started, 30000, 1000);
+		assertNotNull(index.select("synthetic-chat", 10000, started, deadline));
+		assertFalse(ImagePreviewPolicy.shouldWaitForQuality(384, 216, ImagePreviewPolicy.QUALITY_THUMBNAIL,
+				1080, 608, deadline - started, false, deadline - started));
+		assertNull(index.select("synthetic-chat", 10000, started, 32000));
+	}
+
+	@Test public void identityLimitNeverExtendsTheConfiguredWait() {
+		assertEquals(3500, ImagePreviewPolicy.deadline(2000, 1500, 1000));
+		assertTrue(ImagePreviewPolicy.deadline(30900, 30000, 1000) <= 30900);
+	}
+
 	@Test public void higherResolutionWinsRegardlessOfOrder() {
 		assertTrue(ImagePreviewPolicy.isBetter(1280, 720, ImagePreviewPolicy.QUALITY_THUMBNAIL,
 				384, 216, ImagePreviewPolicy.QUALITY_THUMBNAIL, 1080, 608));

@@ -10,12 +10,13 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import io.github.libxposed.service.XposedService;
+import com.oasisfeng.nevo.decorators.wechat.ImagePreviewPolicy;
 
 @SuppressWarnings("deprecation")
 final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenceChangeListener {
 	static final String GROUP = "settings";
 	private static final String SCHEMA_VERSION_KEY = "settings_schema_version";
-	static final int CURRENT_SCHEMA_VERSION = 8;
+	static final int CURRENT_SCHEMA_VERSION = 9;
 	/** Key of the removed MIUI decorator; purged from local and remote storage on migration. */
 	private static final String OBSOLETE_MIUI_KEY = "MIUIDecorator.enabled";
 	private static final String OBSOLETE_MEDIA_KEY = "MediaDecorator.enabled";
@@ -72,12 +73,15 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 	}
 
 	@Override public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
-		if (!isBooleanKey(key)) return;
+		boolean imageWait = ImagePreviewPolicy.PREF_WAIT_MS.equals(key);
+		if (!imageWait && !isBooleanKey(key)) return;
 		XposedService bound = service;
 		if (bound == null) return;
 		try {
-			bound.getRemotePreferences(GROUP).edit()
-					.putBoolean(key, sharedPreferences.getBoolean(key, defaultValue(key))).apply();
+			SharedPreferences.Editor editor = bound.getRemotePreferences(GROUP).edit();
+			if (imageWait) editor.putString(key, mergeImageWaitMillis(readImageWait(sharedPreferences), null));
+			else editor.putBoolean(key, sharedPreferences.getBoolean(key, defaultValue(key)));
+			editor.apply();
 		} catch (RuntimeException e) {
 			Log.e(TAG, "Unable to update remote preference " + key, e);
 		}
@@ -98,6 +102,15 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 		return values;
 	}
 
+	static String mergeImageWaitMillis(String local, String remote) {
+		return Integer.toString(ImagePreviewPolicy.waitMillis(local != null ? local : remote));
+	}
+
+	private static String readImageWait(SharedPreferences preferences) {
+		try { return preferences.getString(ImagePreviewPolicy.PREF_WAIT_MS, null); }
+		catch (ClassCastException invalidType) { return null; }
+	}
+
 	private static void synchronize(SharedPreferences local, SharedPreferences remote) {
 		Map<String, Boolean> localValues = readKnownBooleans(local);
 		Map<String, Boolean> remoteValues = readKnownBooleans(remote);
@@ -107,6 +120,9 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 		applySchemaMigration(merged, schemaVersion);
 		SharedPreferences.Editor localEditor = local.edit();
 		SharedPreferences.Editor remoteEditor = remote.edit();
+		String imageWait = mergeImageWaitMillis(readImageWait(local), readImageWait(remote));
+		localEditor.putString(ImagePreviewPolicy.PREF_WAIT_MS, imageWait);
+		remoteEditor.putString(ImagePreviewPolicy.PREF_WAIT_MS, imageWait);
 		for (Map.Entry<String, Boolean> entry : merged.entrySet()) {
 			localEditor.putBoolean(entry.getKey(), entry.getValue());
 			remoteEditor.putBoolean(entry.getKey(), entry.getValue());

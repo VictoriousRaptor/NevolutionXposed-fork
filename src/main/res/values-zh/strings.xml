@@ -38,7 +38,10 @@
 	<string name="decorator_wechat_image_preview_title">通知内显示图片</string>
 	<string name="decorator_wechat_image_preview_description">收到图片时在通知里直接显示图片，而不是 [图片]。开启或关闭后需要重启微信进程；关闭时保持微信原始的 [图片] 提示。</string>
 	<string name="decorator_wechat_image_preview_large_title">主动获取普通大图</string>
-	<string name="decorator_wechat_image_preview_large_description">仅在“通知内显示图片”也已开启、微信版本受支持且本地图片未达到预览要求时，才请求微信下载普通压缩图。从通知图片请求开始最多等待 1.5 秒；图片提前就绪即显示，超时使用当前最佳图片，无可用图片时保留原通知。不保证下载能在时限内完成，不会请求原图；已提交的微信下载任务可能继续在后台完成。修改后需要重启微信进程。</string>
+	<string name="decorator_wechat_image_preview_large_description">仅在“通知内显示图片”也已开启、微信版本受支持且本地图片未达到预览要求时，才请求微信下载普通压缩图。等待上限使用“图片文件等待时间”；图片提前就绪即显示，超时使用当前最佳图片，无可用图片时保留原通知。不保证下载能在时限内完成，不会请求原图；已提交的微信下载任务可能继续在后台完成。修改后需要重启微信进程。</string>
+	<string name="decorator_wechat_image_wait_title">图片文件等待时间（毫秒）</string>
+	<string name="decorator_wechat_image_wait_summary">最多等待 %1$d 毫秒；范围 100–30000，默认 1500。图片提前就绪即显示，超时保留最佳可用图片或原通知。修改后需重启微信进程。</string>
+	<string name="decorator_wechat_image_wait_range">请输入 %1$d–%2$d 之间的整数（毫秒）</string>
 	<string name="self_display_name">我</string>
 	<string name="action_reply">回复</string>
 

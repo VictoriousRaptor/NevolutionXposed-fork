@@ -4,6 +4,16 @@
 
 配合脚本：`tools/collect-device-info.ps1`（只读取设备与 APK，不在手机上做任何修改）。
 
+## 2026-10-26 图片等待设置与下载 ID 恢复
+
+- 新增“图片文件等待时间（毫秒）”：`WeChatDecorator.image_preview_wait_ms`，按数字字符串保存，默认 `1500`，有效范围 `100–30000`。设置页拒绝空值、非整数和越界输入；读取到无效字符串或错误类型时保守使用默认值。设置存储 schema 升为 9；数值独立于既有布尔开关同步到 libxposed `settings` 组，本地显式值优先，本地缺失时保留远端有效值。微信主进程初始化读取设置，修改后需重新初始化微信进程；本轮不自动执行进程重启。
+- 每个图片请求固定启动时的等待值，默认截止点为 `request.started + waitMillis`。选定唯一图片事件后，在该事件的 30 秒身份期限前预留 500 毫秒完成最终候选扫描，必要时提前收紧截止点，后续索引刷新不延长它；文件/事件重试、候选画质等待及普通大图下载观察共用同一截止点，避免等待 30 秒时先丢失事件而无法降级到缩略图。可提前发布，超时使用最佳可用图片或保留原通知；不保证微信网络下载按期完成，提交后的原生任务可能继续。不延长索引、预览缓存或调试探针生命周期，不放宽消息归属、取消、发布 token 和原图访问限制。
+- 恢复 `fbcf426` 之前的 ID 分工：SQL 单独读取 `ImgInfo2.id`、`msglocalid`、`msgSvrId`；下载首参使用基础图片行 `id`，`MsgIdTalker(long, String)` 使用该行 `msglocalid` 与 talker。缺列回退，非正消息本地 ID 不主动下载，仍保留基础行已有图片的预览。近期有界文件读取与 WXGF 缓存改进继续保留。
+- 适用当前四组图片画像：8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.79/3182，均按版本名与版本码同时匹配；原有反射完整签名、AFTER 回调、微信主进程及图片/普通大图各自开关不变。回复、应用内回复、撤回门禁各自独立。8.0.79 的 ID 语义已再次核对原 APK 反编译且设备 base 哈希匹配既有来源；其余版本不据此追加真实下载通过结论。
+- Debug 的 `NX_IMAGE stage=decorator_ready` 增加 `image_wait_ms`，`stage=queued` 增加 `waitMs`，用于确认进程配置和请求快照；既有 `large_submitted`、`large_submit_failed`、`retry`、`fallback` 和 token 诊断保留，不输出真实 ID、路径或消息内容。Release 仍不输出图片诊断。
+- 回归覆盖默认/最小/最大/无效等待值、缩短/延长画质截止点、远端设置同步及既有选择保留、图片/消息/服务端/原图 ID 互异、无效消息本地 ID 保留本地预览。framework 设置回归使用独立 SharedPreferences，不改用户真实设置。主机、签名构建、framework、真实图片收发及 SystemUI 展示分别记录，构建或描述符检查不等同实际图片下载和显示通过。
+- 本轮最终验证：200 项主机测试通过；同源干净副本完整 `lintDebug` 为 0 errors / 1 项原有警告；Debug、androidTest、Release 均通过既有 release 证书与对齐核验。Android 17 / API 37、微信 8.0.79 (3182) 的最终构建完成 65/65 framework 和 40 项 descriptor 检查；测试包及 runner 已移除并独立核验，最终签名 Release 已安装且拉回哈希一致。微信/SystemUI 进程未主动重启，真实图片事件、下载、渲染及新配置在既有微信进程内的加载仍未验收。原始日志及产物仅保存在本地忽略目录。
+
 ## 2026-10-24 全项目审查修复（3.4.0 / code 17）
 
 - SystemUI 继续通过 `NotificationListenerService` 已声明构造函数 AFTER 捕获实例和更新 NLS 弱引用。实际移除方法优先匹配 `onNotificationRemoved(StatusBarNotification, RankingMap, NotificationStats, int): void`，类型或方法不存在时独立尝试 `onNotificationRemoved(StatusBarNotification, RankingMap, int): void`；目标必须返回 void 且非 static。选定方法仍安装 BEFORE 回调；同一进程按 Method 仅安装一次，失败不记入成功集合，后续构造可重试。两种签名均不可用时记录 `NL hook failed`，不安装移除追踪；NLS 诊断与其他功能继续沿用既有路径。微信主进程和 SystemUI 的作用域、三种移除原因、代次广播及 Markdown 门禁不变。
@@ -149,7 +159,7 @@ ART 内联处理：安装 hook 前通过 libxposed API 102 的 `deoptimize(Execu
 
 ### 3.2 图片事件（8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.79/3182）
 
-2026-10-24 当前工作区说明：按用户要求保留本轮开始前已有的下载器改动，SQL 不再读取 `msglocalid`，`MsgIdTalker` 与下载方法首参都使用选中基础行的 `id`，对应主机测试已同步。下述 2026-10-23 记录保留原始离线推断和验收边界，不代表当前 ID 取值；本轮没有重新核实这些 ID 在各微信版本运行时的含义或真实下载行为。
+2026-10-24 历史变更：当时 SQL 不读 `msglocalid`，消息对与下载首参均使用基础图片行 `id`。2026-10-26 已按用户要求恢复此前分离逻辑，下述 2026-10-23 参数分工再次适用于当前代码；本轮设置、诊断与验证边界见本文顶部更新。
 
 2026-10-23 普通大图下载身份修复：固定 SQL 增加读取 `ImgInfo2.msglocalid`，与图片行 `id` 分开保存。下载接口 `b(long, MsgIdTalker, int, Object, int, <版本回调接口>, int, boolean): int` 的首参仍为选中基础行的图片 `id`，`com.tencent.mm.plugin.msg.MsgIdTalker(long, String)` 则使用 `msglocalid` 和该行的 `msgTalker`；不使用服务端 ID 或 `reserved1` 代替消息本地 ID。缺少列时查询失败并回退，`msglocalid <= 0` 时不提交下载，但仍可读取该基础行已有的本地图片。仍只在微信主进程、图片总开关及大图开关启用后请求；四组版本名与版本码必须同时匹配，完整运行时方法/返回类型校验及 hook 时机保持原有规则，回复、应用内回复和撤回门禁各自独立。
 

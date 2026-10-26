@@ -1,5 +1,7 @@
 # 微信通知图片预览清晰度修复计划
 
+2026-10-26：文件等待改为用户配置的 100–30000 毫秒，默认仍为 1500 毫秒；本页下文固定 1.5 秒的设计与性能记录对应默认值或历史实现。每请求的统一截止点、ID 分离和当前验证边界见[适配手册](wechat-version-adaptation-playbook.md)。
+
 2026-10-24：下文为历史诊断过程。当前路径探针默认关闭，须 Debug 构建显式增加 `-PimageDiagnostics=true`，取消、替换和连续性拒绝时停止旧观察；Release 始终关闭。当前实现及验证边界见[实现总结](wechat-image-preview-implementation-summary.md)。
 
 日期：2026-09-14

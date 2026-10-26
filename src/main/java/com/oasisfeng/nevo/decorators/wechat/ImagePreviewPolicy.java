@@ -1,14 +1,42 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
 /** Pure sizing and selection policy for notification image previews. */
-final class ImagePreviewPolicy {
-	static final long QUALITY_WAIT_MS = 1500;
+public final class ImagePreviewPolicy {
+	public static final String PREF_WAIT_MS = "WeChatDecorator.image_preview_wait_ms";
+	public static final int DEFAULT_WAIT_MS = 1500;
+	public static final int MIN_WAIT_MS = 100;
+	public static final int MAX_WAIT_MS = 30000;
+	private static final int IDENTITY_FALLBACK_MARGIN_MS = 500;
 	static final int MAX_PIXELS = 1024 * 1024;
 	static final int QUALITY_UNKNOWN = 0;
 	static final int QUALITY_THUMBNAIL = 1;
 	static final int QUALITY_HD = 2;
 
 	private ImagePreviewPolicy() {}
+
+	public static int waitMillis(String stored) {
+		return isValidWaitMillis(stored) ? Integer.parseInt(stored.trim()) : DEFAULT_WAIT_MS;
+	}
+
+	public static boolean isValidWaitMillis(String stored) {
+		if (stored == null) return false;
+		try {
+			int value = Integer.parseInt(stored.trim());
+			return value >= MIN_WAIT_MS && value <= MAX_WAIT_MS;
+		} catch (NumberFormatException invalid) { return false; }
+	}
+
+	static long deadline(long started, int waitMillis, long eventObserved) {
+		// Finish the last candidate scan before select() can prune the confirmed event.
+		return Math.min(started + waitMillis, eventObserved + ImageEventIndex.TTL_MS - IDENTITY_FALLBACK_MARGIN_MS);
+	}
+
+	static boolean shouldWaitForQuality(int width, int height, int sourceQuality,
+			int targetWidth, int targetHeight, long elapsedMs, boolean largeDownloadComplete, long waitMillis) {
+		if (largeDownloadComplete && sourceQuality >= QUALITY_HD) return false;
+		return elapsedMs < waitMillis
+				&& (sourceQuality < QUALITY_HD || !coversTarget(width, height, targetWidth, targetHeight));
+	}
 
 	static boolean isBetter(int width, int height, int sourceQuality, int currentWidth, int currentHeight,
 			int currentSourceQuality, int targetWidth, int targetHeight) {
@@ -31,14 +59,13 @@ final class ImagePreviewPolicy {
 
 	static boolean shouldWaitForQuality(int width, int height, int sourceQuality,
 			int targetWidth, int targetHeight, long elapsedMs) {
-		return elapsedMs < QUALITY_WAIT_MS
-				&& (sourceQuality < QUALITY_HD || !coversTarget(width, height, targetWidth, targetHeight));
+		return shouldWaitForQuality(width, height, sourceQuality, targetWidth, targetHeight, elapsedMs, false, DEFAULT_WAIT_MS);
 	}
 
 	static boolean shouldWaitForQuality(int width, int height, int sourceQuality,
 			int targetWidth, int targetHeight, long elapsedMs, boolean largeDownloadComplete) {
-		if (largeDownloadComplete && sourceQuality >= QUALITY_HD) return false;
-		return shouldWaitForQuality(width, height, sourceQuality, targetWidth, targetHeight, elapsedMs);
+		return shouldWaitForQuality(width, height, sourceQuality, targetWidth, targetHeight, elapsedMs,
+				largeDownloadComplete, DEFAULT_WAIT_MS);
 	}
 
 	/** Returns the largest non-upscaled size inside both the display box and pixel budget. */
