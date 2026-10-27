@@ -4,9 +4,24 @@
 
 配合脚本：`tools/collect-device-info.ps1`（只读取设备与 APK，不在手机上做任何修改）。
 
+## 2026-10-27 取消应用名修改并撤销额外标题改写
+
+- 撤销上一轮新增的应用名行替换群名、内容标题改为轮次首位发送者的实现和测试。保留更早的群头像角标、群聊图片复用文本模板及图片 reapply/撤回清理修正，应用名、分隔符与内容标题交回系统模板。
+- 取消原应用名隐藏功能，移除设置项、中英文文案、运行时开关和同步项；schema 11 在本地初始化及本地/远端同步时删除旧键。其余设置、历史迁移与通用远端选择保护保留。
+- `Notification$Builder.createExpandedContentView(): RemoteViews` AFTER hook（方法缺失才回退 `createBigContentView(): RemoteViews`）为群聊图片继续保留，完整实例签名、字段、去优化、实际微信 Context、模块所有者及非汇总门禁不变，不再读写任何应用名/标题视图。缺签名或安装失败保留系统模板，匿名 ready/unavailable/异常类型日志不变。图片所需接口/布局失败直接保留 `[图片]`，不尝试替代接口；可选 Xposed 渲染方法局部声明 BlockedPrivateApi，不放宽设备策略。
+- 图片的既有版本名与版本码仍同时匹配，回复、图片、应用内回复和撤回独立门禁不变。本次已授权执行框架旧设置双端清理和群头像/图片用例，最终 68/68 通过；微信描述符检查 40 项通过，测试包/runner 均清理，最终 Release 回拉哈希与本地一致且非 debuggable。真实微信/OEM 视觉结果仍待验收，详见通知外观说明的本次真机记录。
+
+## 2026-10-27 群聊通知主图标和图片消息样式
+
+- 既有 `Notification$MessagingStyle.makeMessagingView(int): RemoteViews` BEFORE hook 不再排除群聊：在微信主进程与 SystemUI 的实际微信 Context、模块外观标记、非汇总、非已确认 bot 且有原大图标的条件下，使用原群头像作为 `mShortcutIcon`，legacy 类型改为普通会话类型，保留重要会话类型。折叠/展开共用此规则，由系统提供微信角标；不把群头像写入成员 `Person`。完整字段类型、可写性、常量和方法签名检查保持原规则。
+- 群聊图片补图继续保留 `MessagingStyle`、群会话标志和原会话标题/消息身份。既有 `Builder.createExpandedContentView(): RemoteViews`（缺失时使用 `createBigContentView(): RemoteViews`）AFTER hook 在系统展开模板的克隆上向 `android:id/notification_main_column` 追加模块 `wechat_group_image_preview`，图片高 160 dp、`fitStart`；每次群聊展开先反射校验实例签名 `RemoteViews.removeFromParent(int): void` 并登记旧图移除动作，避免 reapply 重复和撤回残留；群名、发送者和消息文字沿用群聊文本排版，不再从可能混合群名和发送者的 `android.title` 另造标题。收起/横幅保持消息模板，私聊图片模板不变，回复动作、静默更新、token 和图片清理规则不变。
+- 模块布局继续使用 `RemoteViews(ApplicationInfo, int)` 的完整反射签名及 libxposed 模块信息，不回退包名查询。图片追加须有 READY、位图和群聊 MessagingStyle；无位图时只清理旧图；无容器 ID、移除接口签名不符、hook 缺签名/安装失败时保留群聊文字或图片标记，群图片移除接口/资源构造异常记录 `WeChat.Appearance source=group_image` 和异常类型，直接保留系统原消息模板。头像失败独立保留系统显示；未新增通知正文或身份日志。OEM 实际布局与 RemoteViews 应用行为仍需真机验证。
+- 微信图片画像仍为 8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.79/3182，版本名与版本码**同时匹配**；原有图片开关、等待时间、运行时签名校验不变。framework 外观按运行时完整签名适配，不另设微信版本白名单；回复、应用内回复、撤回画像独立，未知版本保守回退不变。
+- 框架回归新增群头像/角标布局选择、群图片 Parcel 后的模板/群名/发送者保留、展开图片布局和原模板克隆隔离、reapply 不重复及撤回重用视图时清除旧图。本次框架用例已在 Android 17 / API 37 执行，记录见通知外观说明；实际 hook 安装、群聊文字/图片补图前后、折叠/展开/横幅、系统标题、连续图文、回复和撤回后的真实微信/OEM 展示待真机验收。验证结果见[通知外观说明](wechat-notification-appearance.md)。
+
 ## 2026-10-27 3.4.0 审查精简
 
-本地初始化只迁移已存设置及历史 schema 明确要求的值，不提前写入其他布尔设置的默认值；首次同步仍按本地显式选择、远端选择、默认值的顺序取值，修复远端“关闭展开应用头”被本地初始化覆盖的路径。默认开启、运行时读取和其他历史迁移规则不变，不增加 schema、来源标记或 hook。删除图片等待策略中仅供旧测试使用的重载、外观安装的未用 ClassLoader 参数和重复模板常量；实际 hook 目标、完整签名、时机、进程范围、独立失败回退及各功能版本匹配语义均不变。回归新增“本地初始化后再合并远端关闭选择”的主机用例，沿用图片等待、签名与作用域测试；不以本地主机结果代替设备验证。
+本地初始化只迁移已存设置及历史 schema 明确要求的值，不提前写入其他布尔设置的默认值；首次同步仍按本地显式选择、远端选择、默认值的顺序取值，避免覆盖远端显式选择。其他设置默认值和历史迁移规则不变，不增加 schema、来源标记或 hook。删除图片等待策略中仅供旧测试使用的重载、外观安装的未用 ClassLoader 参数和重复模板常量；实际 hook 目标、完整签名、时机、进程范围、独立失败回退及各功能版本匹配语义均不变。回归新增“本地初始化后再合并远端关闭选择”的主机用例，沿用图片等待、签名与作用域测试；不以本地主机结果代替设备验证。
 
 ## 2026-10-27 图片展开布局的模块包查询修复
 
@@ -19,9 +34,9 @@
 ## 2026-10-26 私聊原生头像与展开应用头对比
 
 - 新增 framework 渲染 BEFORE hook：`Notification$MessagingStyle.makeMessagingView(int): RemoteViews`，在微信主进程与 SystemUI 中，仅对实际微信包、带模块消息标记的非群聊且非已确认 bot 通知，将原 `getLargeIcon()` 传入系统会话图标布局；重要会话类型保留，无原头像回退。链接/文件等原模板继续沿用微信图标；图片预览保留标记。完整字段/常量校验与作用域见[通知外观说明](wechat-notification-appearance.md)。
-- 新增展开 AFTER hook：`Notification$Builder.createExpandedContentView(): RemoteViews`，方法不存在才回退到 `createBigContentView(): RemoteViews`；要求零参数、实例方法和准确返回类型。克隆最终展开 RemoteViews 后隐藏应用名及对应分隔符，保留会话标题、时间、图标、展开与回复操作。只修改模块消息，排除汇总；签名不符、去优化或安装失败独立保留系统显示，匿名诊断使用 `WeChat.Appearance source=avatar_hook_ready/header_hook_ready`、`avatar_hook_unavailable/header_hook_unavailable` 和回调异常类型。
-- 新增默认开启的 `WeChatDecorator.hide_expanded_app_name` 设置；schema 升为 10，显式关闭选择在迁移/同步时保留，渲染时读取，关闭后待模板重建恢复原应用名。该开关不关闭私聊头像规则，不主动重发通知或操作进程。
-- 不新增或修改微信混淆 hook、版本名/版本码映射；回复、图片、应用内回复、撤回各自门禁和未知版本回退保持独立。主机测试、构建、运行时 hook 与真实微信/OEM 展示分别记录；本轮按用户要求不安装 APK、不运行设备测试、不操作设备或重启进程。framework 回归仅编译，真实头像角标、折叠/展开和开关对比待另行授权验收。
+- 新增展开 AFTER hook：`Notification$Builder.createExpandedContentView(): RemoteViews`，方法不存在才回退到 `createBigContentView(): RemoteViews`；要求零参数、实例方法和准确返回类型。此展开入口现仅用于群聊图片追加和清理，不修改应用名、分隔符或内容标题。只修改模块消息，排除汇总；签名不符、去优化或安装失败独立保留系统显示，匿名诊断使用 `WeChat.Appearance source=avatar_hook_ready/header_hook_ready`、`avatar_hook_unavailable/header_hook_unavailable` 和回调异常类型。
+- 原应用名隐藏设置及行为已移除，schema 11 清理旧键，应用名和标题沿用系统模板。
+- 不新增或修改微信混淆 hook、版本名/版本码映射；回复、图片、应用内回复、撤回各自门禁和未知版本回退保持独立。主机测试、构建、运行时 hook 与真实微信/OEM 展示分别记录；本轮按用户要求不安装 APK、不运行设备测试、不操作设备或重启进程。framework 回归仅编译，真实头像角标、折叠/展开和群聊标题待另行授权验收。
 
 ## 2026-10-26 图片等待设置与下载 ID 恢复
 

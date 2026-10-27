@@ -10,16 +10,16 @@ import java.util.Map;
 
 import io.github.libxposed.service.XposedService;
 import com.oasisfeng.nevo.decorators.wechat.ImagePreviewPolicy;
-import com.oasisfeng.nevo.decorators.wechat.NotificationAppearanceHooks;
 
 @SuppressWarnings("deprecation")
 final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenceChangeListener {
 	static final String GROUP = "settings";
 	private static final String SCHEMA_VERSION_KEY = "settings_schema_version";
-	static final int CURRENT_SCHEMA_VERSION = 10;
+	static final int CURRENT_SCHEMA_VERSION = 11;
 	/** Key of the removed MIUI decorator; purged from local and remote storage on migration. */
 	private static final String OBSOLETE_MIUI_KEY = "MIUIDecorator.enabled";
 	private static final String OBSOLETE_MEDIA_KEY = "MediaDecorator.enabled";
+	private static final String OBSOLETE_APP_NAME_KEY = "WeChatDecorator.hide_expanded_app_name";
 	static final String KEY_IMAGE_PREVIEW = "WeChatDecorator.image_preview";
 	static final String KEY_IMAGE_PREVIEW_LARGE = "WeChatDecorator.image_preview_large";
 	static final String KEY_MARKDOWN = "WeChatDecorator.markdown";
@@ -31,8 +31,7 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 			KEY_IMAGE_PREVIEW_LARGE,
 			KEY_MARKDOWN,
 			KEY_SHOW_LAST_REPLY,
-			KEY_PRESERVE_EMOJI,
-			NotificationAppearanceHooks.PREF_HIDE_APP_NAME
+			KEY_PRESERVE_EMOJI
 	};
 
 	private static final String TAG = "RemotePreferenceStore";
@@ -56,6 +55,7 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 		editor.remove("WeChatDecorator.miui_fix");
 		editor.remove(OBSOLETE_MIUI_KEY);
 		editor.remove(OBSOLETE_MEDIA_KEY);
+		editor.remove(OBSOLETE_APP_NAME_KEY);
 		editor.putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
 		editor.apply();
 	}
@@ -129,9 +129,9 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 			localEditor.putBoolean(entry.getKey(), entry.getValue());
 			remoteEditor.putBoolean(entry.getKey(), entry.getValue());
 		}
-		localEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).remove(OBSOLETE_MEDIA_KEY)
+		localEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).remove(OBSOLETE_MEDIA_KEY).remove(OBSOLETE_APP_NAME_KEY)
 				.putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
-		remoteEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).remove(OBSOLETE_MEDIA_KEY)
+		remoteEditor.remove("WeChatDecorator.miui_fix").remove(OBSOLETE_MIUI_KEY).remove(OBSOLETE_MEDIA_KEY).remove(OBSOLETE_APP_NAME_KEY)
 				.putInt(SCHEMA_VERSION_KEY, CURRENT_SCHEMA_VERSION);
 		localEditor.apply();
 		remoteEditor.apply();
@@ -139,6 +139,7 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 
 	static void applySchemaMigration(Map<String, Boolean> values, int schemaVersion) {
 		values.remove(OBSOLETE_MEDIA_KEY);
+		values.remove(OBSOLETE_APP_NAME_KEY);
 		if (schemaVersion < 2) values.put(KEY_IMAGE_PREVIEW, false);
 		if (schemaVersion < 3) values.remove(OBSOLETE_MIUI_KEY);
 		if (schemaVersion < 4) values.put(KEY_IMAGE_PREVIEW_LARGE, false);
@@ -156,7 +157,7 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 	}
 
 	static boolean defaultValue(String key) {
-		return "WeChatDecorator.enabled".equals(key) || NotificationAppearanceHooks.PREF_HIDE_APP_NAME.equals(key);
+		return "WeChatDecorator.enabled".equals(key);
 	}
 
 	private static boolean isBooleanKey(String key) {

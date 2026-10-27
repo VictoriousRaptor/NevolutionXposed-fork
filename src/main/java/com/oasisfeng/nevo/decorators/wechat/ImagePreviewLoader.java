@@ -573,13 +573,18 @@ final class ImagePreviewLoader {
 	}
 
 	static Notification buildPreviewNotification(Context context, ApplicationInfo moduleInfo, Notification current, Bitmap bitmap, long token) {
-		// The notification belongs to WeChat, but these layout resources belong to the installed module.
-		RemoteViews expanded = ImagePreviewRemoteViews.create(moduleInfo, R.layout.wechat_image_preview);
-		expanded.setTextViewText(R.id.wechat_preview_title, current.extras.getCharSequence(Notification.EXTRA_TITLE));
-		expanded.setImageViewBitmap(R.id.wechat_preview_image, bitmap);
-		Notification result = Notification.Builder.recoverBuilder(context, current)
-				.setStyle(new Notification.DecoratedCustomViewStyle())
-				.setCustomBigContentView(expanded).setOnlyAlertOnce(true).build();
+		Notification.Builder builder = Notification.Builder.recoverBuilder(context, current);
+		if (WeChatNotificationAppearance.isGroupMessaging(current)) {
+			// The expanded renderer appends the image to the native group messaging layout.
+			builder.setCustomBigContentView(null);
+		} else {
+			// The notification belongs to WeChat, but these layout resources belong to the installed module.
+			RemoteViews expanded = ImagePreviewRemoteViews.create(moduleInfo, R.layout.wechat_image_preview);
+			expanded.setTextViewText(R.id.wechat_preview_title, current.extras.getCharSequence(Notification.EXTRA_TITLE));
+			expanded.setImageViewBitmap(R.id.wechat_preview_image, bitmap);
+			builder.setStyle(new Notification.DecoratedCustomViewStyle()).setCustomBigContentView(expanded);
+		}
+		Notification result = builder.setOnlyAlertOnce(true).build();
 		NotificationMessages.copyIdentityExtras(current, result);
 		result.extras.putParcelable(Notification.EXTRA_PICTURE, bitmap);
 		result.extras.putBoolean(READY, true);

@@ -152,8 +152,7 @@ public class MainHook extends XposedModule {
 				() -> pref.getBoolean("WeChatDecorator.enabled", true)
 						&& pref.getBoolean(RemotePreferenceStore.KEY_MARKDOWN, false), processName, this::deoptimize);
 		NotificationAppearanceHooks.install(
-				() -> pref.getBoolean("WeChatDecorator.enabled", true),
-				() -> pref.getBoolean(NotificationAppearanceHooks.PREF_HIDE_APP_NAME, true), processName, this::deoptimize);
+				() -> pref.getBoolean("WeChatDecorator.enabled", true), processName, this::deoptimize);
 		switch (loadPackageParam.packageName) {
 			case "com.android.systemui":
 				if (!"com.android.systemui".equals(loadPackageParam.processName)) return;

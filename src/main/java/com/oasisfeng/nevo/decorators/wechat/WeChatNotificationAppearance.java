@@ -1,9 +1,14 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
+import android.content.pm.ApplicationInfo;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
 import android.widget.RemoteViews;
+
+import com.oasisfeng.nevo.xposed.R;
 
 import static com.oasisfeng.nevo.sdk.NevoDecoratorService.TEMPLATE_MESSAGING;
 
@@ -28,7 +33,6 @@ final class WeChatNotificationAppearance {
     static void useNativeAvatar(NotificationAppearanceHookProfile.Avatar profile, Object style, Notification notification)
             throws IllegalAccessException {
         if (!TEMPLATE_MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE))
-                || notification.extras.getBoolean("android.isGroupConversation")
                 || notification.extras.getInt(ConversationClassification.TYPE) == ConversationTypePolicy.BOT) return;
         Icon icon = notification.getLargeIcon();
         if (icon == null) return;
@@ -37,16 +41,32 @@ final class WeChatNotificationAppearance {
         if (profile.conversationType.getInt(style) == 0) profile.conversationType.setInt(style, 1);
     }
 
-    static RemoteViews hideAppName(RemoteViews original, Resources resources) {
-        int appName = resources.getIdentifier("app_name_text", "id", "android");
-        if (appName == 0) return original;
-        // Never change an existing cached/custom RemoteViews: toggling off must recover its original actions.
+    static boolean isGroupMessaging(Notification notification) {
+        return TEMPLATE_MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE))
+                && notification.extras.getBoolean("android.isGroupConversation");
+    }
+
+    @SuppressLint("BlockedPrivateApi") // Optional Xposed renderer: validate the exact signature and fall back on failure.
+    static RemoteViews withGroupImagePreview(RemoteViews original, Resources resources,
+                                             ApplicationInfo moduleInfo, Notification notification)
+            throws ReflectiveOperationException {
+        if (!isGroupMessaging(notification)) return original;
+        int column = resources.getIdentifier("notification_main_column", "id", "android");
+        if (column == 0) return original;
         RemoteViews result = original.clone();
-        result.setViewVisibility(appName, android.view.View.GONE);
-        for (String name : new String[]{"app_name_divider", "app_name_text_divider"}) {
-            int divider = resources.getIdentifier(name, "id", "android");
-            if (divider != 0) result.setViewVisibility(divider, android.view.View.GONE);
-        }
+        // SystemUI may reapply onto the previous view tree: remove our old image before adding one.
+        java.lang.reflect.Method remove = RemoteViews.class.getDeclaredMethod("removeFromParent", int.class);
+        if (remove.getReturnType() != void.class || java.lang.reflect.Modifier.isStatic(remove.getModifiers()))
+            throw new NoSuchMethodException("Unsupported RemoteViews.removeFromParent signature");
+        remove.setAccessible(true);
+        remove.invoke(result, R.id.wechat_preview_image);
+        Bitmap bitmap = ImagePreviewLoader.isPreview(notification)
+                ? notification.extras.getParcelable(Notification.EXTRA_PICTURE) : null;
+        if (bitmap == null) return result;
+        RemoteViews image = ImagePreviewRemoteViews.create(moduleInfo, R.layout.wechat_group_image_preview);
+        image.setImageViewBitmap(R.id.wechat_preview_image, bitmap);
+        // Keep the system's conversation title, sender rows, avatars and actions; append only the picture.
+        result.addView(column, image);
         return result;
     }
 

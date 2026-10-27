@@ -1,16 +1,12 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
-import android.app.Instrumentation;
 import android.app.Notification;
 import android.app.Person;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
-import android.view.View;
-import android.widget.FrameLayout;
 import android.widget.RemoteViews;
 
-import java.util.concurrent.atomic.AtomicReference;
 
 /** Synthetic framework checks only: never post a notification or contact a device app. */
 final class NotificationAppearanceInstrumentation {
@@ -34,8 +30,9 @@ final class NotificationAppearanceInstrumentation {
             profile.shortcutIcon.set(style, null);
             notice.extras.putBoolean("android.isGroupConversation", true);
             WeChatNotificationAppearance.useNativeAvatar(profile, style, notice);
-            check(profile.conversationType.getInt(style) == 0 && profile.shortcutIcon.get(style) == null,
-                    "group avatar rendering changed");
+            check(profile.conversationType.getInt(style) == 1 && profile.shortcutIcon.get(style) == nativeIcon,
+                    "native group icon and app badge layout not selected");
+            profile.shortcutIcon.set(style, null);
             notice.extras.putBoolean("android.isGroupConversation", false);
             notice.extras.putInt(ConversationClassification.TYPE, ConversationTypePolicy.BOT);
             WeChatNotificationAppearance.useNativeAvatar(profile, style, notice);
@@ -58,35 +55,26 @@ final class NotificationAppearanceInstrumentation {
         check(!WeChatNotificationAppearance.owned("com.tencent.mm", notice), "summary accepted");
         notice.flags &= ~Notification.FLAG_GROUP_SUMMARY;
 
+        CharSequence originalTitle = notice.extras.getCharSequence(Notification.EXTRA_TITLE);
         Bitmap image = Bitmap.createBitmap(16, 32, Bitmap.Config.ARGB_8888);
         Notification preview = ImagePreviewLoader.buildPreviewNotification(context, context.getApplicationInfo(), notice, image, 77);
         check(WeChatNotificationAppearance.owned("com.tencent.mm", preview), "preview lost appearance owner");
         check(ImagePreviewLoader.isPreview(preview), "preview state lost");
-        check("Synthetic chat".contentEquals(preview.extras.getCharSequence(Notification.EXTRA_TITLE)), "title changed");
-    }
+        check(android.text.TextUtils.equals(originalTitle, preview.extras.getCharSequence(Notification.EXTRA_TITLE)), "title changed");
 
-    static void expandedHeaderClone(Instrumentation instrumentation) {
-        AtomicReference<Throwable> failure = new AtomicReference<>();
-        instrumentation.runOnMainSync(() -> {
-            try {
-                Context context = instrumentation.getTargetContext();
-                NotificationAppearanceHookProfile.Header profile = NotificationAppearanceHookProfile.header(
-                        Notification.Builder.class, Context.class, Notification.class, RemoteViews.class);
-                Notification.Builder builder = builder(context).setStyle(style());
-                RemoteViews original = (RemoteViews) profile.render.invoke(builder);
-                check(original != null, "missing expanded template");
-                RemoteViews hidden = WeChatNotificationAppearance.hideAppName(original, context.getResources());
-                check(hidden != original, "cached RemoteViews mutated");
-                int appName = context.getResources().getIdentifier("app_name_text", "id", "android");
-                View before = original.apply(context, new FrameLayout(context)).findViewById(appName);
-                View after = hidden.apply(context, new FrameLayout(context)).findViewById(appName);
-                View recovered = original.apply(context, new FrameLayout(context)).findViewById(appName);
-                check(before != null && after != null && recovered != null, "app name view unavailable");
-                check(after.getVisibility() == View.GONE, "app name remains visible");
-                check(before.getVisibility() == recovered.getVisibility(), "original header cannot be recovered");
-            } catch (Throwable error) { failure.set(error); }
-        });
-        if (failure.get() != null) throw new AssertionError("Expanded header rendering failed", failure.get());
+        Notification group = builder(context).setStyle(style().setGroupConversation(true)).build();
+        group.extras.putString(NotificationMessages.TITLE, "Synthetic chat");
+        Notification groupPreview = ImagePreviewLoader.buildPreviewNotification(context, context.getApplicationInfo(), group, image, 78);
+        check("android.app.Notification$MessagingStyle".equals(groupPreview.extras.getString(Notification.EXTRA_TEMPLATE)),
+                "group image replaced the messaging template");
+        check(groupPreview.bigContentView == null, "group image installed a custom title layout");
+        check(groupPreview.extras.getBoolean("android.isGroupConversation"), "group flag lost");
+        androidx.core.app.NotificationCompat.MessagingStyle restored =
+                androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(groupPreview);
+        check(restored != null && "Synthetic chat".contentEquals(restored.getConversationTitle()), "pure group title lost");
+        check(restored.getMessages().size() == 1
+                && "Synthetic peer".contentEquals(restored.getMessages().get(0).getPerson().getName()),
+                "group sender identity changed");
     }
 
     private static Notification.Builder builder(Context context) {

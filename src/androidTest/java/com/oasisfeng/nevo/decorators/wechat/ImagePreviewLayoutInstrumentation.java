@@ -3,18 +3,22 @@ package com.oasisfeng.nevo.decorators.wechat;
 import android.app.Instrumentation;
 import android.app.Notification;
 import android.app.PendingIntent;
+import android.app.Person;
 import android.app.RemoteInput;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.drawable.Icon;
 import android.os.Parcel;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.RemoteViews;
+import android.widget.TextView;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
 import com.oasisfeng.nevo.xposed.R;
@@ -26,12 +30,74 @@ final class ImagePreviewLayoutInstrumentation {
     static void fitStartAndActions(Instrumentation instrumentation) {
         Context module = instrumentation.getTargetContext();
         verify(instrumentation, module, module);
+        verifyGroup(instrumentation, module);
         try {
             Context wechat = module.createPackageContext("com.tencent.mm", Context.CONTEXT_IGNORE_SECURITY);
             verify(instrumentation, wechat, module);
         } catch (android.content.pm.PackageManager.NameNotFoundException absent) {
             throw new AssertionError("Installed WeChat context required for cross-package resource check", absent);
         }
+    }
+
+    private static void verifyGroup(Instrumentation instrumentation, Context module) {
+        Notification.MessagingStyle style = new Notification.MessagingStyle(new Person.Builder().setName("Synthetic self").build())
+                .setConversationTitle("Synthetic group").setGroupConversation(true)
+                .addMessage("Synthetic first", 97, new Person.Builder().setName("Synthetic sender A").build())
+                .addMessage("Synthetic second", 98, new Person.Builder().setName("Synthetic sender B").build())
+                .addMessage("Synthetic third", 99, new Person.Builder().setName("Synthetic sender C").build())
+                .addMessage("[图片]", 100, new Person.Builder().setName("Synthetic sender").build());
+        Notification current = new Notification.Builder(module, "synthetic-group-preview")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setLargeIcon(Icon.createWithBitmap(Bitmap.createBitmap(24, 24, Bitmap.Config.ARGB_8888)))
+                .setStyle(style).build();
+        Notification preview = roundTrip(ImagePreviewLoader.buildPreviewNotification(module, module.getApplicationInfo(), current,
+                Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888), 80));
+        check(WeChatNotificationAppearance.isGroupMessaging(preview), "group preview lost messaging template");
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        instrumentation.runOnMainSync(() -> {
+            try {
+                Notification.Builder builder = Notification.Builder.recoverBuilder(module, preview).setStyle(style);
+                NotificationAppearanceHookProfile.Avatar avatar = NotificationAppearanceHookProfile.avatar(
+                        Notification.MessagingStyle.class, Notification.Style.class, Notification.Builder.class,
+                        Context.class, Notification.class, Icon.class, RemoteViews.class);
+                WeChatNotificationAppearance.useNativeAvatar(avatar, style, preview);
+                check(avatar.conversationType.getInt(style) == 1, "group picture did not use conversation layout");
+                RemoteViews original = builder.createBigContentView();
+                RemoteViews expanded = WeChatNotificationAppearance.withGroupImagePreview(original, module.getResources(),
+                        module.getApplicationInfo(), preview);
+                check(expanded != original, "group image mutated the original template");
+                View root = expanded.apply(module, new FrameLayout(module));
+                ImageView image = root.findViewById(R.id.wechat_preview_image);
+                check(image != null && image.getScaleType() == ImageView.ScaleType.FIT_START, "group preview lost fitStart");
+                float density = module.getResources().getDisplayMetrics().density;
+                root.measure(View.MeasureSpec.makeMeasureSpec(Math.round(320 * density), View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(Math.round(480 * density), View.MeasureSpec.AT_MOST));
+                root.layout(0, 0, root.getMeasuredWidth(), root.getMeasuredHeight());
+                Rect imageBounds = new Rect();
+                image.getDrawingRect(imageBounds);
+                ((android.view.ViewGroup) root).offsetDescendantRectToMyCoords(image, imageBounds);
+                check(image.getHeight() > 0 && imageBounds.bottom <= root.getHeight(), "group history clipped picture");
+                check(root.findViewById(R.id.wechat_preview_title) == null, "group preview added a custom title");
+                int titleId = module.getResources().getIdentifier("title", "id", "android");
+                TextView title = root.findViewById(titleId);
+                check(title != null && "Synthetic group".contentEquals(title.getText()), "group conversation title changed");
+                check(original.apply(module, new FrameLayout(module)).findViewById(R.id.wechat_preview_image) == null,
+                        "cached messaging template retained image");
+                expanded.reapply(module, root);
+                int columnId = module.getResources().getIdentifier("notification_main_column", "id", "android");
+                android.view.ViewGroup column = root.findViewById(columnId);
+                int images = 0;
+                for (int i = 0; i < column.getChildCount(); i++)
+                    if (column.getChildAt(i).getId() == R.id.wechat_preview_image) images++;
+                check(images == 1, "reapply duplicated the group picture");
+                new ImagePreviewLoader(null).discard("synthetic-group", 780, preview);
+                RemoteViews cleared = WeChatNotificationAppearance.withGroupImagePreview(original, module.getResources(),
+                        module.getApplicationInfo(), preview);
+                cleared.reapply(module, root);
+                check(root.findViewById(R.id.wechat_preview_image) == null, "discarded group preview returned");
+            } catch (Throwable error) { failure.set(error); }
+        });
+        if (failure.get() != null) throw new AssertionError("Group messaging image rendering failed", failure.get());
     }
 
     private static void verify(Instrumentation instrumentation, Context owner, Context module) {

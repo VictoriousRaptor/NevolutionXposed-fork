@@ -11,20 +11,18 @@ import java.util.Map;
 import org.junit.Test;
 
 public class RemotePreferenceStoreTest {
-	@Test public void localInitializationPreservesRemoteAppNameChoice() {
-		String key = "WeChatDecorator.hide_expanded_app_name";
+	@Test public void localInitializationPreservesRemoteMarkdownChoice() {
+		String key = RemotePreferenceStore.KEY_MARKDOWN;
 		Map<String, Boolean> initialized = RemotePreferenceStore.migratedLocalValues(Collections.emptyMap(), 9);
 
-		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(initialized, Collections.singletonMap(key, false)).get(key));
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.merge(initialized, Collections.singletonMap(key, true)).get(key));
 	}
 
-	@Test public void expandedAppNameDefaultsHiddenAndKeepsExplicitComparisonChoice() {
+	@Test public void removedAppNameSettingIsPurgedDuringUpgradeAndSync() {
 		String key = "WeChatDecorator.hide_expanded_app_name";
-		assertEquals(Boolean.TRUE, RemotePreferenceStore.merge(
-				RemotePreferenceStore.migratedLocalValues(Collections.emptyMap(), 9), Collections.emptyMap()).get(key));
-		assertEquals(Boolean.FALSE, RemotePreferenceStore.migratedLocalValues(Collections.singletonMap(key, false), 9).get(key));
-		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.emptyMap(), Collections.singletonMap(key, false)).get(key));
-		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.singletonMap(key, false), Collections.singletonMap(key, true)).get(key));
+		assertFalse(RemotePreferenceStore.migratedLocalValues(Collections.singletonMap(key, true), 10).containsKey(key));
+		assertFalse(RemotePreferenceStore.merge(Collections.emptyMap(), Collections.singletonMap(key, false)).containsKey(key));
+		assertFalse(RemotePreferenceStore.merge(Collections.singletonMap(key, true), Collections.emptyMap()).containsKey(key));
 	}
 
 	@Test public void imageWaitDefaultsAndExistingRemoteChoiceAreSynchronized() {

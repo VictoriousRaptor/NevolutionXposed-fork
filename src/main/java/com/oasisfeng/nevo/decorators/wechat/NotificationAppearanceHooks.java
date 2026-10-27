@@ -16,12 +16,10 @@ import java.util.function.Predicate;
 
 /** Framework-only appearance hooks in the existing WeChat/SystemUI scopes. */
 public final class NotificationAppearanceHooks {
-    public static final String PREF_HIDE_APP_NAME = "WeChatDecorator.hide_expanded_app_name";
     private static final String TAG = "WeChat.Appearance";
     private static boolean avatarInstalled, headerInstalled;
 
-    public static synchronized void install(BooleanSupplier enabled, BooleanSupplier hideAppName,
-                                            String process, Predicate<Executable> deoptimize) {
+    public static synchronized void install(BooleanSupplier enabled, String process, Predicate<Executable> deoptimize) {
         if (!WeChatDecorator.WECHAT_PACKAGE.equals(process) && !"com.android.systemui".equals(process)) return;
         if (!avatarInstalled) try {
             NotificationAppearanceHookProfile.Avatar profile = NotificationAppearanceHookProfile.avatar(
@@ -54,12 +52,20 @@ public final class NotificationAppearanceHooks {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     if (param.hasThrowable() || !(param.getResult() instanceof RemoteViews)) return;
                     try {
-                        if (!enabled.getAsBoolean() || !hideAppName.getAsBoolean()) return;
+                        if (!enabled.getAsBoolean()) return;
                         Context context = (Context) profile.context.get(param.thisObject);
                         Notification notification = (Notification) profile.notification.get(param.thisObject);
                         if (context == null || notification == null
                                 || !WeChatNotificationAppearance.owned(context.getPackageName(), notification)) return;
-                        param.setResult(WeChatNotificationAppearance.hideAppName((RemoteViews) param.getResult(), context.getResources()));
+                        RemoteViews expanded = (RemoteViews) param.getResult();
+                        if (WeChatNotificationAppearance.isGroupMessaging(notification)) try {
+                            expanded = WeChatNotificationAppearance.withGroupImagePreview(expanded, context.getResources(),
+                                    XposedBridge.getModuleApplicationInfo(), notification);
+                        } catch (Throwable failure) {
+                            // Keep the original MessagingStyle text ([图片]); do not try another rendering interface.
+                            fallback("group_image", failure);
+                        }
+                        param.setResult(expanded);
                     } catch (Throwable failure) { fallback("header", failure); }
                 }
             });

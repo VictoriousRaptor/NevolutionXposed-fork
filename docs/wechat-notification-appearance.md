@@ -1,35 +1,38 @@
-# 微信通知头像和展开应用头
+# 微信通知头像和群聊图片
 
-## 行为
+## 当前行为
 
-- 私聊文字等重建后的 `MessagingStyle` 通知使用微信原通知 `getLargeIcon()` 的头像，交给系统 `ConversationLayout` 提供头像和微信应用角标。已有重要会话类型保留；不创建快捷方式，不更改系统排名或通知渠道重要性。联系人名和消息身份、回复和撤回逻辑不变。
-- 链接、文件、视频、表情等保留微信原模板的媒体通知继续使用原图标。图片预览仍采用现有自定义展开布局，保留原大图标和外观标记。
-- 群聊保持现有群头像/成员身份规则，不套用私聊头像替换。未知会话沿用现有非群聊展示，确认后按实际类型呈现。原通知无头像时使用原系统回退，不合成头像。
-- 设置页新增“隐藏展开通知的微信应用头”（`WeChatDecorator.hide_expanded_app_name`），默认开启。仅隐藏展开布局中的应用名及对应分隔符，保留联系人/群名、头像和应用角标、时间、展开按钮和操作按钮。关闭后在后续通知模板重建时恢复系统应用名；不会主动重发当前通知。
-- 设置通过现有 libxposed `settings` 组同步，渲染时读取；首次装入新 hook 仍需要目标进程加载新版模块，本轮不操作设备或重启进程。开关关闭不影响私聊原生头像规则。
+- 私聊和群聊的 MessagingStyle 使用微信原通知大图标，由系统 ConversationLayout 提供通知主头像和微信应用角标；群聊使用原群头像，不写入成员 Person。重要会话类型保留，已确认 bot 或无原头像时保留系统回退。
+- 保留此前群聊图片修正：补图后继续用 MessagingStyle，群名、发送者、消息文字沿用群聊文本的系统排版，仅追加高 160 dp、完整等比左上对齐的 fitStart 图片。私聊图片保留既有自定义展开布局。消息身份、回复动作、静默更新、token 和失效清理保持原规则。
+- 取消应用名修改：不隐藏或替换“微信”应用名，不隐藏其分隔符，也不另外改写内容标题。撤销上一轮新增的“应用名行显示群名、内容标题显示首位发送者”代码和测试，标题完全交回现有消息模板。
+- 移除原应用名隐藏设置、文案、运行时开关及同步项。schema 11 在本地初始化和本地/远端同步时清除旧键 `WeChatDecorator.hide_expanded_app_name`。旧键只为迁移清理保留，其余设置及通用远端选择保护不变。
 
-2026-10-27 审查修复：本地初始化不再提前补齐缺失布尔设置的默认值，避免首次同步时覆盖远端已保存的关闭选择。读取时仍默认隐藏应用头，本地显式选择优先，历史 schema 的必要迁移保持原规则；不新增设置来源状态或迁移版本。
+## 渲染接口与门禁
 
-## 渲染接口和作用域
+仅在既有微信主进程和 SystemUI 作用域，对实际微信 Context、带模块外观标记 `nevo.wechat.appearance=com.tencent.mm` 且非汇总的通知处理。标记不作为消息身份、回复资格或已读证据。受微信增强总开关控制，不新增设置。
 
-`NotificationAppearanceHooks` 仅装入既有的微信主进程与 `com.android.systemui`，并检查 builder 实际 Context 的包名为 `com.tencent.mm`、通知包含模块外观标记 `nevo.wechat.appearance=com.tencent.mm`，排除汇总通知。原始消息 ticker 或模块存储的消息历史用于登记外观标记，标记不作为会话身份、回复资格或已读证据。
+头像 BEFORE hook 为 `Notification$MessagingStyle.makeMessagingView(int): RemoteViews`。完整校验 `Style.mBuilder: Notification.Builder`、`Builder.mContext: Context`、`Builder.mN: Notification`、可写实例字段 `mConversationType: int` / `mShortcutIcon: Icon`，以及 legacy=0 / normal=1 的会话类型常量。有原头像的非 bot MessagingStyle 使用原图标；legacy 切换普通会话类型，重要会话类型保留。
 
-头像 BEFORE hook：`android.app.Notification$MessagingStyle.makeMessagingView(int): android.widget.RemoteViews`。完整检查 `Style.mBuilder: Notification.Builder`、`Builder.mContext: Context`、`Builder.mN: Notification`、可写实例字段 `mConversationType: int` / `mShortcutIcon: Icon`，以及 `CONVERSATION_TYPE_LEGACY=0` / `CONVERSATION_TYPE_NORMAL=1`。仅对非群聊、非已确认 bot 且原通知有头像的 MessagingStyle 生效；legacy 类型改为普通会话布局，重要会话类型保留，图标取原通知头像。
+展开 AFTER hook 仅为群聊图片保留：优先 `Notification$Builder.createExpandedContentView(): RemoteViews`，方法缺失才使用 `createBigContentView(): RemoteViews`，要求零参数、实例方法和准确返回类型。只对群聊 MessagingStyle 克隆最终 RemoteViews，按完整实例签名 `RemoteViews.removeFromParent(int): void` 反射登记旧模块图片移除动作；有 READY 与 EXTRA_PICTURE 时向 `android:id/notification_main_column` 追加 `wechat_group_image_preview`。无位图时只清旧图，防止重复 reapply 和撤回残留。不查询或修改应用名、分隔符和内容标题视图。
 
-展开 AFTER hook：优先解析 `android.app.Notification$Builder.createExpandedContentView(): RemoteViews`（本地 AOSP Android 17 参考入口）；方法不存在时解析 `createBigContentView(): RemoteViews`。方法必须为实例方法、零参数且返回 RemoteViews。现代方法存在但签名不符时不混用旧方法。对最终结果克隆后追加 `app_name_text` 和可用的 `app_name_divider` / `app_name_text_divider` 隐藏动作，使动作排在会话数据绑定之后，并避免修改缓存模板造成开关无法还原。不删除整个通知 header 容器。
+模块图片布局使用 libxposed 模块 ApplicationInfo 与完整反射构造 `RemoteViews(ApplicationInfo, int)`，不回退宿主包查询。缺系统容器 ID、移除接口签名不符或资源构造失败时，直接保留原消息模板中的 `[图片]`，不尝试替代接口或其他图片模板。头像与展开入口独立校验、去优化、安装和回退。日志保持 `WeChat.Appearance` 的 avatar/header ready、unavailable 以及 avatar/header/group_image 异常类型，不记录通知正文、头像、联系人或设备标识。
 
-已知创建/渲染 ContentView 的 framework 方法在安装时去优化，防止目标被内联绕过。两个 hook 独立安装、独立回退；缺签名、字段类型不符、去优化或安装失败时保留对应系统显示，日志为 `WeChat.Appearance source=avatar_hook_unavailable` / `header_hook_unavailable`；安装成功为 `avatar_hook_ready` / `header_hook_ready`，回调异常为 `avatar` / `header`，仅含异常类型，不记录通知正文、头像、联系人或实际设备标识。
-
-本次不改变微信版本画像；回复、图片、应用内回复和撤回仍各自遵守既有版本名/版本码匹配与完整签名门禁。framework 支持以运行时完整签名为准，不把同名方法或某一微信版本适配当作所有 Android/OEM 支持证据。
+framework 以运行时完整签名支持，不另设微信版本白名单。图片仍限定 8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.79/3182，版本名与版本码同时匹配，保留图片开关、等待时间和签名校验。回复、应用内回复与撤回各自门禁独立，未知版本保守回退不变。
 
 ## 验证边界
 
-主机回归覆盖新旧展开入口、错误返回类型/静态方法拒绝、字段类型和可写性、会话类型常量、所有者双重限制、开关默认开启和显式关闭选择保留。framework 回归入口覆盖原头像/重要会话/群聊/bot/无头像、汇总与其他包隔离、图片预览元数据、展开模板克隆及原模板恢复。
+保留群头像与图片相关回归，包括模板/身份/发送者保留、ConversationLayout、四条消息受限高度测量、原模板克隆隔离、重复 reapply 与撤回清理。保留旧设置本地/远端清理用例，删除仅针对已撤销标题改写和应用名隐藏行为的框架用例。
 
-本轮禁止安装 APK、运行设备测试或重启进程。framework 回归仅编译，不能当作已在设备执行；构建和签名结果单独记录，不证明 LSPosed hook 已安装或真实微信/ColorOS 视觉通过。需要后续另行授权验收：私聊文字/链接/图片、群聊文字/媒体、折叠/展开、头像角标、开关开启/关闭、通知回复及撤回后的重建。
+本次已执行真机框架回归，完整结果与清理记录见下节；真实微信/OEM 的群图标、连续图文、通知栏交互及真实回复/撤回展示仍未验收。框架通过不代表实际 LSPosed hook 安装或视觉通过。
 
-系统布局依据：[AOSP ConversationLayout](https://android.googlesource.com/platform/frameworks/base/+/master/core/java/com/android/internal/widget/ConversationLayout.java)。它提供会话头像和应用角标，并在展开时控制应用名；具体尺寸、角标图形和位置由设备 framework/SystemUI 决定，本地源码和反射检查不能保证与某一 OEM 微信原模板像素一致。
+AOSP commit `94b4c163b7dfe5ce3607f7bb8456f9573f7de57d` 的 [群会话展开布局](https://github.com/aosp-mirror/platform_frameworks_base/blob/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/core/res/res/layout/notification_2025_template_expanded_conversation.xml) 与 [RemoteViews](https://github.com/aosp-mirror/platform_frameworks_base/blob/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/core/java/android/widget/RemoteViews.java) 支持静态结构核对，不能替代设备验收。原始日志、签名材料和 APK 仅存本地忽略目录 `.debug-artifacts/group-notification-20261027/`。
 
-图片预览额外核对了本地参考对应的 AOSP commit `94b4c163b7dfe5ce3607f7bb8456f9573f7de57d`：`DecoratedCustomViewStyle` 的 `DECORATION_PARTIAL` 保留大图标，经过公共 `applyStandardTemplate()` / `bindLargeIcon()` 使用原 `mLargeIcon`，与普通微信卡片共享系统图标绑定路径。因此本次保留现有 fitStart 图片布局，不把“必须改成同一种模板”当作原生头像的必要条件。[对应源码](https://github.com/aosp-mirror/platform_frameworks_base/blob/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/core/java/android/app/Notification.java#L6950)
+## 2026-10-27 本次真机验证与提交
 
-本轮本地验证：207 项主机测试通过，失败、错误、跳过均为 0；使用 `-PrequireReleaseSigning=true` 离线完成 `testDebugUnitTest assembleDebug assembleDebugAndroidTest`，Debug 与 androidTest 两包签名证书均与现有 release 密钥证书一致，签名及 zipalign 检查通过。新增三项 framework 回归已编译，未执行；未运行完整 Lint。没有安装 APK、读取或操作设备、重启进程、提交或推送。原始日志、证书核验结果与两包副本仅保存在本地忽略目录 `.debug-artifacts/notification-presentation-20261026/`。
+- 使用现有 release 密钥及 `-PrequireReleaseSigning=true` 离线完成 `testDebugUnitTest assembleDebug assembleDebugAndroidTest assembleRelease`：213 项主机测试全部通过，失败、错误、跳过均为 0；Release 的 lintVitalRelease 通过，三包签名及 zipalign 检查通过，证书匹配既有 release 密钥。
+- Release Lint 首次指出 `RemoteViews.removeFromParent(int)` 为受限隐藏接口。仅在既有可选 Xposed 渲染方法局部声明 BlockedPrivateApi，保留完整签名校验及异常回退，不放宽设备隐藏 API 策略；所需接口或图片布局失败直接保留原消息模板的 `[图片]`，不尝试替代接口/其他图片模板。
+- Android 17 / API 37 真机最终通过 68/68 项框架 instrumentation；微信安装包描述符检查通过 40 项。群头像选择、群聊图片模板/标题/发送者保留、受限高度、reapply 不重复、撤回清理及旧设置双端清理均包含在框架用例中。
+- 首轮为 67/68，唯一失败是旧测试将系统生成的普通标题固定断言为纯会话名。核对 framework 的 MessagingStyle 标题合成后，测试改为验证补图前后的实际原始标题保持一致；未因此改变通知标题业务逻辑。最终完整重跑全部通过。
+- 两轮均在 finally 清理阶段卸载精确测试包并核验 package/runner 均不存在，再用最终 Release 覆盖临时 Debug。最终安装的 Release 为 3.4.0 / 17，回拉 APK SHA-256 与本地最终 Release 一致，包不含 DEBUGGABLE。
+- instrumentation 使用 `--no-hidden-api-checks`，结果证明该测试上下文中的 framework 行为；不证明微信/SystemUI 进程的 LSPosed hook 安装、真实消息收发、图片下载或实际 OEM 通知视觉。未发送真实消息，未主动重启整机、微信或 SystemUI，未执行完整 Lint。
+- 原始日志、设备标识、回滚 APK、三包副本、证书和哈希核验仅保存在忽略目录 `.debug-artifacts/group-notification-20261027/`；不加入提交或公开附件。
