@@ -20,7 +20,7 @@ public final class NotificationAppearanceHooks {
     private static final String TAG = "WeChat.Appearance";
     private static boolean avatarInstalled, headerInstalled;
 
-    public static synchronized void install(ClassLoader loader, BooleanSupplier enabled, BooleanSupplier hideAppName,
+    public static synchronized void install(BooleanSupplier enabled, BooleanSupplier hideAppName,
                                             String process, Predicate<Executable> deoptimize) {
         if (!WeChatDecorator.WECHAT_PACKAGE.equals(process) && !"com.android.systemui".equals(process)) return;
         if (!avatarInstalled) try {

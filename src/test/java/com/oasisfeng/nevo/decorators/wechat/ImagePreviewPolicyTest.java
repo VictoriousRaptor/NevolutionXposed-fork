@@ -66,20 +66,20 @@ public class ImagePreviewPolicyTest {
 
 	@Test public void waitsForUndersizedCandidateThenFallsBackAtDeadline() {
 		assertTrue(ImagePreviewPolicy.shouldWaitForQuality(384, 216, ImagePreviewPolicy.QUALITY_THUMBNAIL,
-				1080, 608, 1499));
+				1080, 608, 1499, false, ImagePreviewPolicy.DEFAULT_WAIT_MS));
 		assertFalse(ImagePreviewPolicy.shouldWaitForQuality(384, 216, ImagePreviewPolicy.QUALITY_THUMBNAIL,
-				1080, 608, 1500));
+				1080, 608, 1500, false, ImagePreviewPolicy.DEFAULT_WAIT_MS));
 		assertFalse(ImagePreviewPolicy.shouldWaitForQuality(1280, 720, ImagePreviewPolicy.QUALITY_HD,
-				1080, 608, 0));
+				1080, 608, 0, false, ImagePreviewPolicy.DEFAULT_WAIT_MS));
 		assertTrue(ImagePreviewPolicy.shouldWaitForQuality(1920, 1080, ImagePreviewPolicy.QUALITY_THUMBNAIL,
-				1080, 608, 100));
+				1080, 608, 100, false, ImagePreviewPolicy.DEFAULT_WAIT_MS));
 	}
 
 	@Test public void completedLargeDownloadPublishesLastAvailableHdCandidate() {
 		assertFalse(ImagePreviewPolicy.shouldWaitForQuality(277, 513, ImagePreviewPolicy.QUALITY_HD,
-				1239, 846, 400, true));
+				1239, 846, 400, true, ImagePreviewPolicy.DEFAULT_WAIT_MS));
 		assertTrue(ImagePreviewPolicy.shouldWaitForQuality(277, 513, ImagePreviewPolicy.QUALITY_THUMBNAIL,
-				1239, 846, 400, true));
+				1239, 846, 400, true, ImagePreviewPolicy.DEFAULT_WAIT_MS));
 	}
 
 	@Test public void fitNeverUpscalesAndStaysWithinPixelBudget() {

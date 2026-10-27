@@ -2,12 +2,14 @@
 
 日期：2026-10-24，2026-10-27 更新。Android `versionCode`：17（上一版本 3.3.1 为 16）。设置 schema：10。
 
-2026-10-27 合并验证：图片布局修复与私聊头像/展开应用名改动一起运行 `testDebugUnitTest assembleDebugAndroidTest assembleRelease --offline`，强制使用现有 release 签名。212 项主机测试全部通过，失败、错误、跳过均为 0；framework 测试 APK 编译成功，包含新增的包查询失败场景及既有外观回归，未安装执行。Release 的 `lintVitalRelease`、签名证书比对及 zipalign 检查通过，实际 APK 为 3.4.0 / 17、minSdk 26、非 debuggable。完整 Lint、真实微信收图、隐藏 API 访问及 SystemUI/OEM 展示未在本轮验收；不推送、不安装。产物与原始验收记录仅存于本地忽略目录。
+2026-10-27 合并验证（下述审查精简前）：图片布局修复与私聊头像/展开应用名改动一起运行 `testDebugUnitTest assembleDebugAndroidTest assembleRelease --offline`，强制使用现有 release 签名。212 项主机测试全部通过，失败、错误、跳过均为 0；framework 测试 APK 编译成功，包含新增的包查询失败场景及既有外观回归，未安装执行。Release 的 `lintVitalRelease`、签名证书比对及 zipalign 检查通过，实际 APK 为 3.4.0 / 17、minSdk 26、非 debuggable。完整 Lint、真实微信收图、隐藏 API 访问及 SystemUI/OEM 展示未在本轮验收；不推送、不安装。产物与原始验收记录仅存于本地忽略目录。
 
 ## 变更
 
 - 修复图片解码成功后，微信进程无法查询模块包导致展开布局创建失败的问题。使用框架提供的模块 ApplicationInfo 和完整反射构造签名创建模块布局，保留 minSdk 26、fitStart 及回复动作；构造不可用时保留文字通知。
 - 私聊通知头像使用微信原头像交由系统会话布局呈现；新增默认开启的展开应用名隐藏设置，保留通知头其他元素及回复操作。作用范围、签名门禁及尚未完成的真机展示验收见[通知外观说明](wechat-notification-appearance.md)。
+- 图片文件等待时间可配置为 100–30000 毫秒，默认 1500；文件重试、画质等待和普通大图观察共用每请求截止点，并受图片事件身份期限限制。下载首参使用图片行 `id`，消息对独立使用 `msglocalid`。
+- Markdown 代码样式恢复按完整签名选择旧返回值布局或 Android 17 消息字段布局；不混用两代调用链，签名或去优化失败时沿用系统清理结果。
 - 私聊通知未展开时使用对方名字作为会话标题：`MessagingStyle` 保留现有会话名，同时继续标记为非群聊。群聊标题规则不变；跳过装饰的媒体或非聊天通知继续沿用原处理路径。实际 Android/OEM 折叠布局待真机确认。
 - 通知栏回复 B 后保留本轮来信 A 和回复 B；下一条符合条件的原始来信 C 到达后，默认显示 C，开启“显示你最后回复的消息”时显示 B+C。发送前仍请求原生已读，失败不记录 B；用户明确移除仍清理对应通知代次，迟到回调不复活已移除通知。详见[通知历史规则](notification-history-policy.md)。
 - SystemUI 移除回调兼容四参数与三参数签名，安装失败可重试；原生已读动作绑定当前会话实例和通知代次，不继承旧通知动作。会话身份缓存最多保留 256 个最近使用的 ID，活跃归档中的会话保留。
@@ -23,10 +25,18 @@
 ## 待办与兼容边界
 
 - 自己的头像来源仅登记为[未确定待办](project-modification-plan.md)，没有修改头像选择、读取或缓存代码。
-- 按用户要求保留已有本地下载器 ID 实现：SQL 不读 `msglocalid`，消息对和下载首参均使用基础行 `id`。主机测试已同步；本轮没有重新判断各微信版本的 ID 语义或真实下载行为。
+- 2026-10-24 两处共用图片行 `id` 的历史实现已于 2026-10-26 撤销，当前 SQL 单独读取 `msglocalid`。8.0.79 的 ID 语义已离线复核，其余版本的新增列及真实下载仍需独立验收，见各版本 findings。
 - Android/OEM 实际通知表现、微信已读/回复/下载及新旧版本覆盖安装仍需独立真机验收。构建、签名和缓存契约测试不代表这些行为通过。
 
 ## 验证记录
+
+### 2026-10-27 审查精简
+
+- 审查 `5bb56fa..0ed9f71` 的全部 3.4.0 改动，移除图片等待的两个测试专用旧重载、外观安装的未用参数及重复模板常量；保留完整签名画像、回复延迟清理边界和缓存关闭保护。
+- 本地设置初始化只迁移已有值及历史必需值，避免提前补默认值覆盖远端关闭选择；新增顺序回归先在旧代码下失败，再于修复后通过。默认值、历史强制迁移和 schema 10 不变。本轮未执行设置 UI 首次加载与异步服务绑定的设备时序验证。
+- 使用 `-PrequireReleaseSigning=true` 离线完成 `testDebugUnitTest assembleDebug assembleDebugAndroidTest`：213 项主机测试全部通过，无失败、错误或跳过；Debug、androidTest 两包签名均与现有 release 密钥证书一致，zipalign 检查通过。Debug 实际版本为 3.4.0 / 17、minSdk 26。
+- 完整 `lintDebug` 在 125 个源码及构建文件哈希一致的本地副本运行，包含主源码、AndroidTest 和 UnitTest 分析：0 errors / 3 warnings。两项 `DiscouragedApi` 来自按名称查询隐藏的系统应用名及分隔符 ID，保留现有兼容逻辑；另一项为既有 Debug 像素复数文案 `PluralsCandidate`。画像生成脚本回归通过。
+- 本轮未重建 Release、安装 APK、执行 framework/真实微信测试或推送。日志、证书核验和 Lint 报告保存在本地忽略目录 `.debug-artifacts/review-3.4.0-20261027/`。
 
 ### 2026-10-25 Release 构建
 

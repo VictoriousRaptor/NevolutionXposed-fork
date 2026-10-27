@@ -57,17 +57,6 @@ public final class ImagePreviewPolicy {
 		return quality(width, height, targetWidth, targetHeight) >= 1d;
 	}
 
-	static boolean shouldWaitForQuality(int width, int height, int sourceQuality,
-			int targetWidth, int targetHeight, long elapsedMs) {
-		return shouldWaitForQuality(width, height, sourceQuality, targetWidth, targetHeight, elapsedMs, false, DEFAULT_WAIT_MS);
-	}
-
-	static boolean shouldWaitForQuality(int width, int height, int sourceQuality,
-			int targetWidth, int targetHeight, long elapsedMs, boolean largeDownloadComplete) {
-		return shouldWaitForQuality(width, height, sourceQuality, targetWidth, targetHeight, elapsedMs,
-				largeDownloadComplete, DEFAULT_WAIT_MS);
-	}
-
 	/** Returns the largest non-upscaled size inside both the display box and pixel budget. */
 	static Size fitInside(int width, int height, int maxWidth, int maxHeight, int maxPixels) {
 		if (width <= 0 || height <= 0 || maxWidth <= 0 || maxHeight <= 0 || maxPixels <= 0)

@@ -5,7 +5,6 @@ import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
 import android.util.Log;
 
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -99,7 +98,8 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 	}
 
 	static Map<String, Boolean> migratedLocalValues(Map<String, Boolean> stored, int schemaVersion) {
-		Map<String, Boolean> values = merge(stored, Collections.emptyMap());
+		// Missing settings remain eligible for a remote choice at the first synchronization.
+		Map<String, Boolean> values = new LinkedHashMap<>(stored);
 		applySchemaMigration(values, schemaVersion);
 		return values;
 	}

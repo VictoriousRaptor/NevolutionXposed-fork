@@ -5,10 +5,11 @@ import android.content.res.Resources;
 import android.graphics.drawable.Icon;
 import android.widget.RemoteViews;
 
+import static com.oasisfeng.nevo.sdk.NevoDecoratorService.TEMPLATE_MESSAGING;
+
 /** Presentation metadata is separate from transcript identity and reply eligibility. */
 final class WeChatNotificationAppearance {
     static final String OWNER = "nevo.wechat.appearance";
-    static final String MESSAGING = "android.app.Notification$MessagingStyle";
 
     static void mark(Notification notification) {
         if (WeChatMessage.isChat(notification.tickerText) || notification.extras.getBoolean(NotificationMessages.STORED))
@@ -26,7 +27,7 @@ final class WeChatNotificationAppearance {
 
     static void useNativeAvatar(NotificationAppearanceHookProfile.Avatar profile, Object style, Notification notification)
             throws IllegalAccessException {
-        if (!MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE))
+        if (!TEMPLATE_MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE))
                 || notification.extras.getBoolean("android.isGroupConversation")
                 || notification.extras.getInt(ConversationClassification.TYPE) == ConversationTypePolicy.BOT) return;
         Icon icon = notification.getLargeIcon();
