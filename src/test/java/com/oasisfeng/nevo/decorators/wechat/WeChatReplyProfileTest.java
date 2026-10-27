@@ -7,7 +7,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
 import android.content.Intent;
+import android.content.Context;
+import android.content.BroadcastReceiver;
 import android.os.Bundle;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -89,24 +93,36 @@ public class WeChatReplyProfileTest {
 		assertEquals(Arrays.asList("f", "h", "c"), candidates(profile, "gateMethods"));
 	}
 
-	@Test public void unknown3183OffersOnlyTheSameNameCandidate() {
-		WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId("8.0.79", 3183, 1);
-		List<WeChatProfileSelector.Candidate<WeChatReplyProfile>> candidates = WeChatReplyProfile.candidates();
-		WeChatProfileSelector.Selection<WeChatReplyProfile> selected = new WeChatProfileSelector(1).select(
-				"reply", build, candidates, p -> "wechat-8.0.79/3182".equals(p.label), new MemoryCache());
+	@Test public void unknown3183RequiresRealCompleteProfileResolution() {
+		WeChatProfileSelector.Selection<WeChatReplyProfile> selected = select3183(
+				ValidReceiver.class, ExactHelper.class, ValidGates.class);
 		assertEquals(WeChatProfileSelector.MatchKind.EXPERIMENTAL, selected.kind);
 		assertEquals("wechat-8.0.79/3182", selected.profile.label);
 	}
 
-	@Test public void replyRequiresHelperAndAllThreeGates() {
-		WeChatReplyProfile profile = WeChatReplyProfile.forPackage("8.0.79", 3182);
-		Class<?> type = WeChatReplyProfileTest.class;
-		assertTrue(new WeChatReplyProfile.Resolved(profile, "8.0.79", 3182, type, type, type,
-				Arrays.asList("c", "d", "b")).isUsable());
-		assertFalse(new WeChatReplyProfile.Resolved(profile, "8.0.79", 3182, type, null, type,
-				Arrays.asList("c", "d", "b")).isUsable());
-		assertFalse(new WeChatReplyProfile.Resolved(profile, "8.0.79", 3182, type, type, type,
-				Arrays.asList("c", "d")).isUsable());
+	@Test public void unknown3183RejectsChangedOrMissingGateAndHelperOrReceiver() {
+		for (Class<?> gates : Arrays.asList(ChangedGate.class, MissingGate.class))
+			assertEquals(WeChatProfileSelector.MatchKind.NO_MATCH,
+					select3183(ValidReceiver.class, ExactHelper.class, gates).kind);
+		assertEquals(WeChatProfileSelector.MatchKind.NO_MATCH,
+					select3183(ValidReceiver.class, WrongResultHelper.class, ValidGates.class).kind);
+		assertEquals(WeChatProfileSelector.MatchKind.NO_MATCH,
+					select3183(Object.class, ExactHelper.class, ValidGates.class).kind);
+	}
+
+	private static WeChatProfileSelector.Selection<WeChatReplyProfile> select3183(
+			Class<?> receiver, Class<?> helper, Class<?> gates) {
+		Map<String, Class<?>> classes = new HashMap<>();
+		classes.put("com.tencent.mm.plugin.auto.service.MMAutoMessageReplyReceiver", receiver);
+		classes.put("z2.s1", helper);
+		classes.put("lt1.a", gates);
+		WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId("8.0.79", 3183, 1);
+		return new WeChatProfileSelector(1).select("reply", build, WeChatReplyProfile.candidates(), profile ->
+				profile.resolve(name -> {
+					Class<?> resolved = classes.get(name);
+					if (resolved == null) throw new ClassNotFoundException(name);
+					return resolved;
+				}, build.versionName, build.versionCode).isUsable(), new MemoryCache());
 	}
 
 	@Test public void gateInstallFailureLeavesEarlierCallbacksInert() throws Exception {
@@ -145,6 +161,23 @@ public class WeChatReplyProfileTest {
 	public static class ExactHelper { public static Bundle b(Intent intent) { return null; } }
 	public static class WrongResultHelper { public static Object b(Intent intent) { return null; } }
 	public static class InstanceHelper { public Bundle b(Intent intent) { return null; } }
+	public static class ValidReceiver extends BroadcastReceiver {
+		@Override public void onReceive(Context context, Intent intent) {}
+	}
+	public static class ValidGates {
+		public static boolean c() { return true; }
+		public static boolean d() { return true; }
+		public static boolean b() { return true; }
+	}
+	public static class ChangedGate {
+		public static boolean c() { return true; }
+		public static int d() { return 1; }
+		public static boolean b() { return true; }
+	}
+	public static class MissingGate {
+		public static boolean c() { return true; }
+		public static boolean d() { return true; }
+	}
 
 	private static final class MemoryCache implements WeChatProfileSelector.Cache {
 		public String read(String f, WeChatProfileSelector.BuildId b, int r) { return null; }

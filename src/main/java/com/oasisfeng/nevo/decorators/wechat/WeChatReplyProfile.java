@@ -196,9 +196,15 @@ public final class WeChatReplyProfile {
 	}
 
 	public Resolved resolve(ClassLoader cl, String versionName, long versionCode) {
-		final Class<?> receiver = findReceiver(cl);
-		final Class<?> helper = findHelper(cl);
-		final Class<?> gate = findGateClass(cl);
+		return resolve(name -> XposedHelpers.findClass(name, cl), versionName, versionCode);
+	}
+
+	/** Allows a synthetic class map to exercise the same descriptor checks in host tests. */
+	interface ClassResolver { Class<?> find(String name) throws Throwable; }
+	Resolved resolve(ClassResolver classes, String versionName, long versionCode) {
+		final Class<?> receiver = findReceiver(classes);
+		final Class<?> helper = findHelper(classes);
+		final Class<?> gate = findGateClass(classes);
 		final List<String> methods = new ArrayList<>();
 		if (gate != null) {
 			for (String name : gateMethods) {
@@ -208,10 +214,10 @@ public final class WeChatReplyProfile {
 		return new Resolved(this, versionName, versionCode, receiver, helper, gate, methods);
 	}
 
-	private Class<?> findReceiver(ClassLoader cl) {
+	private Class<?> findReceiver(ClassResolver classes) {
 		for (String name : receiverCandidates) {
 			try {
-				final Class<?> clazz = XposedHelpers.findClass(name, cl);
+				final Class<?> clazz = classes.find(name);
 				if (!BroadcastReceiver.class.isAssignableFrom(clazz)) continue;
 				Method onReceive = clazz.getMethod("onReceive", Context.class, Intent.class);
 				if (onReceive.getReturnType() != void.class || Modifier.isStatic(onReceive.getModifiers())
@@ -223,10 +229,10 @@ public final class WeChatReplyProfile {
 		return null;
 	}
 
-	private Class<?> findHelper(ClassLoader cl) {
+	private Class<?> findHelper(ClassResolver classes) {
 		for (String name : helperCandidates) {
 			try {
-				final Class<?> clazz = XposedHelpers.findClass(name, cl);
+				final Class<?> clazz = classes.find(name);
 				if (!hasHelperSignature(clazz)) continue;
 				return clazz;
 			} catch (Throwable ignored) {
@@ -242,10 +248,10 @@ public final class WeChatReplyProfile {
 		} catch (NoSuchMethodException ignored) { return false; }
 	}
 
-	private Class<?> findGateClass(ClassLoader cl) {
+	private Class<?> findGateClass(ClassResolver classes) {
 		for (String name : gateCandidates) {
 			try {
-				final Class<?> clazz = XposedHelpers.findClass(name, cl);
+				final Class<?> clazz = classes.find(name);
 				boolean complete = true;
 				for (String method : gateMethods) {
 					if (!hasStaticBooleanNoArg(clazz, method)) {
