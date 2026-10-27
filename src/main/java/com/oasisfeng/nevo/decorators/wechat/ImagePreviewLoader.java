@@ -574,8 +574,8 @@ final class ImagePreviewLoader {
 
 	static Notification buildPreviewNotification(Context context, ApplicationInfo moduleInfo, Notification current, Bitmap bitmap, long token) {
 		Notification.Builder builder = Notification.Builder.recoverBuilder(context, current);
-		if (WeChatNotificationAppearance.isGroupMessaging(current)) {
-			// The expanded renderer appends the image to the native group messaging layout.
+		if (WeChatNotificationAppearance.isMessaging(current)) {
+			// The expanded renderer appends the image to the native messaging layout.
 			builder.setCustomBigContentView(null);
 		} else {
 			// The notification belongs to WeChat, but these layout resources belong to the installed module.

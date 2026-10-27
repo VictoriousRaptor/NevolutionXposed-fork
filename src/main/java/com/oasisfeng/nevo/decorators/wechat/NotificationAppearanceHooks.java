@@ -17,7 +17,7 @@ import java.util.function.Predicate;
 /** Framework-only appearance hooks in the existing WeChat/SystemUI scopes. */
 public final class NotificationAppearanceHooks {
     private static final String TAG = "WeChat.Appearance";
-    private static boolean avatarInstalled, headerInstalled;
+    private static boolean avatarInstalled, collapsedInstalled, headerInstalled;
 
     public static synchronized void install(BooleanSupplier enabled, String process, Predicate<Executable> deoptimize) {
         if (!WeChatDecorator.WECHAT_PACKAGE.equals(process) && !"com.android.systemui".equals(process)) return;
@@ -44,6 +44,28 @@ public final class NotificationAppearanceHooks {
             Log.i(TAG, "source=avatar_hook_ready process=" + process);
         } catch (Throwable failure) { fallback("avatar_hook_unavailable", failure); }
 
+        if (!collapsedInstalled) try {
+            NotificationAppearanceHookProfile.Header profile = NotificationAppearanceHookProfile.collapsed(
+                    Notification.Builder.class, Context.class, Notification.class, RemoteViews.class);
+            deoptimizeViewCallers(Notification.Builder.class, deoptimize);
+            XposedBridge.hookMethod(profile.render, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.hasThrowable() || !(param.getResult() instanceof RemoteViews)) return;
+                    try {
+                        if (!enabled.getAsBoolean()) return;
+                        Context context = (Context) profile.context.get(param.thisObject);
+                        Notification notification = (Notification) profile.notification.get(param.thisObject);
+                        if (context == null || notification == null
+                                || !WeChatNotificationAppearance.owned(context.getPackageName(), notification)) return;
+                        param.setResult(WeChatNotificationAppearance.hideCollapsedAppName(
+                                (RemoteViews) param.getResult(), context.getResources()));
+                    } catch (Throwable failure) { fallback("collapsed_header", failure); }
+                }
+            });
+            collapsedInstalled = true;
+            Log.i(TAG, "source=collapsed_hook_ready process=" + process);
+        } catch (Throwable failure) { fallback("collapsed_hook_unavailable", failure); }
+
         if (!headerInstalled) try {
             NotificationAppearanceHookProfile.Header profile = NotificationAppearanceHookProfile.header(
                     Notification.Builder.class, Context.class, Notification.class, RemoteViews.class);
@@ -58,12 +80,12 @@ public final class NotificationAppearanceHooks {
                         if (context == null || notification == null
                                 || !WeChatNotificationAppearance.owned(context.getPackageName(), notification)) return;
                         RemoteViews expanded = (RemoteViews) param.getResult();
-                        if (WeChatNotificationAppearance.isGroupMessaging(notification)) try {
-                            expanded = WeChatNotificationAppearance.withGroupImagePreview(expanded, context.getResources(),
+                        if (WeChatNotificationAppearance.isMessaging(notification)) try {
+                            expanded = WeChatNotificationAppearance.withImagePreview(expanded, context.getResources(),
                                     XposedBridge.getModuleApplicationInfo(), notification);
                         } catch (Throwable failure) {
                             // Keep the original MessagingStyle text ([图片]); do not try another rendering interface.
-                            fallback("group_image", failure);
+                            fallback("message_image", failure);
                         }
                         param.setResult(expanded);
                     } catch (Throwable failure) { fallback("header", failure); }

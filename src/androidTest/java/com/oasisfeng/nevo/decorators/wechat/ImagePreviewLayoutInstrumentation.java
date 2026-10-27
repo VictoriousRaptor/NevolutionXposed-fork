@@ -20,7 +20,6 @@ import android.widget.ImageView;
 import android.widget.RemoteViews;
 import android.widget.TextView;
 
-import com.oasisfeng.nevo.xposed.BuildConfig;
 import com.oasisfeng.nevo.xposed.R;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -63,7 +62,7 @@ final class ImagePreviewLayoutInstrumentation {
                 WeChatNotificationAppearance.useNativeAvatar(avatar, style, preview);
                 check(avatar.conversationType.getInt(style) == 1, "group picture did not use conversation layout");
                 RemoteViews original = builder.createBigContentView();
-                RemoteViews expanded = WeChatNotificationAppearance.withGroupImagePreview(original, module.getResources(),
+                RemoteViews expanded = WeChatNotificationAppearance.withImagePreview(original, module.getResources(),
                         module.getApplicationInfo(), preview);
                 check(expanded != original, "group image mutated the original template");
                 View root = expanded.apply(module, new FrameLayout(module));
@@ -91,7 +90,7 @@ final class ImagePreviewLayoutInstrumentation {
                     if (column.getChildAt(i).getId() == R.id.wechat_preview_image) images++;
                 check(images == 1, "reapply duplicated the group picture");
                 new ImagePreviewLoader(null).discard("synthetic-group", 780, preview);
-                RemoteViews cleared = WeChatNotificationAppearance.withGroupImagePreview(original, module.getResources(),
+                RemoteViews cleared = WeChatNotificationAppearance.withImagePreview(original, module.getResources(),
                         module.getApplicationInfo(), preview);
                 cleared.reapply(module, root);
                 check(root.findViewById(R.id.wechat_preview_image) == null, "discarded group preview returned");
@@ -107,6 +106,10 @@ final class ImagePreviewLayoutInstrumentation {
         Notification current = new Notification.Builder(owner, "synthetic-preview")
                 .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Synthetic chat")
                 .setContentText("[图片]").setWhen(100)
+                .setLargeIcon(Icon.createWithBitmap(Bitmap.createBitmap(24, 24, Bitmap.Config.ARGB_8888)))
+                .setStyle(new Notification.MessagingStyle(new Person.Builder().setName("Synthetic self").build())
+                        .setConversationTitle("Synthetic chat").setGroupConversation(false)
+                        .addMessage("[图片]", 100, new Person.Builder().setName("Synthetic peer").build()))
                 .addAction(new Notification.Action.Builder(null, "Reply", reply)
                         .addRemoteInput(new RemoteInput.Builder("synthetic-input").build()).build()).build();
         current.extras.putString(NotificationMessages.KEY, "synthetic-chat");
@@ -119,13 +122,24 @@ final class ImagePreviewLayoutInstrumentation {
         check(preview.actions != null && preview.actions.length == 1
                 && preview.actions[0].actionIntent.equals(reply)
                 && "synthetic-input".equals(preview.actions[0].getRemoteInputs()[0].getResultKey()), "reply action changed");
-        check(preview.bigContentView != null && BuildConfig.APPLICATION_ID.equals(preview.bigContentView.getPackage()),
-                "layout resources incorrectly owned by notification host");
+        check("android.app.Notification$MessagingStyle".equals(preview.extras.getString(Notification.EXTRA_TEMPLATE)),
+                "private image replaced the messaging template");
+        check(preview.bigContentView == null, "private image installed a custom title layout");
         AtomicReference<Throwable> failure = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> {
             try {
-                View root = Notification.Builder.recoverBuilder(owner, preview).createBigContentView()
-                        .apply(module, new FrameLayout(module));
+                Notification.MessagingStyle style = new Notification.MessagingStyle(
+                        new Person.Builder().setName("Synthetic self").build())
+                        .setConversationTitle("Synthetic chat").setGroupConversation(false)
+                        .addMessage("[图片]", 100, new Person.Builder().setName("Synthetic peer").build());
+                NotificationAppearanceHookProfile.Avatar avatar = NotificationAppearanceHookProfile.avatar(
+                        Notification.MessagingStyle.class, Notification.Style.class, Notification.Builder.class,
+                        Context.class, Notification.class, Icon.class, RemoteViews.class);
+                WeChatNotificationAppearance.useNativeAvatar(avatar, style, preview);
+                check(avatar.conversationType.getInt(style) == 1, "private picture lost native avatar badge layout");
+                RemoteViews original = Notification.Builder.recoverBuilder(owner, preview).setStyle(style).createBigContentView();
+                View root = WeChatNotificationAppearance.withImagePreview(original, module.getResources(),
+                        module.getApplicationInfo(), preview).apply(module, new FrameLayout(module));
                 int width = Math.round(320 * module.getResources().getDisplayMetrics().density);
                 root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(width * 2, View.MeasureSpec.AT_MOST));

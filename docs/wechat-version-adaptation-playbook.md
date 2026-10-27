@@ -4,6 +4,14 @@
 
 配合脚本：`tools/collect-device-info.ps1`（只读取设备与 APK，不在手机上做任何修改）。
 
+## 2026-10-27 通知应用头与消息头像统一
+
+- 当前外观策略：带模块外观标记的私聊、群聊消息统一保留微信原通知 `getLargeIcon()`；系统 `ConversationLayout` 以该图标作为会话头像并提供微信应用角标。群聊成员 `Person` 仍只表示消息发送者，不以群头像覆盖成员头像；已确认 bot、无原头像和无支持的 framework 布局保持系统回退。媒体卡片若成功在微信原生通知上拼接原生回复动作，保留原生模板、内容视图与回复实现；未拼接时才进入现有 `MessagingStyle` 会话构建，并在构建成功后清除原生自定义折叠/展开/横幅视图，避免它们遮住会话头像。构建失败仍保留原通知。
+- 私聊与群聊图片补图都保留 `MessagingStyle`、原大图标、会话标题、发送者身份和回复动作；`Builder.createExpandedContentView(): RemoteViews` AFTER hook（该方法缺失才回退 `createBigContentView(): RemoteViews`）克隆系统展开视图，按已校验的 `RemoteViews.removeFromParent(int): void` 清除旧图片，再向 `android:id/notification_main_column` 追加模块 160 dp `fitStart` 图片。群图标题和成员排版继续与群文本共用系统模板；私聊图片不再切换 `DecoratedCustomViewStyle`。原生非消息模板的图片构建仍保守使用原有自定义展开回退。
+- 新增 `Notification$Builder.createContentView(): RemoteViews` AFTER hook，仅对实际微信 Context、`nevo.wechat.appearance=com.tencent.mm`、非汇总通知且微信增强开启时，克隆折叠 `RemoteViews` 并隐藏系统 `app_name_text` 及存在的分隔符；展开 hook 不修改应用头，因此展开继续显示“微信”。不恢复已删除的设置键。折叠入口要求零参数、实例方法、准确 `RemoteViews` 返回类型及 `mContext: Context`、`mN: Notification` 实例字段；与头像和展开入口各自独立去优化、安装及失败回退。诊断使用 `WeChat.Appearance source=collapsed_hook_ready/collapsed_hook_unavailable/collapsed_header`、`message_image` 与原 avatar/header 来源，只记录异常类型，不记录内容或身份。
+- framework 外观 hook 仍按完整运行时签名判定，不新增微信版本白名单。图片获取仍只适配 8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.79/3182，版本名与版本码必须同时匹配；图片开关、等待值和微信主进程签名校验不变。回复、应用内回复、撤回各有独立门禁，不能据外观成功推断这些功能适配。缺头像、容器、`removeFromParent` 或模块资源时保留原消息文字/原生样式。回归需分别检查私聊链接原生回复与无回复、私聊文本/图片、群聊文本/图片、折叠/展开应用头、补图前后、连续更新与撤回；本节是源码及构建范围说明，真实微信/SystemUI hook 安装和 OEM 视觉结果尚未验证。
+- 2026-10-27 Android 17 / API 37 设备框架回归：69/69 instrumentation 通过，设备已安装微信 8.0.79/3182 的描述符检查 40 项通过。测试使用现有 release 证书签名的 Debug 与 androidTest APK；`finally` 清理并独立核验测试包和 runner 均不存在，测试前与测试后模块 APK 的回拉哈希均与本地 Release 相同，最终模块非 debuggable。使用了 instrumentation 的 `--no-hidden-api-checks`，结果只证明该测试上下文的 framework 布局与描述符；未发送真实消息，未验证微信/SystemUI 内的 hook 安装或 OEM 实际通知视觉，也未重启整机。原始日志、APK 备份和结果只保存在本地忽略目录 `.debug-artifacts/notification-style-device-20261027/`。
+
 ## 2026-10-27 取消应用名修改并撤销额外标题改写
 
 - 撤销上一轮新增的应用名行替换群名、内容标题改为轮次首位发送者的实现和测试。保留更早的群头像角标、群聊图片复用文本模板及图片 reapply/撤回清理修正，应用名、分隔符与内容标题交回系统模板。

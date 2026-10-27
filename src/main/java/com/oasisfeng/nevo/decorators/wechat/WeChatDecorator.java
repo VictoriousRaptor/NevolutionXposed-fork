@@ -445,16 +445,19 @@ public class WeChatDecorator extends NevoDecoratorService {
 				sLastCallType = null;
 				sLastCallTime = 0;
 			}
-			// 表情包/视频/文件等消息不做处理，保留微信原始通知内容
+			boolean replaceNativeMediaLayout = false;
+			// Keep WeChat's rich layout when its native notification only needs our reply action.
+			// Without a native reply to append, use the same conversation avatar/badge layout as text.
 			if (content != null) {
 				if (content.contains("[表情]") || content.contains("[动画表情]") ||
 					content.contains("[视频]") || content.contains("[文件]") || content.contains("[链接]") ||
 					content.contains("[音乐]") || content.contains("[位置]") || content.contains("[红包]") ||
 					content.contains("[转账]") || content.contains("[小程序]")) {
-					if (BuildConfig.DEBUG) Log.d(TAG, "Skipping media/sticker message, keeping original");
-					// Keep WeChat's own layout, but still offer inline reply when WeChat exposes one.
-					if (ensureMessagingBuilder()) mMessagingBuilder.attachReplyAction(id, n);
-					return Decorating.Unprocessed;
+					if (ensureMessagingBuilder() && mMessagingBuilder.attachReplyAction(id, n)) {
+						if (BuildConfig.DEBUG) Log.d(TAG, "Keeping native media layout with appended reply");
+						return Decorating.Unprocessed;
+					}
+					replaceNativeMediaLayout = true;
 				}
 				// 转换微信内置表情标记为 Emoji（如 [得意] -> 😎）
 				if (content.startsWith("[") && content.endsWith("]")) {
@@ -543,6 +546,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			WeChatNotificationAppearance.mark(n);
 			NotificationMarkdown.apply(n, mMarkdownEnabled);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
+			if (replaceNativeMediaLayout) WeChatNotificationAppearance.clearNativeContentViews(n);
 
 			if (extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) != null)
 				n.flags |= Notification.FLAG_ONLY_ALERT_ONCE;		// No more alert for direct-replied notification.

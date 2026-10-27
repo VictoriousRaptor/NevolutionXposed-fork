@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
+import android.view.View;
 import android.widget.RemoteViews;
 
 import com.oasisfeng.nevo.xposed.R;
@@ -30,6 +31,25 @@ final class WeChatNotificationAppearance {
         return WeChatDecorator.WECHAT_PACKAGE.equals(packageName) && WeChatDecorator.WECHAT_PACKAGE.equals(owner);
     }
 
+    @SuppressLint("DiscouragedApi") // Framework notification view IDs are private and vary across system layouts.
+    static RemoteViews hideCollapsedAppName(RemoteViews original, Resources resources) {
+        int appName = resources.getIdentifier("app_name_text", "id", "android");
+        if (appName == 0) return original;
+        RemoteViews result = original.clone();
+        result.setViewVisibility(appName, View.GONE);
+        for (String name : new String[]{"app_name_divider", "app_name_text_divider"}) {
+            int divider = resources.getIdentifier(name, "id", "android");
+            if (divider != 0) result.setViewVisibility(divider, View.GONE);
+        }
+        return result;
+    }
+
+    static void clearNativeContentViews(Notification notification) {
+        notification.contentView = null;
+        notification.bigContentView = null;
+        notification.headsUpContentView = null;
+    }
+
     static void useNativeAvatar(NotificationAppearanceHookProfile.Avatar profile, Object style, Notification notification)
             throws IllegalAccessException {
         if (!TEMPLATE_MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE))
@@ -41,16 +61,20 @@ final class WeChatNotificationAppearance {
         if (profile.conversationType.getInt(style) == 0) profile.conversationType.setInt(style, 1);
     }
 
+    static boolean isMessaging(Notification notification) {
+        return TEMPLATE_MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE));
+    }
+
     static boolean isGroupMessaging(Notification notification) {
         return TEMPLATE_MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE))
                 && notification.extras.getBoolean("android.isGroupConversation");
     }
 
-    @SuppressLint("BlockedPrivateApi") // Optional Xposed renderer: validate the exact signature and fall back on failure.
-    static RemoteViews withGroupImagePreview(RemoteViews original, Resources resources,
+    @SuppressLint({"BlockedPrivateApi", "DiscouragedApi"}) // Optional Xposed renderer uses private framework APIs and view IDs.
+    static RemoteViews withImagePreview(RemoteViews original, Resources resources,
                                              ApplicationInfo moduleInfo, Notification notification)
             throws ReflectiveOperationException {
-        if (!isGroupMessaging(notification)) return original;
+        if (!isMessaging(notification)) return original;
         int column = resources.getIdentifier("notification_main_column", "id", "android");
         if (column == 0) return original;
         RemoteViews result = original.clone();

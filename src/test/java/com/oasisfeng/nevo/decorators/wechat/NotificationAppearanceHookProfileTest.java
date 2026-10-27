@@ -10,6 +10,11 @@ public class NotificationAppearanceHookProfileTest {
         assertEquals("createExpandedContentView", header(CurrentBuilder.class).render.getName());
     }
 
+    @Test public void collapsedHeaderUsesOnlyTheCompactRenderer() throws Exception {
+        assertEquals("createContentView", collapsed(CompactBuilder.class).render.getName());
+        assertThrows(NoSuchMethodException.class, () -> collapsed(WrongCompactBuilder.class));
+    }
+
     @Test public void rejectsWrongModernSignatureRatherThanTryingALegacyMethod() {
         assertThrows(NoSuchMethodException.class, () -> header(WrongReturnBuilder.class));
         assertThrows(NoSuchMethodException.class, () -> header(StaticBuilder.class));
@@ -48,6 +53,10 @@ public class NotificationAppearanceHookProfileTest {
         return NotificationAppearanceHookProfile.header(builder, Context.class, Notice.class, Views.class);
     }
 
+    private static NotificationAppearanceHookProfile.Header collapsed(Class<?> builder) throws Exception {
+        return NotificationAppearanceHookProfile.collapsed(builder, Context.class, Notice.class, Views.class);
+    }
+
     private static NotificationAppearanceHookProfile.Avatar avatar(Class<?> style) throws Exception {
         return NotificationAppearanceHookProfile.avatar(style, BaseStyle.class, LegacyBuilder.class,
                 Context.class, Notice.class, Icon.class, Views.class);
@@ -66,6 +75,16 @@ public class NotificationAppearanceHookProfileTest {
         private Context mContext;
         private Notice mN;
         private Views createExpandedContentView() { return null; }
+    }
+    private static class CompactBuilder {
+        private Context mContext;
+        private Notice mN;
+        private Views createContentView() { return null; }
+    }
+    private static class WrongCompactBuilder {
+        private Context mContext;
+        private Notice mN;
+        private String createContentView() { return null; }
     }
     private static class WrongReturnBuilder {
         private String createExpandedContentView() { return null; }

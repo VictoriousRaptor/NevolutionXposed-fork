@@ -1,15 +1,38 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
 import android.app.Notification;
+import android.app.Instrumentation;
 import android.app.Person;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
+import android.view.View;
+import android.widget.FrameLayout;
 import android.widget.RemoteViews;
 
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Synthetic framework checks only: never post a notification or contact a device app. */
 final class NotificationAppearanceInstrumentation {
+    static void collapsedAppNameOnly(Instrumentation instrumentation) {
+        Context context = instrumentation.getTargetContext();
+        Notification notice = builder(context).setStyle(style()).build();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        instrumentation.runOnMainSync(() -> {
+            try {
+                RemoteViews compact = Notification.Builder.recoverBuilder(context, notice).createContentView();
+                RemoteViews hidden = WeChatNotificationAppearance.hideCollapsedAppName(compact, context.getResources());
+                check(hidden != compact, "collapsed template was mutated in place");
+                View root = hidden.apply(context, new FrameLayout(context));
+                int appName = context.getResources().getIdentifier("app_name_text", "id", "android");
+                View label = root.findViewById(appName);
+                if (label != null) check(label.getVisibility() == View.GONE, "collapsed application label remained visible");
+                compact.apply(context, new FrameLayout(context));
+            } catch (Throwable error) { failure.set(error); }
+        });
+        if (failure.get() != null) throw new AssertionError("Collapsed notification rendering failed", failure.get());
+    }
+
     static void nativeAvatarAndGroupScope(Context context) {
         try {
             NotificationAppearanceHookProfile.Avatar profile = NotificationAppearanceHookProfile.avatar(
@@ -55,12 +78,22 @@ final class NotificationAppearanceInstrumentation {
         check(!WeChatNotificationAppearance.owned("com.tencent.mm", notice), "summary accepted");
         notice.flags &= ~Notification.FLAG_GROUP_SUMMARY;
 
+        RemoteViews nativeCard = new RemoteViews(context.getPackageName(), android.R.layout.simple_list_item_1);
+        notice.contentView = nativeCard;
+        notice.bigContentView = nativeCard;
+        notice.headsUpContentView = nativeCard;
+        WeChatNotificationAppearance.clearNativeContentViews(notice);
+        check(notice.contentView == null && notice.bigContentView == null && notice.headsUpContentView == null,
+                "native card views blocked the conversation template");
+
         CharSequence originalTitle = notice.extras.getCharSequence(Notification.EXTRA_TITLE);
         Bitmap image = Bitmap.createBitmap(16, 32, Bitmap.Config.ARGB_8888);
         Notification preview = ImagePreviewLoader.buildPreviewNotification(context, context.getApplicationInfo(), notice, image, 77);
         check(WeChatNotificationAppearance.owned("com.tencent.mm", preview), "preview lost appearance owner");
         check(ImagePreviewLoader.isPreview(preview), "preview state lost");
         check(android.text.TextUtils.equals(originalTitle, preview.extras.getCharSequence(Notification.EXTRA_TITLE)), "title changed");
+        check("android.app.Notification$MessagingStyle".equals(preview.extras.getString(Notification.EXTRA_TEMPLATE))
+                && preview.bigContentView == null, "private image left the conversation template");
 
         Notification group = builder(context).setStyle(style().setGroupConversation(true)).build();
         group.extras.putString(NotificationMessages.TITLE, "Synthetic chat");

@@ -5,7 +5,7 @@
     <string name="scale_test_failed">Could not load the test images.</string>
     <string name="scale_test_square">Square Lenna</string>
     <string name="scale_test_full">Full Lenna (censored)</string>
-    <string name="scale_test_dimensions">Source: %1$d × %2$d pixels</string>
+    <string name="scale_test_dimensions">Source: %1$d × %2$d px</string>
     <string name="scale_test_send">Send this test notification</string>
     <string name="scale_test_clear">Clear the six test notifications</string>
     <string name="scale_test_permission">Allow notifications and enable pop-up banners for the image scaling test channel, then try again.</string>
