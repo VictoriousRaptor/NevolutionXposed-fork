@@ -94,6 +94,11 @@ public class WeChatDecorator extends NevoDecoratorService {
 	}
 
 	public static class Local extends LocalDecorator implements HookSupport {
+		private static final WeChatProfileSelector PROFILE_SELECTOR = new WeChatProfileSelector(1);
+		public static WeChatProfileSelector profileSelector() { return PROFILE_SELECTOR; }
+		private WeChatProfileSelector.Cache mProfileCache;
+		public void configureProfileCache(WeChatProfileSelector.Cache cache) { mProfileCache = cache; }
+		WeChatProfileSelector.Cache profileCache() { return mProfileCache; }
 		public Local(String prefKey) {
 			super(prefKey);
 		}

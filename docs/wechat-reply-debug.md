@@ -1,5 +1,11 @@
 # WeChat notification reply compatibility
 
+## 2026-10-28 同版本名新代码实验性回复排查
+
+精确已知组合优先；未知代码仅枚举同 `versionName` 的已核对通知回复画像，完整签名唯一命中才标 `experimental`。8.0.77 的 3141/3160 候选若都通过则记录 `ambiguous` 并不选实验性画像；8.0.72/8.0.78 的名称**或**代码历史回退及其他 legacy 回退仍在，原生 `PendingIntent` 回复不受合成门禁失败影响。须同时验证接收器 `onReceive(Context, Intent): void`、静态 RemoteInput helper `b(Intent): Bundle`、画像指定的三道无参数静态 `boolean` 门禁；门禁批量 hook 任一失败会撤销已有句柄，合成入口保持关闭。`NX_REPLY stage=profile_ready` 只表示解析通过；还需检查 `car_mode_bypass_ready` 与真实消息投递，不能把前者视为后者。
+
+8.0.79/3183 没有 APK，无法记录该构建来源、SHA-256、反编译位置或实际原始混淆名；只有 3182 候选的原证据。此次主机测试与编译不证明 3183 运行时 hook、`key_username` 投递或设备通知行为。缓存读键包括功能、版本名、长版本码、更新时间、修订版；hook 进程远程偏好只读，模块侧正缓存写入 IPC 尚待接入和跨启动验证，不能因进程内 `experimental` 日志就称为持久匹配。
+
 The full procedure lives in
 [微信版本适配手册](wechat-version-adaptation-playbook.md). Read that playbook
 first; this file only keeps the rules that must never be broken.

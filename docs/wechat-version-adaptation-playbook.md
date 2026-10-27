@@ -1,5 +1,13 @@
 # 微信版本适配手册
 
+## 2026-10-28 同版本名不同 versionCode 的实验性签名探测（实施中）
+
+微信主进程 `Application.onCreate(): void` AFTER 首次初始化时，通知栏合成回复及通知原生 Emoji 保留各自按已知 `versionName` 取候选；已知精确 `versionName && versionCode` 组合优先。未知代码只探测**同版本名**候选，完整签名唯一命中后才标记 `experimental` 并安装该功能的 hook；零命中或 8.0.77 多候选歧义均不启用实验性画像。回复原有 8.0.72/8.0.78 的名称**或**代码匹配和 legacy 回退继续保留，原生 `PendingIntent` 回复与不依赖微信混淆布局的 framework 外观仍独立工作。图片事件、大图下载、应用内回复、撤回尚需分别接入，不能从回复或 Emoji 通过推断它们已可用。
+
+回复完整预检包括 `MMAutoMessageReplyReceiver` 继承 `BroadcastReceiver` 及实例 `onReceive(Context, Intent): void`、`z2.s1.b(Intent): Bundle` 静态方法、对应画像中三道无参数静态 `boolean` 车载门禁。门禁批量安装期间回调保持惰性，任一 hook 失败就撤销已装句柄且关闭合成入口；`profile_ready` 仅表示签名解析，须门禁安装完成才允许合成动作。Emoji 仅有 8.0.79/3182 画像；探测 `com.tencent.mm.smiley.g.d(String): String` 和 `com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9,long,boolean,boolean,String,int,String,String,Intent,boolean): void` 两个实例非 abstract 方法。直接调用者取消优化成功后才激活，微信通知增强及 `WeChatDecorator.preserve_emoji` 仍在回调时实时读取，默认关闭。诊断只记录版本、画像、`exact`/`experimental`、`no_match`/`ambiguous`、阶段及异常类型，不记录消息或身份。
+
+候选 ID 设计为按功能、版本名、长版本码、微信更新时间及画像修订版存于模块自有缓存，新进程仍须复核完整签名。**本阶段的 hook 进程远程偏好写通道尚未完成**：libxposed API 102 的 `getRemotePreferences()` 在被 hook 应用中只读，模块侧 IPC 持久写入及跨微信进程复用仍待后续任务验证；不能把本阶段测试称为“首次匹配后持久缓存已通过”。8.0.79/3183 没有提供 APK，来源、SHA-256 和反编译位置均未知；本阶段仅有主机单元测试与构建，不具备该目标的离线字节码、真实 hook 安装、回复送达、Emoji 展示或 OEM 行为证据。回归须分别覆盖精确优先、3183 唯一签名、8.0.77 歧义、错误 helper/门禁、部分安装失败、原生回复和 Emoji 运行中开关，再在取得 APK 与授权设备后逐层验证。
+
 本文档是一次性完成"微信新版本适配"的运行手册：从采集证据、定位混淆类/方法、生成版本画像，到装包、验证与记录。适用于本仓库的维护者与代行实施的 agent。
 
 配合脚本：`tools/collect-device-info.ps1`（只读取设备与 APK，不在手机上做任何修改）。

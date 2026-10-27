@@ -1,6 +1,7 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
 import com.oasisfeng.nevo.xposed.compat.XC_MethodHook.MethodHookParam;
+import android.content.Intent;
 
 import org.junit.Test;
 
@@ -18,6 +19,18 @@ public class WeChatEmojiHooksTest {
         assertFalse(WeChatEmojiHooks.supports("8.0.79", 3180));
         assertFalse(WeChatEmojiHooks.supports("8.0.78", 3182));
         assertFalse(WeChatEmojiHooks.supports(null, 3182));
+    }
+
+    @Test public void unknown3183NeedsBothCompleteEmojiSignatures() {
+        WeChatProfileSelector selector = new WeChatProfileSelector(1);
+        WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId("8.0.79", 3183, 1);
+        assertTrue(WeChatEmojiHooks.selectCandidate(build, selector, new MemoryCache(),
+                EmojiFixture.class, NotificationFixture.class, MessageFixture.class));
+        assertFalse(WeChatEmojiHooks.selectCandidate(build, new WeChatProfileSelector(1), new MemoryCache(),
+                EmojiFixture.class, WrongNotificationFixture.class, MessageFixture.class));
+        assertFalse(WeChatEmojiHooks.selectCandidate(new WeChatProfileSelector.BuildId("8.0.78", 3183, 1),
+                new WeChatProfileSelector(1), new MemoryCache(), EmojiFixture.class, NotificationFixture.class,
+                MessageFixture.class));
     }
 
     @Test public void preservesOriginalUnicodeAndLiteralMarkersInsideNotification() {
@@ -130,5 +143,21 @@ public class WeChatEmojiHooksTest {
     public static class Fixture {
         public String convert(String value) { return value; }
         public static String staticConvert(String value) { return value; }
+    }
+
+    public static class EmojiFixture { public String d(String text) { return text; } }
+    public static class MessageFixture {}
+    public static class NotificationFixture {
+        public void a(MessageFixture message, long id, boolean a, boolean b, String c, int d,
+                      String e, String f, Intent intent, boolean g) {}
+    }
+    public static class WrongNotificationFixture {
+        public static void a(MessageFixture message, long id, boolean a, boolean b, String c, int d,
+                             String e, String f, Intent intent, boolean g) {}
+    }
+    private static final class MemoryCache implements WeChatProfileSelector.Cache {
+        public String read(String f, WeChatProfileSelector.BuildId b, int r) { return null; }
+        public void write(String f, WeChatProfileSelector.BuildId b, int r, String id) {}
+        public void remove(String f, WeChatProfileSelector.BuildId b, int r) {}
     }
 }

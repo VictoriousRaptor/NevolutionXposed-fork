@@ -1,5 +1,9 @@
 # WeChat 8.0.72 reply findings (2026-09-11)
 
+## 2026-10-28 同名新构建实验性探测补充
+
+已核对的 8.0.72/3085 仍优先按版本名与版本码**同时**命中；历史通知回复 `forPackage()` 对 8.0.72 名称**或** 3085 代码任一匹配的回退保持。仅当同名未知代码的完整回复签名唯一通过时，新增选择器将其记为实验性候选：`MMAutoMessageReplyReceiver.onReceive(Context, Intent): void`、静态 `z2.s1.b(Intent): Bundle`、`dn1.a.f()/h()/c(): boolean`（均静态）须全部成立；车载门禁 hook 全部成功后才开放合成回复。失败时不扩大其他混淆画像，保留既有原生 `PendingIntent` 与 legacy/历史回退；Emoji 画像仅存在于 8.0.79，8.0.72 不据回复匹配启用。APK 来源、SHA-256、反编译原始名及位置以本文件原有 3085 证据为准，同名新代码没有 APK 证据。主机测试不代表未知构建的真实 hook 或回复送达；正缓存持久写入通道仍待接入。
+
 ## Device and app facts
 
 | Item | Value |

@@ -8,6 +8,7 @@ import android.os.Bundle;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -86,6 +87,16 @@ public final class WeChatReplyProfile {
 			new String[] { "rn1.a", "com.tencent.mm.booter.auto.AutoLogic" },
 			new String[] { "f", "g", "c" });
 
+	/** Only APK-verified profiles participate in same-name experimental matching. */
+	public static List<WeChatProfileSelector.Candidate<WeChatReplyProfile>> candidates() {
+		return Arrays.asList(
+				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_79_3182.label, "8.0.79", 3182L, RELEASE_8_0_79_3182),
+				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_77_3141.label, "8.0.77", 3141L, RELEASE_8_0_77_3141),
+				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_77.label, "8.0.77", 3160L, RELEASE_8_0_77),
+				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_78.label, "8.0.78", 3180L, RELEASE_8_0_78),
+				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_72.label, "8.0.72", 3085L, RELEASE_8_0_72));
+	}
+
 	public final String label;
 	private final String[] receiverCandidates;
 	private final String[] helperCandidates;
@@ -135,7 +146,8 @@ public final class WeChatReplyProfile {
 		}
 
 		public boolean isUsable() {
-			return receiverClass != null && gateClass != null && !gateMethods.isEmpty();
+			return receiverClass != null && helperClass != null && gateClass != null
+					&& gateMethods.size() == profile.gateMethods.length;
 		}
 
 		public String describe() {
@@ -146,6 +158,41 @@ public final class WeChatReplyProfile {
 					+ " gates=" + (gateClass == null ? "none" : gateClass.getName() + gateMethods)
 					+ " usable=" + isUsable();
 		}
+	}
+
+	/** Keeps every gate callback inert until the complete batch is installed. */
+	public static final class GateBatch {
+		private volatile boolean ready;
+		private volatile long generation;
+		private volatile Throwable failure;
+		public boolean ready() { return ready; }
+		public Throwable failure() { return failure; }
+		public synchronized boolean install(List<String> names, GateInstaller installer) {
+			if (ready) return true;
+			final long attempt = ++generation;
+			final List<AutoCloseable> handles = new ArrayList<>();
+			try {
+				if (names == null || names.isEmpty()) return false;
+				for (String name : names) handles.add(installer.install(name, new GateCallback(this, attempt)));
+				ready = true;
+				failure = null;
+				return true;
+			} catch (Throwable error) {
+				ready = false;
+				failure = error;
+				for (int i = handles.size() - 1; i >= 0; i--) {
+					try { handles.get(i).close(); } catch (Exception ignored) { /* Inert callback remains safe. */ }
+				}
+				return false;
+			}
+		}
+	}
+	public interface GateInstaller { AutoCloseable install(String name, GateCallback callback) throws Throwable; }
+	public static final class GateCallback {
+		private final GateBatch batch;
+		private final long generation;
+		GateCallback(GateBatch batch, long generation) { this.batch = batch; this.generation = generation; }
+		public boolean active() { return batch.ready() && batch.generation == generation; }
 	}
 
 	public Resolved resolve(ClassLoader cl, String versionName, long versionCode) {
@@ -166,7 +213,9 @@ public final class WeChatReplyProfile {
 			try {
 				final Class<?> clazz = XposedHelpers.findClass(name, cl);
 				if (!BroadcastReceiver.class.isAssignableFrom(clazz)) continue;
-				clazz.getMethod("onReceive", Context.class, Intent.class);
+				Method onReceive = clazz.getMethod("onReceive", Context.class, Intent.class);
+				if (onReceive.getReturnType() != void.class || Modifier.isStatic(onReceive.getModifiers())
+						|| Modifier.isAbstract(onReceive.getModifiers())) continue;
 				return clazz;
 			} catch (Throwable ignored) {
 			}
@@ -178,14 +227,19 @@ public final class WeChatReplyProfile {
 		for (String name : helperCandidates) {
 			try {
 				final Class<?> clazz = XposedHelpers.findClass(name, cl);
-				final Method method = clazz.getDeclaredMethod("b", Intent.class);
-				if (!Modifier.isStatic(method.getModifiers())) continue;
-				if (!Bundle.class.isAssignableFrom(method.getReturnType())) continue;
+				if (!hasHelperSignature(clazz)) continue;
 				return clazz;
 			} catch (Throwable ignored) {
 			}
 		}
 		return null;
+	}
+
+	static boolean hasHelperSignature(Class<?> clazz) {
+		try {
+			final Method method = clazz.getDeclaredMethod("b", Intent.class);
+			return Modifier.isStatic(method.getModifiers()) && method.getReturnType() == Bundle.class;
+		} catch (NoSuchMethodException ignored) { return false; }
 	}
 
 	private Class<?> findGateClass(ClassLoader cl) {

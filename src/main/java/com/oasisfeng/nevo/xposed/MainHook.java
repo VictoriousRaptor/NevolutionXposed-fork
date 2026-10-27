@@ -15,8 +15,8 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 
 import java.lang.reflect.Method;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.oasisfeng.nevo.sdk.HookSupport;
@@ -27,6 +27,8 @@ import com.oasisfeng.nevo.decorators.wechat.WeChatDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatNotificationRemoval;
 import com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile;
 import com.oasisfeng.nevo.decorators.wechat.WeChatEmojiHooks;
+import com.oasisfeng.nevo.decorators.wechat.WeChatProfileCache;
+import com.oasisfeng.nevo.decorators.wechat.WeChatProfileSelector;
 import com.oasisfeng.nevo.decorators.wechat.NotificationMarkdownHooks;
 import com.oasisfeng.nevo.decorators.wechat.NotificationAppearanceHooks;
 import com.oasisfeng.nevo.xposed.compat.PackageHookContext;
@@ -53,8 +55,9 @@ public class MainHook extends XposedModule {
 
 	private static Class<?> sMMAutoMessageReplyReceiverClass = null;
 	private static volatile com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved sReplyProfile = null;
-	/** Guarded by hookAutoLogicMethods; failed installations remain eligible for retry. */
-	private static final Set<Method> sHookedCarModeGates = new HashSet<>();
+	/** Gate callbacks are inert until the whole batch has been installed. */
+	private static final WeChatReplyProfile.GateBatch sCarModeGates = new WeChatReplyProfile.GateBatch();
+	private static WeChatProfileSelector.Cache sProfileCache;
 	/** A rejected profile is retried, but never more often than this. */
 	private static final long PROFILE_RETRY_INTERVAL_MS = 5_000L;
 	private static volatile long sLastProfileAttempt = 0L;
@@ -84,14 +87,22 @@ public class MainHook extends XposedModule {
 		sLastProfileAttempt = now;
 		try {
 			final android.content.pm.PackageInfo info = context.getPackageManager().getPackageInfo("com.tencent.mm", 0);
-			final String versionName = info.versionName;
-			final long versionCode = android.os.Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode;
-			final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile profile =
-					com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.forPackage(versionName, versionCode);
-			final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved resolved =
-					profile.resolve(context.getClassLoader(), versionName, versionCode);
+			final WeChatProfileSelector.BuildId build = WeChatProfileSelector.BuildId.fromPackageInfo(info);
+			final Map<String, WeChatReplyProfile.Resolved> resolvedCandidates = new HashMap<>();
+			final WeChatProfileSelector.Selection<WeChatReplyProfile> selected =
+					WeChatDecorator.Local.profileSelector().select("reply", build, WeChatReplyProfile.candidates(), profile -> {
+						WeChatReplyProfile.Resolved result = profile.resolve(context.getClassLoader(), build.versionName, build.versionCode);
+						resolvedCandidates.put(profile.label, result);
+						return result.isUsable();
+					}, sProfileCache);
+			final WeChatReplyProfile profile = selected.profile != null ? selected.profile
+					: WeChatReplyProfile.forPackage(build.versionName, build.versionCode);
+			final WeChatReplyProfile.Resolved resolved = resolvedCandidates.containsKey(profile.label)
+					? resolvedCandidates.get(profile.label)
+					: profile.resolve(context.getClassLoader(), build.versionName, build.versionCode);
 			sReplyProfile = resolved;
-			logReply(resolved.isUsable() ? "profile_ready" : "profile_rejected", resolved.describe());
+			logReply(resolved.isUsable() ? "profile_ready" : "profile_rejected",
+					"match=" + selected.kind.name().toLowerCase(java.util.Locale.ROOT) + " " + resolved.describe());
 		} catch (Throwable e) {
 			XposedBridge.rethrowFrameworkError(e);
 			sReplyProfile = null;
@@ -101,7 +112,7 @@ public class MainHook extends XposedModule {
 
 	public static boolean isSyntheticReplyAvailable() {
 		final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved resolved = sReplyProfile;
-		return resolved != null && resolved.isUsable();
+		return resolved != null && resolved.isUsable() && sCarModeGates.ready();
 	}
 
 	/** Arms the single-use synthetic reply text. */
@@ -139,6 +150,11 @@ public class MainHook extends XposedModule {
 			return;
 		}
 		pref = getRemotePreferences(RemotePreferenceStore.GROUP);
+		// API 102 exposes these preferences read-only in hooked apps. This is a temporary
+		// read path until the module-owned cache write IPC is connected; failed writes
+		// never make an experimental signature match usable on a later process by itself.
+		if ("com.tencent.mm".equals(processName))
+			sProfileCache = new WeChatProfileCache(getRemotePreferences(WeChatProfileCache.GROUP));
 		log(Log.INFO, TAG, "Loaded in " + processName + " with " + getFrameworkName()
 				+ " " + getFrameworkVersion() + " API " + getApiVersion());
 	}
@@ -302,7 +318,6 @@ public class MainHook extends XposedModule {
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log(this.wechat + " NotificationManager hook failed"); }
 		try {
 			AtomicReference<Context> ref = new AtomicReference<>();
-			hookAutoReplyReceiver(loadPackageParam);
 			XposedHelpers.findAndHookMethod(Application.class, "onCreate", new XC_MethodHook() {
 				@Override
 				protected void afterHookedMethod(MethodHookParam param) {
@@ -314,14 +329,17 @@ public class MainHook extends XposedModule {
 						WeChatEmojiHooks.install(context, loadPackageParam.classLoader,
 								() -> pref.getBoolean("WeChatDecorator.enabled", true)
 										&& pref.getBoolean(RemotePreferenceStore.KEY_PRESERVE_EMOJI, false),
-									MainHook.this::deoptimize);
+									MainHook.this::deoptimize, WeChatDecorator.Local.profileSelector(), sProfileCache);
 						resolveReplyProfile(context);
+						if (sReplyProfile != null && sReplyProfile.isUsable()) hookAutoReplyReceiver(sReplyProfile);
 						// Install the car-mode gate bypass before WeChat builds its
 						// notifications, so WeChat itself creates the car conversation
 						// with the reply PendingIntent that carries key_username. The
 						// synthetic path cannot provide that username by itself.
 						MainHook.this.hookCarModeBypass();
 						LocalDecorator wechat = MainHook.this.wechat.getLocalDecorator("com.tencent.mm");
+						if (wechat instanceof WeChatDecorator.Local)
+							((WeChatDecorator.Local) wechat).configureProfileCache(sProfileCache);
 						wechat.onCreate(pref);
 						if (!wechat.isDisabled() && (wechat instanceof HookSupport)) ((HookSupport)wechat).hook(loadPackageParam);
 					}
@@ -366,10 +384,9 @@ public class MainHook extends XposedModule {
 	}
 
 
-	private void hookAutoReplyReceiver(PackageHookContext loadPackageParam) {
+	private void hookAutoReplyReceiver(WeChatReplyProfile.Resolved resolved) {
 		try {
-			final Class<?> receiverClass = XposedHelpers.findClass("com.tencent.mm.plugin.auto.service.MMAutoMessageReplyReceiver", loadPackageParam.classLoader);
-			sMMAutoMessageReplyReceiverClass = receiverClass;
+			final Class<?> receiverClass = resolved.receiverClass;
 			if (BuildConfig.DEBUG) Log.d(TAG, "hookAutoReplyReceiver: found class " + receiverClass);
 			// Only the public entry point is traced; hooking every declared method of the
 			// receiver produced per-call logging without adding diagnostic value.
@@ -400,6 +417,7 @@ public class MainHook extends XposedModule {
 					}
 				}
 			});
+			sMMAutoMessageReplyReceiverClass = receiverClass;
 		} catch (Throwable e) {
 			XposedBridge.rethrowFrameworkError(e);
 			XposedBridge.log("hookAutoReplyReceiver failed: " + e.getMessage());
@@ -422,7 +440,10 @@ public class MainHook extends XposedModule {
 		}
 		try {
 			final Class<?> gateClass = resolved.gateClass;
-			hookAutoLogicMethods(gateClass, resolved.gateMethods);
+			if (!hookAutoLogicMethods(gateClass, resolved.gateMethods)) {
+				logReply("synthetic_unavailable", "reason=gate_install_failed");
+				return false;
+			}
 			logReply("car_mode_bypass_ready", "class=" + gateClass.getName() + " methods=" + resolved.gateMethods);
 		} catch (Throwable th) {
 			XposedBridge.rethrowFrameworkError(th);
@@ -485,7 +506,10 @@ public class MainHook extends XposedModule {
 				logReply("car_mode_bypass_skipped", "reason=profile_unusable");
 				return;
 			}
-			hookAutoLogicMethods(resolved.gateClass, resolved.gateMethods);
+			if (!hookAutoLogicMethods(resolved.gateClass, resolved.gateMethods)) {
+				logReply("car_mode_bypass_skipped", "reason=gate_install_failed");
+				return;
+			}
 
 			// 版本画像中已通过签名校验的 RemoteInput 辅助类
 			try {
@@ -540,24 +564,24 @@ public class MainHook extends XposedModule {
 		}
 	}
 
-	private static synchronized void hookAutoLogicMethods(final Class<?> autoLogicClass, java.util.List<String> bypassMethods) {
+	private static synchronized boolean hookAutoLogicMethods(final Class<?> autoLogicClass,
+			java.util.List<String> bypassMethods) {
 		if (BuildConfig.DEBUG) Log.d(TAG, "hooking " + autoLogicClass.getName() + " " + bypassMethods);
-		for (final String methodName : bypassMethods) {
-			try {
-				Method method = XposedHelpers.findMethodExact(autoLogicClass, methodName);
-				if (sHookedCarModeGates.contains(method)) continue;
-				XposedBridge.hookMethod(method, new XC_MethodHook() {
-					@Override
-					protected void beforeHookedMethod(MethodHookParam param) {
-						param.setResult(true);
-						if (BuildConfig.DEBUG) Log.d(TAG, "Bypassed " + autoLogicClass.getSimpleName() + "." + methodName + "() -> true");
-					}
-				});
-				sHookedCarModeGates.add(method);
-			} catch (Throwable e) {
-				XposedBridge.rethrowFrameworkError(e);
-				XposedBridge.log("hookAutoLogicMethods: " + methodName + " hook failed: " + e.getMessage());
-			}
+		boolean ready = sCarModeGates.install(bypassMethods, (methodName, callback) -> {
+			Method method = XposedHelpers.findMethodExact(autoLogicClass, methodName);
+			io.github.libxposed.api.XposedInterface.HookHandle handle = XposedBridge.hookMethod(method, new XC_MethodHook() {
+				@Override protected void beforeHookedMethod(MethodHookParam param) {
+					if (!callback.active()) return;
+					param.setResult(true);
+					if (BuildConfig.DEBUG) Log.d(TAG, "Bypassed " + autoLogicClass.getSimpleName() + "." + methodName + "() -> true");
+				}
+			});
+			return handle::unhook;
+		});
+		if (!ready && sCarModeGates.failure() != null) {
+			XposedBridge.rethrowFrameworkError(sCarModeGates.failure());
+			logReply("car_mode_gate_install_failed", "type=" + sCarModeGates.failure().getClass().getSimpleName());
 		}
+		return ready;
 	}
 }

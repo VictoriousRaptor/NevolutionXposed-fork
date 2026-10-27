@@ -5,8 +5,13 @@ import org.junit.Test;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ArrayList;
+import android.content.Intent;
+import android.os.Bundle;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Pins the version -> profile mapping and the descriptors of the verified profiles.
@@ -82,6 +87,69 @@ public class WeChatReplyProfileTest {
 		assertEquals(Arrays.asList("z2.s1"), candidates(profile, "helperCandidates"));
 		assertEquals(Arrays.asList("dn1.a"), candidates(profile, "gateCandidates"));
 		assertEquals(Arrays.asList("f", "h", "c"), candidates(profile, "gateMethods"));
+	}
+
+	@Test public void unknown3183OffersOnlyTheSameNameCandidate() {
+		WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId("8.0.79", 3183, 1);
+		List<WeChatProfileSelector.Candidate<WeChatReplyProfile>> candidates = WeChatReplyProfile.candidates();
+		WeChatProfileSelector.Selection<WeChatReplyProfile> selected = new WeChatProfileSelector(1).select(
+				"reply", build, candidates, p -> "wechat-8.0.79/3182".equals(p.label), new MemoryCache());
+		assertEquals(WeChatProfileSelector.MatchKind.EXPERIMENTAL, selected.kind);
+		assertEquals("wechat-8.0.79/3182", selected.profile.label);
+	}
+
+	@Test public void replyRequiresHelperAndAllThreeGates() {
+		WeChatReplyProfile profile = WeChatReplyProfile.forPackage("8.0.79", 3182);
+		Class<?> type = WeChatReplyProfileTest.class;
+		assertTrue(new WeChatReplyProfile.Resolved(profile, "8.0.79", 3182, type, type, type,
+				Arrays.asList("c", "d", "b")).isUsable());
+		assertFalse(new WeChatReplyProfile.Resolved(profile, "8.0.79", 3182, type, null, type,
+				Arrays.asList("c", "d", "b")).isUsable());
+		assertFalse(new WeChatReplyProfile.Resolved(profile, "8.0.79", 3182, type, type, type,
+				Arrays.asList("c", "d")).isUsable());
+	}
+
+	@Test public void gateInstallFailureLeavesEarlierCallbacksInert() throws Exception {
+		WeChatReplyProfile.GateBatch batch = new WeChatReplyProfile.GateBatch();
+		List<WeChatReplyProfile.GateCallback> callbacks = new ArrayList<>();
+		List<Integer> removed = new ArrayList<>();
+		assertFalse(batch.install(Arrays.asList("c", "d", "b"), (name, callback) -> {
+			if ("d".equals(name)) throw new IllegalStateException("synthetic hook failure");
+			callbacks.add(callback);
+			return () -> removed.add(1);
+		}));
+		assertFalse(batch.ready());
+		assertFalse(callbacks.get(0).active());
+		assertEquals(1, removed.size());
+	}
+
+	@Test public void failedUnhookCannotReviveOldGateCallbackOnRetry() {
+		WeChatReplyProfile.GateBatch batch = new WeChatReplyProfile.GateBatch();
+		List<WeChatReplyProfile.GateCallback> oldCallbacks = new ArrayList<>();
+		assertFalse(batch.install(Arrays.asList("c", "d", "b"), (name, callback) -> {
+			if ("d".equals(name)) throw new IllegalStateException("synthetic install failure");
+			oldCallbacks.add(callback);
+			return () -> { throw new IllegalStateException("synthetic unhook failure"); };
+		}));
+		assertTrue(batch.install(Arrays.asList("c", "d", "b"), (name, callback) -> () -> {}));
+		assertTrue(batch.ready());
+		assertFalse(oldCallbacks.get(0).active());
+	}
+
+	@Test public void helperRequiresExactStaticBundleResult() {
+		assertTrue(WeChatReplyProfile.hasHelperSignature(ExactHelper.class));
+		assertFalse(WeChatReplyProfile.hasHelperSignature(WrongResultHelper.class));
+		assertFalse(WeChatReplyProfile.hasHelperSignature(InstanceHelper.class));
+	}
+
+	public static class ExactHelper { public static Bundle b(Intent intent) { return null; } }
+	public static class WrongResultHelper { public static Object b(Intent intent) { return null; } }
+	public static class InstanceHelper { public Bundle b(Intent intent) { return null; } }
+
+	private static final class MemoryCache implements WeChatProfileSelector.Cache {
+		public String read(String f, WeChatProfileSelector.BuildId b, int r) { return null; }
+		public void write(String f, WeChatProfileSelector.BuildId b, int r, String id) {}
+		public void remove(String f, WeChatProfileSelector.BuildId b, int r) {}
 	}
 
 	private static List<String> candidates(final WeChatReplyProfile profile, final String field) throws Exception {
