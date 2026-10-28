@@ -259,7 +259,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 					|| target.conversation() != mConversationManager.getConversation(id)) return;
 			Notification read = latest.clone();
 			Conversation conversation = mConversationManager.snapshot(target.conversation(), read);
-			NotificationMessages.readForReply(conversation, read, target.token(), showLastReply());
+			NotificationMessages.readForReply(conversation, read, getArchivedNotifications(id), target.token(), showLastReply());
 			if (!clearReadNotifications(id, target.token(), false)) return;
 			NotificationMessages.stamp(conversation, read);
 			// Keep the current transcript until the next peer; user removal can still delete it.
@@ -275,11 +275,12 @@ public class WeChatDecorator extends NevoDecoratorService {
 			long activeToken = latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
 			Notification reply = latest.clone();
 			Conversation conversation = mConversationManager.snapshot(target.conversation(), reply);
-			if (!NotificationMessages.recordReadReply(conversation, reply, target, text, time, replyId)) return;
+			if (!NotificationMessages.recordReadReply(conversation, reply, getArchivedNotifications(id),
+					target, text, time, replyId)) return;
 			if (!clearReadNotifications(id, token, false)
 					&& !NotificationMessages.hasReadForReply(latest, token)) return;
 			imagePreviews.discardRead(id, reply, token);
-			NotificationMessages.readForReply(conversation, reply, token, showLastReply());
+			NotificationMessages.readForReply(conversation, reply, getArchivedNotifications(id), token, showLastReply());
 			NotificationMessages.stamp(conversation, reply);
 			// Saving a successful reply must not depend on the notification still being active.
 			if (getArchivedNotification(id) == null) cache(id, reply);

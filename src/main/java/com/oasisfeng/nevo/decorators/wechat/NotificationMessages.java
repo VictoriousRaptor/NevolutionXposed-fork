@@ -54,6 +54,10 @@ final class NotificationMessages {
     }
 
     static Message incoming(Conversation conversation, Notification notification) {
+        return incoming(conversation, notification, true);
+    }
+
+    private static Message incoming(Conversation conversation, Notification notification, boolean translateEmoji) {
         CharSequence raw = NotificationMarkdown.originalText(notification.extras);
         if (TextUtils.isEmpty(raw)) return null;
         String text = UNREAD_COUNT_PREFIX.matcher(raw.toString()).replaceFirst("");
@@ -67,7 +71,8 @@ final class NotificationMessages {
             }
         }
         // Ticker and car history can lag behind EXTRA_TEXT. Neither determines direction.
-        Message message = new Message(EmojiTranslator.translate(text), notification.when, peer(conversation, sender));
+        Message message = new Message(translateEmoji ? EmojiTranslator.translate(text) : text,
+                notification.when, peer(conversation, sender));
         // This ID comes from NotificationItem itself, never a timestamp/text search in history.
         long serverId = notification.extras.getLong(SERVER_ID);
         if (serverId > 0) message.getExtras().putLong(SERVER_ID, serverId);
@@ -119,11 +124,15 @@ final class NotificationMessages {
     static List<Message> rebuild(Conversation conversation, Notification current, List<Notification> archive, boolean showLastReply) {
         List<MessageIdentityPolicy.Entry<Message>> entries = new ArrayList<>();
         Notification snapshot = current;
-        // A normalized notification is already a complete bounded snapshot. Combining every
-        // snapshot again would multiply undated lines, which cannot safely be deduplicated.
-        if (!current.extras.getBoolean(STORED)) for (int i = archive.size() - 1; i >= 0; i--) {
-            Notification older = archive.get(i);
-            if (older == current || !belongsTo(conversation, older) || !older.extras.getBoolean(STORED)) continue;
+        // Keep raw chat notifications after the latest complete snapshot. Media notifications
+        // retain WeChat's native layout, so they have not yet been folded into EXTRA_MESSAGES.
+        long currentToken = current.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
+        List<Notification> prior = NotificationHistoryWindow.prior(archive, current,
+                n -> n.extras.getBoolean(STORED),
+                n -> belongsTo(conversation, n) && (n.extras.getBoolean(STORED)
+                        || (WeChatMessage.isChat(n.tickerText) && !n.extras.getBoolean(RECALL_PROMPT)))
+                        && (currentToken == 0 || n.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN) != currentToken));
+        for (Notification older : prior) if (older.extras.getBoolean(STORED)) {
             snapshot = older;
             break;
         }
@@ -134,6 +143,14 @@ final class NotificationMessages {
                 current.extras.getLong(WeChatNotificationRemoval.READ_THROUGH_TOKEN));
         if (readThrough != 0) current.extras.putLong(WeChatNotificationRemoval.READ_THROUGH_TOKEN, readThrough);
         if (snapshot != current) add(entries, conversation, snapshot, true, 0);
+        for (Notification older : prior) if (!older.extras.getBoolean(STORED)) {
+            // EXTRA_TEXT represents this one raw notification. Its car or bundle history may
+            // repeat earlier lines, and its media marker must stay as WeChat posted it.
+            Message message = incoming(conversation, older, false);
+            if (message == null) continue;
+            stampNotificationToken(message, older);
+            addEntry(entries, message, 2);
+        }
         add(entries, conversation, current, false, 1);
         RecallHistory recalls = new RecallHistory();
         // Merge deletion metadata even when current is an already normalized (possibly stale)
@@ -287,8 +304,9 @@ final class NotificationMessages {
     }
 
     /** Mark the incoming generation read, keeping it visible until the next peer event. */
-    static void readForReply(Conversation conversation, Notification notification, long token, boolean showLastReply) {
-        List<Message> messages = rebuild(conversation, notification, java.util.Collections.emptyList(), true);
+    static void readForReply(Conversation conversation, Notification notification, List<Notification> archive,
+                             long token, boolean showLastReply) {
+        List<Message> messages = rebuild(conversation, notification, archive, true);
         ConversationRound round = readRound(notification.extras);
         boolean newerPeer = false;
         long generation = WeChatNotificationRemoval.nextToken();
@@ -316,10 +334,11 @@ final class NotificationMessages {
     }
 
     /** Preserve the current peer/reply group; retire old peers only if a later peer already arrived. */
-    static boolean recordReadReply(Conversation conversation, Notification notification, MessagingBuilder.ReplyTarget target,
+    static boolean recordReadReply(Conversation conversation, Notification notification, List<Notification> archive,
+                                   MessagingBuilder.ReplyTarget target,
                                    CharSequence text, long time, String replyId) {
         long readToken = target.token();
-        List<Message> messages = rebuild(conversation, notification, java.util.Collections.emptyList(), true);
+        List<Message> messages = rebuild(conversation, notification, archive, true);
         ConversationRound round = readRound(notification.extras);
         if (round.activeReplies.contains(replyId) || round.pendingReplies.contains(replyId) || round.recentReplyIds.contains(replyId)) return false;
         long generation = WeChatNotificationRemoval.nextToken();

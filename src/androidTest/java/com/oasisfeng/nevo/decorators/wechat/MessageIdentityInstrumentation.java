@@ -20,6 +20,7 @@ import androidx.core.graphics.drawable.IconCompat;
 
 import com.oasisfeng.nevo.decorators.wechat.ConversationManager.Conversation;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -51,6 +52,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "personAndAttachmentRoundTrip", "staleTickerAndCarHistory", "unknownAndGroupNames",
                 "replyThenIncoming", "repeatedRebuildAndPreview", "untrustedMissingSender", "reusedNotificationId",
                 "rawPersonOnlyNotification", "nativeMessagingSelf", "rawColonText", "undatedSnapshots",
+                "rawMediaBetweenTextMessages", "rawMediaInGroupHistory", "rawMediaRespectsReadBoundary", "rawMediaReplyKeepsEarlierText",
+                "rawMediaAndNativeHistoryDoNotDuplicate", "rawMediaInBotHistory",
                 "stablePeerAcrossTalkerAndAvatar", "twoRoundsAndReplay", "appReplyStartsFresh",
                 "appReplyKeepsLaterNotificationReply", "groupRound", "roundPreviewAndUndated",
                 "removedRoundStartsFresh", "lastReplyDisplayChoice", "lateReadPreservesNewMessages", "dismissUsesNativeRead",
@@ -74,6 +77,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
                 this::replyThenIncoming, this::repeatedRebuildAndPreview, this::untrustedMissingSender, this::reusedNotificationId,
                 this::rawPersonOnlyNotification, this::nativeMessagingSelf, this::rawColonText, this::undatedSnapshots,
+                this::rawMediaBetweenTextMessages, this::rawMediaInGroupHistory, this::rawMediaRespectsReadBoundary,
+                this::rawMediaReplyKeepsEarlierText, this::rawMediaAndNativeHistoryDoNotDuplicate,
+                this::rawMediaInBotHistory,
                 this::stablePeerAcrossTalkerAndAvatar, this::twoRoundsAndReplay, this::appReplyStartsFresh,
                 this::appReplyKeepsLaterNotificationReply, this::groupRound, this::roundPreviewAndUndated,
                 this::removedRoundStartsFresh, this::lastReplyDisplayChoice, this::lateReadPreservesNewMessages, this::dismissUsesNativeRead,
@@ -265,6 +271,116 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         check(NotificationMessages.rebuild(c, copy, Collections.singletonList(old), true).size() == 1, "undated snapshot multiplied");
         List<Message> messages = NotificationMessages.rebuild(c, notification("current", 200), Arrays.asList(old, copy), true);
         check(messages.size() == 2 && "current".contentEquals(messages.get(1).getText()), "undated history covered current incoming");
+    }
+
+    private void rawMediaBetweenTextMessages() {
+        Conversation c = conversation(false);
+        Notification a = normalized(c, notification("A", 100));
+        String[] markers = { "[动画表情]", "[表情]", "[图片]", "[视频]", "[文件]", "[链接]", "[音乐]",
+                "[位置]", "[红包]", "[转账]", "[小程序]", "[语音]" };
+        List<Notification> archive = new ArrayList<>();
+        archive.add(a);
+        for (int i = 0; i < markers.length; i++) {
+            Notification media = notification(markers[i], 200 + i * 100);
+            media.tickerText = "Alice: " + markers[i];
+            archive.add(media);
+        }
+        Notification latest = notification("C", 200 + markers.length * 100);
+        archive.add(latest);
+        List<Message> messages = NotificationMessages.rebuild(c, latest, archive, true);
+        check(messages.size() == markers.length + 2, "raw media left a gap in private history");
+        check("A".contentEquals(messages.get(0).getText()), "first private text was lost");
+        for (int i = 0; i < markers.length; i++)
+            check(markers[i].contentEquals(messages.get(i + 1).getText()), "private media history gap at " + i);
+        check("C".contentEquals(messages.get(messages.size() - 1).getText()), "last private text was lost");
+    }
+
+    private void rawMediaInGroupHistory() {
+        Conversation c = conversation(true);
+        Notification a = notification("Bob: A", 100);
+        a.extras.putCharSequence(Notification.EXTRA_TITLE, "群名");
+        a = normalized(c, a);
+        Notification sticker = notification("Carol: [动画表情]", 200);
+        sticker.extras.putCharSequence(Notification.EXTRA_TITLE, "群名");
+        sticker.tickerText = "群名: Carol: [动画表情]";
+        Notification latest = notification("Dave: C", 300);
+        latest.extras.putCharSequence(Notification.EXTRA_TITLE, "群名");
+        List<Message> messages = NotificationMessages.rebuild(c, latest, Arrays.asList(a, sticker, latest), true);
+        check(messages.size() == 3, "raw media left a gap in group history");
+        String[] expected = { "A", "[动画表情]", "C" };
+        String[] senders = { "Bob", "Carol", "Dave" };
+        for (int i = 0; i < expected.length; i++) {
+            check(expected[i].contentEquals(messages.get(i).getText()), "group history gap at " + i);
+            check(senders[i].contentEquals(messages.get(i).getPerson().getName()), "group sender changed at " + i);
+        }
+    }
+
+    private void rawMediaRespectsReadBoundary() {
+        Conversation c = conversation(false);
+        Notification a = notification("A", 100);
+        a.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 1);
+        a = normalized(c, a);
+        Notification sticker = notification("[动画表情]", 200);
+        sticker.tickerText = "Alice: [动画表情]";
+        sticker.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 2);
+        Notification latest = notification("C", 300);
+        latest.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 3);
+        latest.extras.putLong(WeChatNotificationRemoval.READ_THROUGH_TOKEN, 2);
+        List<Message> messages = NotificationMessages.rebuild(c, latest, Arrays.asList(a, sticker, latest), true);
+        check(messages.size() == 1 && "C".contentEquals(messages.get(0).getText()),
+                "read boundary restored earlier raw media");
+    }
+
+    private void rawMediaReplyKeepsEarlierText() {
+        Conversation c = conversation(false);
+        Notification a = notification("A", 100);
+        a.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 1);
+        a = normalized(c, a);
+        Notification sticker = notification("[动画表情]", 200);
+        sticker.tickerText = "Alice: [动画表情]";
+        sticker.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 2);
+        Notification read = sticker.clone();
+        NotificationMessages.readForReply(c, read, Arrays.asList(a, sticker), 2, true);
+        List<Message> messages = NotificationMessages.rebuild(c, read, Collections.emptyList(), true);
+        check(messages.size() == 2 && "A".contentEquals(messages.get(0).getText())
+                && "[动画表情]".contentEquals(messages.get(1).getText()),
+                "reply from raw media dropped earlier text or duplicated current media");
+    }
+
+    private void rawMediaAndNativeHistoryDoNotDuplicate() {
+        Conversation c = conversation(false);
+        Notification a = normalized(c, notification("A", 100));
+        Notification sticker = notification("[动画表情]", 200);
+        sticker.tickerText = "Alice: [动画表情]";
+        Notification latest = notification("C", 300);
+        latest.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle");
+        latest.extras.putCharSequence(androidx.core.app.NotificationCompat.EXTRA_SELF_DISPLAY_NAME, "我");
+        Person peer = NotificationMessages.peer(c, null);
+        latest.extras.putParcelableArray(Notification.EXTRA_MESSAGES, new Bundle[]{
+                MessagingBuilder.toBundle(new Message("[动画表情]", 200, peer)),
+                MessagingBuilder.toBundle(new Message("C", 300, peer)) });
+        List<Message> messages = NotificationMessages.rebuild(c, latest, Arrays.asList(a, sticker, latest), true);
+        check(messages.size() == 3 && "A".contentEquals(messages.get(0).getText())
+                && "[动画表情]".contentEquals(messages.get(1).getText())
+                && "C".contentEquals(messages.get(2).getText()), "native history duplicated raw media");
+    }
+
+    private void rawMediaInBotHistory() {
+        Conversation c = new Conversation(1);
+        c.title = "服务号";
+        c.setType(Conversation.TYPE_BOT_MESSAGE);
+        Notification a = notification("A", 100);
+        a.extras.putCharSequence(Notification.EXTRA_TITLE, "服务号");
+        a = normalized(c, a);
+        Notification media = notification("[文件]", 200);
+        media.extras.putCharSequence(Notification.EXTRA_TITLE, "服务号");
+        media.tickerText = "服务号: [文件]";
+        Notification latest = notification("C", 300);
+        latest.extras.putCharSequence(Notification.EXTRA_TITLE, "服务号");
+        List<Message> messages = NotificationMessages.rebuild(c, latest, Arrays.asList(a, media, latest), true);
+        check(messages.size() == 3 && "A".contentEquals(messages.get(0).getText())
+                && "[文件]".contentEquals(messages.get(1).getText())
+                && "C".contentEquals(messages.get(2).getText()), "bot history skipped raw media");
     }
 
     private Notification notification(String text, long time) {
