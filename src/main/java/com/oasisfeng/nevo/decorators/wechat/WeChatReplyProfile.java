@@ -218,7 +218,9 @@ public final class WeChatReplyProfile {
 		for (String name : receiverCandidates) {
 			try {
 				final Class<?> clazz = classes.find(name);
-				if (!BroadcastReceiver.class.isAssignableFrom(clazz)) continue;
+				if (!BroadcastReceiver.class.isAssignableFrom(clazz)
+						|| !Modifier.isPublic(clazz.getModifiers()) || Modifier.isAbstract(clazz.getModifiers())
+						|| !Modifier.isPublic(clazz.getDeclaredConstructor().getModifiers())) continue;
 				Method onReceive = clazz.getMethod("onReceive", Context.class, Intent.class);
 				if (onReceive.getReturnType() != void.class || Modifier.isStatic(onReceive.getModifiers())
 						|| Modifier.isAbstract(onReceive.getModifiers())) continue;

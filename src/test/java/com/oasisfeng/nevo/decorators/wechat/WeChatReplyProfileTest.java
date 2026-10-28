@@ -110,6 +110,44 @@ public class WeChatReplyProfileTest {
 					select3183(Object.class, ExactHelper.class, ValidGates.class).kind);
 	}
 
+	@Test public void rejectsReceiversThatCannotBeConstructedByDispatch() {
+		for (Class<?> receiver : Arrays.asList(AbstractReceiver.class, NoDefaultReceiver.class,
+				PrivateConstructorReceiver.class, HiddenReceiver.class))
+			assertEquals(receiver.getSimpleName(), WeChatProfileSelector.MatchKind.NO_MATCH,
+				    select3183(receiver, ExactHelper.class, ValidGates.class).kind);
+	}
+
+	@Test public void receiverHookFailureClosesSyntheticAvailabilityEvenWithReadyGates() throws Exception {
+		Class<?> hook = Class.forName("com.oasisfeng.nevo.xposed.MainHook");
+		Field profileField = hook.getDeclaredField("sReplyProfile");
+		Field receiverField = hook.getDeclaredField("sMMAutoMessageReplyReceiverClass");
+		Field gatesField = hook.getDeclaredField("sCarModeGates");
+		profileField.setAccessible(true); receiverField.setAccessible(true); gatesField.setAccessible(true);
+		Object oldProfile = profileField.get(null), oldReceiver = receiverField.get(null);
+		WeChatReplyProfile.GateBatch gates = (WeChatReplyProfile.GateBatch) gatesField.get(null);
+		Field ready = WeChatReplyProfile.GateBatch.class.getDeclaredField("ready");
+		ready.setAccessible(true);
+		boolean oldReady = ready.getBoolean(gates);
+		try {
+			profileField.set(null, new WeChatReplyProfile.Resolved(WeChatReplyProfile.forPackage("8.0.79", 3182),
+				    "8.0.79", 3182, ValidReceiver.class, ExactHelper.class, ValidGates.class,
+				    Arrays.asList("c", "d", "b")));
+			ready.setBoolean(gates, true);
+			receiverField.set(null, null); // Receiver hook threw before publishing success.
+			assertFalse((Boolean) hook.getMethod("isSyntheticReplyAvailable").invoke(null));
+			receiverField.set(null, ValidReceiver.class);
+			assertTrue((Boolean) hook.getMethod("isSyntheticReplyAvailable").invoke(null));
+		} finally {
+			profileField.set(null, oldProfile); receiverField.set(null, oldReceiver);
+			ready.setBoolean(gates, oldReady);
+		}
+	}
+
+	public abstract static class AbstractReceiver extends ValidReceiver {}
+	public static class NoDefaultReceiver extends ValidReceiver { public NoDefaultReceiver(int ignored) {} }
+	public static class PrivateConstructorReceiver extends ValidReceiver { private PrivateConstructorReceiver() {} }
+	static class HiddenReceiver extends ValidReceiver { public HiddenReceiver() {} }
+
 	private static WeChatProfileSelector.Selection<WeChatReplyProfile> select3183(
 			Class<?> receiver, Class<?> helper, Class<?> gates) {
 		Map<String, Class<?>> classes = new HashMap<>();

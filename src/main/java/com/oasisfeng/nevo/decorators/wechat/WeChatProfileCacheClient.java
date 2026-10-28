@@ -38,8 +38,9 @@ public final class WeChatProfileCacheClient implements WeChatProfileSelector.Cac
 
     private static void ensureAcknowledged(String stage, Map<String, Object> result) {
         if (Boolean.TRUE.equals(result.get(WeChatProfileCacheProvider.OK))) return;
-        logFailure(stage, "MissingAcknowledgment");
-        throw new IllegalStateException("Candidate cache operation not acknowledged");
+        IllegalStateException failure = new IllegalStateException("Candidate cache operation not acknowledged");
+        logFailure(stage, failure.getClass().getSimpleName());
+        throw failure;
     }
 
     private Map<String, Object> call(String stage, String feature, WeChatProfileSelector.BuildId build,

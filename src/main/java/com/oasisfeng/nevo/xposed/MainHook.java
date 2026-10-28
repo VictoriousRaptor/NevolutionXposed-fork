@@ -53,7 +53,7 @@ public class MainHook extends XposedModule {
 	private String processName;
 	private final NevoDecoratorService wechat = new com.oasisfeng.nevo.decorators.wechat.WeChatDecorator();
 
-	private static Class<?> sMMAutoMessageReplyReceiverClass = null;
+	private static volatile Class<?> sMMAutoMessageReplyReceiverClass = null;
 	private static volatile com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved sReplyProfile = null;
 	/** Gate callbacks are inert until the whole batch has been installed. */
 	private static final WeChatReplyProfile.GateBatch sCarModeGates = new WeChatReplyProfile.GateBatch();
@@ -112,7 +112,8 @@ public class MainHook extends XposedModule {
 
 	public static boolean isSyntheticReplyAvailable() {
 		final com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved resolved = sReplyProfile;
-		return resolved != null && resolved.isUsable() && sCarModeGates.ready();
+		return resolved != null && resolved.isUsable() && sMMAutoMessageReplyReceiverClass == resolved.receiverClass
+			&& sCarModeGates.ready();
 	}
 
 	/** Arms the single-use synthetic reply text. */

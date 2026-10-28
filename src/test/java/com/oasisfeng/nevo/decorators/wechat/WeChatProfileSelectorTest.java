@@ -36,8 +36,10 @@ public class WeChatProfileSelectorTest {
         assertTrue(cache.ids.isEmpty());
     }
     @Test public void crossedNameAndExceptionFailClosed() {
+        int[] crossedProbes = {0};
         assertEquals(MatchKind.NO_MATCH, selector().select("reply", build("8.0.80", 3182), candidates,
-                p -> { fail("Crossed-name probe"); return true; }, cache).kind);
+                p -> { crossedProbes[0]++; return true; }, cache).kind);
+        assertEquals(0, crossedProbes[0]);
         assertEquals(MatchKind.NO_MATCH, selector().select("reply", build("8.0.79", 3183), candidates,
                 p -> { throw new LinkageError(); }, cache).kind);
     }
@@ -57,7 +59,9 @@ public class WeChatProfileSelectorTest {
     @Test public void negativesMemoizedOnlyForCurrentProcess() {
         BuildId b = build("8.0.79", 3183); WeChatProfileSelector s = selector();
         s.select("reply", b, candidates, p -> false, cache);
-        assertEquals(MatchKind.NO_MATCH, s.select("reply", b, candidates, p -> { fail(); return true; }, cache).kind);
+        int[] repeatedProbes = {0};
+        assertEquals(MatchKind.NO_MATCH, s.select("reply", b, candidates, p -> { repeatedProbes[0]++; return true; }, cache).kind);
+        assertEquals(0, repeatedProbes[0]);
         assertEquals(MatchKind.EXPERIMENTAL, selector().select("reply", b, candidates, p -> true, cache).kind);
     }
     @Test public void identityIncludesFeatureLongCodeUpdateAndRevision() {

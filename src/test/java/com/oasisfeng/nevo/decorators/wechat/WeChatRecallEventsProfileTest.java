@@ -33,7 +33,7 @@ public class WeChatRecallEventsProfileTest {
                 select77(build, true).kind);
     }
 
-    @Test public void secondHookFailureLeavesFirstCallbackInertEvenAfterRetry() throws Exception {
+    @Test public void secondHookFailureLeavesBothCallbacksInertEvenAfterRetry() throws Exception {
         Map<String, Class<?>> classes = new HashMap<>();
         classes.put("com.tencent.mm.booter.notification.NotificationItem", NotificationItem.class);
         classes.put("com.tencent.mm.autogen.events.RevokeMsgEvent", Revoke79.class);
@@ -64,6 +64,23 @@ public class WeChatRecallEventsProfileTest {
         param.thisObject = event;
         before.invoke(callbacks.get(0), param);
         assertEquals(0, delivered[0]);
+        // Allocate without Android stub constructors. Extras must remain the exact untouched sentinel.
+        Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+        java.lang.reflect.Field unsafeField = unsafeClass.getDeclaredField("theUnsafe");
+        unsafeField.setAccessible(true);
+        Object unsafe = unsafeField.get(null);
+        Method allocate = unsafeClass.getMethod("allocateInstance", Class.class);
+        Notification notification = (Notification) allocate.invoke(unsafe, Notification.class);
+        android.os.Bundle extras = (android.os.Bundle) allocate.invoke(unsafe, android.os.Bundle.class);
+        notification.extras = extras;
+        NotificationItem item = new NotificationItem();
+        item.f = notification; item.h = "synthetic"; item.i = 1;
+        Method notificationBefore = callbacks.get(1).getClass()
+                .getDeclaredMethod("beforeHookedMethod", MethodHookParam.class);
+        notificationBefore.setAccessible(true);
+        MethodHookParam notificationParam = new MethodHookParam(); notificationParam.thisObject = item;
+        notificationBefore.invoke(callbacks.get(1), notificationParam);
+        assertSame(extras, notification.extras);
     }
 
     private static WeChatProfileSelector.Selection<WeChatRecallEvents.Profile> select(
