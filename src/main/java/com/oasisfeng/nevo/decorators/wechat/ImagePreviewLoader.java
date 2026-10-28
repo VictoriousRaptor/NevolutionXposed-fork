@@ -64,8 +64,8 @@ final class ImagePreviewLoader {
 	}
 	void setLargePreviewEnabled(boolean enabled) { largePreviewEnabled = enabled; }
 	void setWaitMillis(int value) { waitMillis = value; }
-	void installLargePreview(Context context, ClassLoader loader) {
-		if (largePreviewEnabled) largePreview.install(context, loader);
+	void installLargePreview(Context context, ClassLoader loader, WeChatProfileSelector selector, WeChatProfileSelector.Cache cache) {
+		if (largePreviewEnabled) largePreview.install(context, loader, selector, cache);
 	}
 	private final Map<String, Request> pending = new ConcurrentHashMap<>();
 	// Published previews stay a short while so later messages in the same conversation keep the image.

@@ -324,3 +324,31 @@ device, so 8.0.76 regression status is *pending*, not passed.
 首次构建时的证据为离线源码核对、本地 106 项单元测试及签名 Debug/仪器 APK 构建；当时 33 项仪器用例只编译未执行，未安装或操作真机。本次撤回、合成回复与 SystemUI 清理的真实微信行为**尚未验收**，不能沿用本文历史原生回复的通过结果。无精确服务端 ID 的消息（含只有模块 UUID 的本人通知回复）保留，通知清除后不复活和图片文字回退仍待微信端设备验证。详见[适配手册](wechat-version-adaptation-playbook.md)、[撤回专题](wechat-recall-history.md)及[项目修改计划](project-modification-plan.md)。
 
 同日后续验证：按用户授权在 PJZ110 / Android 16 安装同 release 证书的 Debug 与测试 APK，模块 framework 仪器结果为 **33/33 通过**，微信和 SystemUI 未重启。测试发现普通进程缺少 Xposed API 时合成资格检查会抛出 `NoClassDefFoundError`，现已保守关闭合成入口并保留原生路径；本测试进程使用 `--no-hidden-api-checks` 访问 framework 隐藏字段，不修改全局设置。版本映射和微信 hook 签名未改变。本结果取代上段“仪器仅编译”的执行状态，仍不代表 8.0.72 真实微信 hook/收发/撤回已验收，详见[项目执行记录](project-modification-plan.md)。
+
+
+### 同版本名图片画像运行时探测（实验性）
+
+图片事件与大图下载使用独立的 `image_events` / `image_download` 选择结果和候选缓存。
+精确 `versionName && long versionCode` 画像优先，并且仍须通过完整签名验证；未知 code
+仅枚举同版本名候选，唯一完整匹配才实验性启用。8.0.77 的 3141/3160 两个候选同时
+通过时，该组件以 `ambiguous` 关闭，不按列表次序选择。8.0.79/3183 只有在当前进程
+完整匹配 3182 的该组件描述符时才启用，不能据此推断另一个组件也可用。
+
+图片事件先解析 state getter、simple-message 的继承字段 `d:int`、message 的继承字段
+`field_msgSvrId:long`、全部读访问器、三个 pipeline 回调目标、路径方法与 static VFS。
+8.0.79/8.0.72 的路径方法依据现有离线源码核对为实例方法；8.0.77 路径方法沿用既有
+参数/返回类型校验，其 static/instance 修饰符没有新增离线证据，不作已验证声明。
+所有 hook 安装完成前回调均 inert；任何安装失败使 `available=false`，失败批次回调
+即使随后重试成功也保持 inert。ready 日志增加 `match=exact/experimental`。
+
+大图组件独立解析 static kernel/service getter、唯一非 static 数据库字段、实例 query、
+service 与 download implementation 的继承关系、实例下载 getter、完整 `b(...) : int`、
+`MsgIdTalker(long,String)`、callback interface 和 static WXGF decoder。探测只做反射，
+不构造消息对、不查询数据、不获取服务、不触发下载或更改通知。候选正缓存通过模块
+provider 持久化，并在每个新进程重验；缓存不可用时仍执行现场签名探测。
+
+现有图片预览和大图开关继续分别控制安装；本地图片优先、缩略图和等待超时回退保持不变。
+失败诊断保留 `events_unavailable` / `large_unavailable` 与原因或 stage/type。
+主机测试覆盖同名选择、独立匹配、错误 state/download 签名、继承拒绝与部分 hook 失败。
+没有 3183 APK，未做该构建离线字节码验证、运行时 hook 安装、真实图片/消息或 OEM 行为验证；
+签名匹配和主机测试通过不等于设备行为兼容。

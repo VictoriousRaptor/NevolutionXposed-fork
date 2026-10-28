@@ -14,6 +14,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,7 +27,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Version-locked access to WeChat's normal (non-original) image download and its ImgInfo2 base row.
+ * Version-profiled access to WeChat's normal (non-original) image download and its ImgInfo2 base row.
  * Every descriptor is resolved and validated before use; any mismatch disables this component.
  */
 final class WeChatImageDownloader {
@@ -64,52 +65,36 @@ final class WeChatImageDownloader {
 		worker.setRemoveOnCancelPolicy(true);
 	}
 
-	void install(Context context, ClassLoader loader) {
+	void install(Context context, ClassLoader loader, WeChatProfileSelector selector, WeChatProfileSelector.Cache cache) {
+		if (available) return;
 		String stage = "version";
 		try {
 			android.content.pm.PackageInfo info = context.getPackageManager().getPackageInfo("com.tencent.mm", 0);
-			WeChatImageProfile profile = WeChatImageProfile.forVersion(info.versionName, info.versionCode);
+			WeChatProfileSelector.Selection<WeChatImageProfile> choice = selector.select("image_download",
+					WeChatProfileSelector.BuildId.fromPackageInfo(info), WeChatImageProfile.CANDIDATES,
+					p -> resolve(p, name -> Class.forName(name, false, loader)) != null, cache);
+			WeChatImageProfile profile = choice.profile;
 			if (profile == null) {
-				log("large_unavailable", "reason=unsupported_version");
+				log("large_unavailable", "reason=" + choice.kind.name().toLowerCase());
 				return;
 			}
 
-			stage = "core_storage";
-			Class<?> kernel = Class.forName(profile.kernel, false, loader);
-			Class<?> coreStorage = Class.forName(profile.core, false, loader);
-			Class<?> databaseWrapper = Class.forName(profile.database, false, loader);
-			coreStorageGet = method(kernel, profile.coreGet, coreStorage);
-			for (Field field : coreStorage.getDeclaredFields()) {
-				if (field.getType() != databaseWrapper) continue;
-				if (databaseField != null) throw new IllegalStateException("Ambiguous database wrapper");
-				databaseField = field;
-			}
-			if (databaseField == null) throw new IllegalStateException("Missing database wrapper");
-			databaseField.setAccessible(true);
-			databaseQuery = method(databaseWrapper, profile.query, Cursor.class, String.class, String[].class, int.class);
-
-			stage = "image_service";
-			Class<?> serviceManager = Class.forName(profile.manager, false, loader);
-			imageServiceClass = Class.forName(profile.service, false, loader);
-			Class<?> imageServiceImplementation = Class.forName(profile.implementation, false, loader);
-			downloadServiceClass = Class.forName(profile.download, false, loader);
-			Class<?> msgIdTalkerClass = Class.forName("com.tencent.mm.plugin.msg.MsgIdTalker", false, loader);
-			callbackClass = Class.forName(profile.callback, false, loader);
-			serviceGet = method(serviceManager, "c", Class.forName(profile.serviceBase, false, loader), Class.class);
-			downloadServiceGet = method(imageServiceImplementation, profile.downloadGet, Class.forName(profile.downloadInterface, false, loader));
-			msgIdTalkerConstructor = msgIdTalkerClass.getDeclaredConstructor(long.class, String.class);
-			msgIdTalkerConstructor.setAccessible(true);
-			downloadMethod = XposedHelpers.findMethodExact(downloadServiceClass, "b", long.class, msgIdTalkerClass,
-					int.class, Object.class, int.class, callbackClass, int.class, boolean.class);
-			if (downloadMethod.getReturnType() != int.class)
-				throw new IllegalStateException("Unexpected download result");
-
-			stage = "wxgf";
-			Class<?> wxgfClass = Class.forName("com.tencent.mm.plugin.gif.MMWXGFJNI", false, loader);
-			wxgfDecode = method(wxgfClass, "wxam2PicBuf", byte[].class, byte[].class, int.class, int.class);
+			stage = "signature";
+			Resolved resolved = resolve(profile, name -> Class.forName(name, false, loader));
+			callbackClass = resolved.callbackClass;
+			imageServiceClass = resolved.imageServiceClass;
+			downloadServiceClass = resolved.downloadServiceClass;
+			msgIdTalkerConstructor = resolved.msgIdTalkerConstructor;
+			coreStorageGet = resolved.coreStorageGet;
+			databaseQuery = resolved.databaseQuery;
+			serviceGet = resolved.serviceGet;
+			downloadServiceGet = resolved.downloadServiceGet;
+			downloadMethod = resolved.downloadMethod;
+			wxgfDecode = resolved.wxgfDecode;
+			databaseField = resolved.databaseField;
 
 			available = true;
-			log("large_ready", "profile=" + profile.label + " revision=image-large-2 base_row_only=true");
+			log("large_ready", "profile=" + profile.label + " match=" + choice.kind.name().toLowerCase() + " revision=image-large-3 base_row_only=true");
 		} catch (Throwable failure) {
 			available = false;
 			log("large_unavailable", "stage=" + stage + " type=" + failure.getClass().getSimpleName());
@@ -348,9 +333,61 @@ final class WeChatImageDownloader {
 		}
 	}
 
+	interface NameResolver { Class<?> find(String name) throws ClassNotFoundException; }
+	static final class Resolved {
+		Class<?> callbackClass,imageServiceClass,downloadServiceClass;
+		Constructor<?> msgIdTalkerConstructor;
+		Method coreStorageGet,databaseQuery,serviceGet,downloadServiceGet,downloadMethod,wxgfDecode;
+		Field databaseField;
+	}
+	static Resolved resolve(WeChatImageProfile profile, NameResolver resolver) throws ReflectiveOperationException {
+		Resolved r = new Resolved();
+
+			Class<?> kernel = resolver.find(profile.kernel);
+			Class<?> coreStorage = resolver.find(profile.core);
+			Class<?> databaseWrapper = resolver.find(profile.database);
+			r.coreStorageGet = staticMethod(kernel, profile.coreGet, coreStorage);
+			for (Field field : coreStorage.getDeclaredFields()) {
+				if (field.getType() != databaseWrapper) continue;
+                if (Modifier.isStatic(field.getModifiers())) throw new IllegalStateException("Static database wrapper");
+				if (r.databaseField != null) throw new IllegalStateException("Ambiguous database wrapper");
+				r.databaseField = field;
+			}
+			if (r.databaseField == null) throw new IllegalStateException("Missing database wrapper");
+			r.databaseField.setAccessible(true);
+			r.databaseQuery = method(databaseWrapper, profile.query, Cursor.class, String.class, String[].class, int.class);
+			Class<?> serviceManager = resolver.find(profile.manager);
+			r.imageServiceClass = resolver.find(profile.service);
+			Class<?> imageServiceImplementation = resolver.find(profile.implementation);
+			r.downloadServiceClass = resolver.find(profile.download);
+			Class<?> msgIdTalkerClass = resolver.find("com.tencent.mm.plugin.msg.MsgIdTalker");
+			r.callbackClass = resolver.find(profile.callback);
+            Class<?> downloadInterface = resolver.find(profile.downloadInterface);
+            if (!r.imageServiceClass.isAssignableFrom(imageServiceImplementation)
+                    || !downloadInterface.isAssignableFrom(r.downloadServiceClass)
+                    || !downloadInterface.isInterface() || !r.callbackClass.isInterface())
+                throw new IllegalStateException("Invalid image service inheritance");
+			r.serviceGet = staticMethod(serviceManager, "c", resolver.find(profile.serviceBase), Class.class);
+			r.downloadServiceGet = method(imageServiceImplementation, profile.downloadGet, resolver.find(profile.downloadInterface));
+			r.msgIdTalkerConstructor = msgIdTalkerClass.getDeclaredConstructor(long.class, String.class);
+			r.msgIdTalkerConstructor.setAccessible(true);
+			r.downloadMethod = method(r.downloadServiceClass, "b", int.class, long.class, msgIdTalkerClass,
+					int.class, Object.class, int.class, r.callbackClass, int.class, boolean.class);
+			Class<?> wxgfClass = resolver.find("com.tencent.mm.plugin.gif.MMWXGFJNI");
+			r.wxgfDecode = staticMethod(wxgfClass, "wxam2PicBuf", byte[].class, byte[].class, int.class, int.class);
+
+		return r;
+	}
+
+    private static Method staticMethod(Class<?> owner, String name, Class<?> returns, Class<?>... arguments) {
+        Method result = XposedHelpers.findMethodExact(owner, name, arguments);
+        if (!Modifier.isStatic(result.getModifiers()) || result.getReturnType() != returns)
+            throw new IllegalStateException("Invalid static method: " + name);
+        return result;
+    }
 	private static Method method(Class<?> owner, String name, Class<?> returns, Class<?>... arguments) {
 		Method method = XposedHelpers.findMethodExact(owner, name, arguments);
-		if (method.getReturnType() != returns) throw new IllegalStateException("Unexpected return type: " + name);
+		if (Modifier.isStatic(method.getModifiers()) || Modifier.isAbstract(method.getModifiers()) || method.getReturnType() != returns) throw new IllegalStateException("Unexpected return type: " + name);
 		return method;
 	}
 

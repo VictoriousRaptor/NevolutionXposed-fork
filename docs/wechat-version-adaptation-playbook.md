@@ -2,7 +2,7 @@
 
 ## 2026-10-28 同版本名不同 versionCode 的实验性签名探测（实施中）
 
-微信主进程 `Application.onCreate(): void` AFTER 首次初始化时，通知栏合成回复及通知原生 Emoji 保留各自按已知 `versionName` 取候选；已知精确 `versionName && versionCode` 组合优先。未知代码只探测**同版本名**候选，完整签名唯一命中后才标记 `experimental` 并安装该功能的 hook；零命中或 8.0.77 多候选歧义均不启用实验性画像。回复原有 8.0.72/8.0.78 的名称**或**代码匹配和 legacy 回退继续保留，原生 `PendingIntent` 回复与不依赖微信混淆布局的 framework 外观仍独立工作。图片事件、大图下载、应用内回复、撤回尚需分别接入，不能从回复或 Emoji 通过推断它们已可用。
+微信主进程 `Application.onCreate(): void` AFTER 首次初始化时，通知栏合成回复及通知原生 Emoji 保留各自按已知 `versionName` 取候选；已知精确 `versionName && versionCode` 组合优先。未知代码只探测**同版本名**候选，完整签名唯一命中后才标记 `experimental` 并安装该功能的 hook；零命中或 8.0.77 多候选歧义均不启用实验性画像。回复原有 8.0.72/8.0.78 的名称**或**代码匹配和 legacy 回退继续保留，原生 `PendingIntent` 回复与不依赖微信混淆布局的 framework 外观仍独立工作。图片事件、大图下载、应用内回复、撤回均已分别接入独立的同版本名完整签名探测，不能从回复或 Emoji 通过推断其他组件可用。
 
 回复完整预检包括 `MMAutoMessageReplyReceiver` 继承 `BroadcastReceiver` 及实例 `onReceive(Context, Intent): void`、`z2.s1.b(Intent): Bundle` 静态方法、对应画像中三道无参数静态 `boolean` 车载门禁。门禁批量安装期间回调保持惰性，任一 hook 失败就撤销已装句柄且关闭合成入口；`profile_ready` 仅表示签名解析，须门禁安装完成才允许合成动作。Emoji 仅有 8.0.79/3182 画像；探测 `com.tencent.mm.smiley.g.d(String): String` 和 `com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9,long,boolean,boolean,String,int,String,String,Intent,boolean): void` 两个实例非 abstract 方法。直接调用者取消优化成功后才激活，微信通知增强及 `WeChatDecorator.preserve_emoji` 仍在回调时实时读取，默认关闭。诊断只记录版本、画像、`exact`/`experimental`、`no_match`/`ambiguous`、阶段及异常类型，不记录消息或身份。
 
@@ -646,3 +646,31 @@ adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oa
 | `probe/test-result.txt` | `gradlew testDebugUnitTest --offline` 输出 | `PASS` 才继续装包 |
 
 回复探针只提供接收器、辅助类和门禁的候选证据，不会自动完成图片、应用内回复、撤回或 SystemUI 交互的适配；这些路径须按正文分别核对、记录和验证。探针测试通过也不能替代步骤 5/6 的构建签名检查和设备操作授权。
+
+
+### 同版本名图片画像运行时探测（实验性）
+
+图片事件与大图下载使用独立的 `image_events` / `image_download` 选择结果和候选缓存。
+精确 `versionName && long versionCode` 画像优先，并且仍须通过完整签名验证；未知 code
+仅枚举同版本名候选，唯一完整匹配才实验性启用。8.0.77 的 3141/3160 两个候选同时
+通过时，该组件以 `ambiguous` 关闭，不按列表次序选择。8.0.79/3183 只有在当前进程
+完整匹配 3182 的该组件描述符时才启用，不能据此推断另一个组件也可用。
+
+图片事件先解析 state getter、simple-message 的继承字段 `d:int`、message 的继承字段
+`field_msgSvrId:long`、全部读访问器、三个 pipeline 回调目标、路径方法与 static VFS。
+8.0.79/8.0.72 的路径方法依据现有离线源码核对为实例方法；8.0.77 路径方法沿用既有
+参数/返回类型校验，其 static/instance 修饰符没有新增离线证据，不作已验证声明。
+所有 hook 安装完成前回调均 inert；任何安装失败使 `available=false`，失败批次回调
+即使随后重试成功也保持 inert。ready 日志增加 `match=exact/experimental`。
+
+大图组件独立解析 static kernel/service getter、唯一非 static 数据库字段、实例 query、
+service 与 download implementation 的继承关系、实例下载 getter、完整 `b(...) : int`、
+`MsgIdTalker(long,String)`、callback interface 和 static WXGF decoder。探测只做反射，
+不构造消息对、不查询数据、不获取服务、不触发下载或更改通知。候选正缓存通过模块
+provider 持久化，并在每个新进程重验；缓存不可用时仍执行现场签名探测。
+
+现有图片预览和大图开关继续分别控制安装；本地图片优先、缩略图和等待超时回退保持不变。
+失败诊断保留 `events_unavailable` / `large_unavailable` 与原因或 stage/type。
+主机测试覆盖同名选择、独立匹配、错误 state/download 签名、继承拒绝与部分 hook 失败。
+没有 3183 APK，未做该构建离线字节码验证、运行时 hook 安装、真实图片/消息或 OEM 行为验证；
+签名匹配和主机测试通过不等于设备行为兼容。

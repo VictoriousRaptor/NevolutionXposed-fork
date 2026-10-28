@@ -136,8 +136,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 				imageLog("hooks_skipped", "reason=preview_disabled scans=0");
 				return;
 			}
-			imageEvents.install(getAppContext(), loadPackageParam.classLoader);
-			imagePreviews.installLargePreview(getAppContext(), loadPackageParam.classLoader);
+			imageEvents.install(getAppContext(), loadPackageParam.classLoader, PROFILE_SELECTOR, mProfileCache);
+			imagePreviews.installLargePreview(getAppContext(), loadPackageParam.classLoader, PROFILE_SELECTOR, mProfileCache);
 		}
 
 		private MessagingBuilder mMessagingBuilder;

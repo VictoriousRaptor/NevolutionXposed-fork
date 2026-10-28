@@ -10,6 +10,7 @@ import com.oasisfeng.nevo.xposed.compat.XposedBridge;
 import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -24,61 +25,63 @@ final class WeChatImageEvents {
 		if (BuildConfig.DEBUG) Log.i("WeChatDecorator", "NX_IMAGE stage=" + stage + " " + details);
 	}
 
-	void install(Context context, ClassLoader loader) {
+	void install(Context context, ClassLoader loader, WeChatProfileSelector selector, WeChatProfileSelector.Cache cache) {
+		if (available) return;
 		String stage = "version";
 		try {
 			PackageInfo info = context.getPackageManager().getPackageInfo("com.tencent.mm", 0);
-			WeChatImageProfile profile = WeChatImageProfile.forVersion(info.versionName, info.versionCode);
+			WeChatProfileSelector.Selection<WeChatImageProfile> choice = selector.select("image_events",
+					WeChatProfileSelector.BuildId.fromPackageInfo(info), WeChatImageProfile.CANDIDATES,
+					p -> resolve(p, name -> Class.forName(name, false, loader)) != null, cache);
+			WeChatImageProfile profile = choice.profile;
 			if (profile == null) {
-				log("events_unavailable", "reason=unsupported_version"); return;
+				log("events_unavailable", "reason=" + choice.kind.name().toLowerCase()); return;
 			}
-			stage = "classes";
-			Class<?> state = Class.forName(profile.state, false, loader);
-			Class<?> simple = Class.forName(profile.simple, false, loader);
-			Class<?> msg = Class.forName(profile.message, false, loader);
-			Class<?> flow = Class.forName(profile.flow, false, loader);
-			stage = "state_accessor";
-			Method stateGet = method(state, profile.stateGet, Object.class, String.class);
-			stage = "message_base";
-			// Decompiled aliases such as f473340d exist only in JADX output; resolve the real obfuscated field.
-			Field resolved = null;
-			for (Class<?> current = simple; current != null && resolved == null; current = current.getSuperclass()) {
-				try { resolved = current.getDeclaredField("d"); } catch (NoSuchFieldException ignored) {}
-			}
-			if (resolved == null || resolved.getType() != int.class) throw new IllegalStateException("Invalid simple-message base");
-			final Field base = resolved;
-			Field resolvedMsgSvrId = null;
-			for (Class<?> current = msg; current != null && resolvedMsgSvrId == null; current = current.getSuperclass()) {
-				try { resolvedMsgSvrId = current.getDeclaredField("field_msgSvrId"); }
-				catch (NoSuchFieldException ignored) {}
-			}
-			if (resolvedMsgSvrId == null || resolvedMsgSvrId.getType() != long.class)
-				throw new IllegalStateException("Invalid msgSvrId field");
-			resolvedMsgSvrId.setAccessible(true);
-			final Field msgSvrId = resolvedMsgSvrId;
-			stage = "message_accessors";
-			Method stringAt = method(simple, "getString", String.class, int.class);
-			Method longAt = method(simple, "getLong", long.class, int.class);
-			Method intAt = method(simple, "getInteger", int.class, int.class);
-			stage = "message_methods";
-			Method talker = method(msg, profile.talker, String.class);
-			Method id = method(msg, "getMsgId", long.class);
-			Method created = method(msg, "getCreateTime", long.class);
-			Method type = method(msg, "getType", int.class);
-			Method sender = method(msg, profile.sender, int.class);
-			Method serverId = method(msg, profile.serverId, long.class);
-			stage = "path_methods";
-			Method pathMethod = method(Class.forName(profile.pathOwner, false, loader), profile.pathMethod, String.class, msg, String.class, boolean.class);
-			realPath = method(Class.forName(profile.vfs, false, loader), "i", String.class, String.class, boolean.class);
-			stage = "pipeline_methods";
-			Class<?> action = Class.forName(profile.result, false, loader);
-			Method initial = method(flow, "l", action, state);
-			Method remote = method(flow, "handleDataFromRemote", action, state, Class.forName(profile.remote, false, loader));
-			Method local = method(flow, "handleDataFromFile", action, state, Class.forName(profile.local, false, loader));
-			stage = "hooks";
+			stage = "signature";
+			Resolved resolved = resolve(profile, name -> Class.forName(name, false, loader));
+            stage = "hooks";
+            if (!installResolved(resolved, XposedBridge::hookMethod)) {
+                log("events_unavailable", "stage=hooks type=" + lastHookFailureType);
+                return;
+            }
+			log("events_ready", "profile=" + profile.label + " match=" + choice.kind.name().toLowerCase() + " revision=image-events-11 scans=0 base="
+					+ resolved.base.getDeclaringClass().getSimpleName() + "." + resolved.base.getName());
+		} catch (Throwable failure) {
+			XposedBridge.rethrowFrameworkError(failure);
+			available = false;
+			log("events_unavailable", "stage=" + stage + " type=" + failure.getClass().getSimpleName());
+		}
+	}
+
+    private static final class HookState { volatile boolean ready; }
+    private String lastHookFailureType;
+    boolean installResolved(Resolved resolved, Hooker hooker) {
+        if (available) return true;
+        HookState state = new HookState();
+        try {
+			Class<?> simple = resolved.simple;
+			Field base = resolved.base;
+			Field msgSvrId = resolved.msgSvrId;
+			Method stateGet = resolved.stateGet;
+			Method stringAt = resolved.stringAt;
+			Method longAt = resolved.longAt;
+			Method intAt = resolved.intAt;
+			Method talker = resolved.talker;
+			Method id = resolved.id;
+			Method created = resolved.created;
+			Method type = resolved.type;
+			Method sender = resolved.sender;
+			Method serverId = resolved.serverId;
+			Method pathMethod = resolved.pathMethod;
+			Method realPath = resolved.realPath;
+			Method initial = resolved.initial;
+			Method remote = resolved.remote;
+			Method local = resolved.local;
+			this.realPath = realPath;
+
 			XC_MethodHook pipeline = new XC_MethodHook() {
 				@Override protected void afterHookedMethod(MethodHookParam param) {
-					if (!available || param.hasThrowable()) return;
+					if (!state.ready || param.hasThrowable()) return;
 					try {
 						Object data = stateGet.invoke(param.args[0], "key_msg_info");
 						if (!simple.isInstance(data)) return;
@@ -101,12 +104,12 @@ final class WeChatImageEvents {
 					} catch (Exception failure) { log("event_error", "type=" + failure.getClass().getSimpleName()); }
 				}
 			};
-			XposedBridge.hookMethod(initial, pipeline);
-			XposedBridge.hookMethod(remote, pipeline);
-			XposedBridge.hookMethod(local, pipeline);
-			XposedBridge.hookMethod(serverId, new XC_MethodHook() {
+			hooker.hook(initial, pipeline);
+			hooker.hook(remote, pipeline);
+			hooker.hook(local, pipeline);
+			hooker.hook(serverId, new XC_MethodHook() {
 				@Override protected void afterHookedMethod(MethodHookParam param) {
-					if (!available || param.hasThrowable() || !(param.getResult() instanceof Number)) return;
+					if (!state.ready || param.hasThrowable() || !(param.getResult() instanceof Number)) return;
 					try {
 						Object data = param.thisObject;
 						long value = ((Number) param.getResult()).longValue();
@@ -118,9 +121,9 @@ final class WeChatImageEvents {
 					} catch (Exception failure) { log("identity_error", "type=" + failure.getClass().getSimpleName()); }
 				}
 			});
-			XposedBridge.hookMethod(pathMethod, new XC_MethodHook() {
+			hooker.hook(pathMethod, new XC_MethodHook() {
 				@Override protected void afterHookedMethod(MethodHookParam param) {
-					if (!available || param.hasThrowable() || param.args[0] == null || !(param.getResult() instanceof String)) return;
+					if (!state.ready || param.hasThrowable() || param.args[0] == null || !(param.getResult() instanceof String)) return;
 					try {
 						Object data = param.args[0];
 						if (((Number) type.invoke(data)).intValue() != 3 || ((Number) sender.invoke(data)).intValue() != 0) return;
@@ -131,22 +134,104 @@ final class WeChatImageEvents {
 					} catch (Exception failure) { log("event_error", "type=" + failure.getClass().getSimpleName()); }
 				}
 			});
+			state.ready = true;
 			available = true;
-			log("events_ready", "profile=" + profile.label + " revision=image-events-10 scans=0 base="
-					+ base.getDeclaringClass().getSimpleName() + "." + base.getName());
-		} catch (Throwable failure) {
-			XposedBridge.rethrowFrameworkError(failure);
-			available = false;
-			log("events_unavailable", "stage=" + stage + " type=" + failure.getClass().getSimpleName());
-		}
-	}
+			return true;
+
+        } catch (Throwable failure) {
+            state.ready = false;
+            available = false;
+            XposedBridge.rethrowFrameworkError(failure);
+            lastHookFailureType = failure.getClass().getSimpleName();
+            return false;
+        }
+    }
 
 	boolean isAvailable() { return available; }
 	String resolvePath(String path) throws Exception { return (String) realPath.invoke(null, path, false); }
 
+	interface NameResolver { Class<?> find(String name) throws ClassNotFoundException; }
+	interface Hooker { void hook(Method method, XC_MethodHook callback) throws Throwable; }
+	static final class Resolved {
+		final Class<?> simple;
+		final Field base,msgSvrId;
+		final Method stateGet,stringAt,longAt,intAt,talker,id,created,type,sender,serverId,pathMethod,realPath,initial,remote,local;
+		Resolved(Class<?> simple, Field base, Field msgSvrId, Method stateGet, Method stringAt, Method longAt, Method intAt, Method talker, Method id, Method created, Method type, Method sender, Method serverId, Method pathMethod, Method realPath, Method initial, Method remote, Method local) {
+			this.simple = simple;
+			this.base = base;
+			this.msgSvrId = msgSvrId;
+			this.stateGet = stateGet;
+			this.stringAt = stringAt;
+			this.longAt = longAt;
+			this.intAt = intAt;
+			this.talker = talker;
+			this.id = id;
+			this.created = created;
+			this.type = type;
+			this.sender = sender;
+			this.serverId = serverId;
+			this.pathMethod = pathMethod;
+			this.realPath = realPath;
+			this.initial = initial;
+			this.remote = remote;
+			this.local = local;
+		}
+	}
+	static Resolved resolve(WeChatImageProfile profile, NameResolver resolver) throws ReflectiveOperationException {
+
+			Class<?> state = resolver.find(profile.state);
+			Class<?> simple = resolver.find(profile.simple);
+			Class<?> msg = resolver.find(profile.message);
+			Class<?> flow = resolver.find(profile.flow);
+			Method stateGet = method(state, profile.stateGet, Object.class, String.class);
+			// Decompiled aliases such as f473340d exist only in JADX output; resolve the real obfuscated field.
+			Field resolved = null;
+			for (Class<?> current = simple; current != null && resolved == null; current = current.getSuperclass()) {
+				try { resolved = current.getDeclaredField("d"); } catch (NoSuchFieldException ignored) {}
+			}
+			if (resolved == null || (resolved.getType() != int.class || Modifier.isStatic(resolved.getModifiers()))) throw new IllegalStateException("Invalid simple-message base");
+			resolved.setAccessible(true);
+			final Field base = resolved;
+			Field resolvedMsgSvrId = null;
+			for (Class<?> current = msg; current != null && resolvedMsgSvrId == null; current = current.getSuperclass()) {
+				try { resolvedMsgSvrId = current.getDeclaredField("field_msgSvrId"); }
+				catch (NoSuchFieldException ignored) {}
+			}
+			if (resolvedMsgSvrId == null || (resolvedMsgSvrId.getType() != long.class || Modifier.isStatic(resolvedMsgSvrId.getModifiers())))
+				throw new IllegalStateException("Invalid msgSvrId field");
+			resolvedMsgSvrId.setAccessible(true);
+			final Field msgSvrId = resolvedMsgSvrId;
+			Method stringAt = method(simple, "getString", String.class, int.class);
+			Method longAt = method(simple, "getLong", long.class, int.class);
+			Method intAt = method(simple, "getInteger", int.class, int.class);
+			Method talker = method(msg, profile.talker, String.class);
+			Method id = method(msg, "getMsgId", long.class);
+			Method created = method(msg, "getCreateTime", long.class);
+			Method type = method(msg, "getType", int.class);
+			Method sender = method(msg, profile.sender, int.class);
+			Method serverId = method(msg, profile.serverId, long.class);
+			Method pathMethod = XposedHelpers.findMethodExact(resolver.find(profile.pathOwner), profile.pathMethod, msg, String.class, boolean.class);
+            if (pathMethod.getReturnType() != String.class || Modifier.isAbstract(pathMethod.getModifiers())
+                    || (!profile.label.startsWith("8.0.77/") && Modifier.isStatic(pathMethod.getModifiers())))
+                throw new IllegalStateException("Invalid message path signature");
+			Method realPath = staticMethod(resolver.find(profile.vfs), "i", String.class, String.class, boolean.class);
+			Class<?> action = resolver.find(profile.result);
+			Method initial = method(flow, "l", action, state);
+			Method remote = method(flow, "handleDataFromRemote", action, state, resolver.find(profile.remote));
+			Method local = method(flow, "handleDataFromFile", action, state, resolver.find(profile.local));
+
+		return new Resolved(simple,base,msgSvrId,stateGet,stringAt,longAt,intAt,talker,id,created,type,sender,serverId,pathMethod,realPath,initial,remote,local);
+	}
+
+    private static Method staticMethod(Class<?> owner, String name, Class<?> returns, Class<?>... arguments) {
+        Method result = XposedHelpers.findMethodExact(owner, name, arguments);
+        if (!Modifier.isStatic(result.getModifiers()) || result.getReturnType() != returns)
+            throw new IllegalStateException("Invalid static method: " + name);
+        return result;
+    }
 	private static Method method(Class<?> owner, String name, Class<?> returns, Class<?>... arguments) {
 		Method method = XposedHelpers.findMethodExact(owner, name, arguments);
-		if (method.getReturnType() != returns) throw new IllegalStateException("Unexpected return type: " + name);
+		if (Modifier.isStatic(method.getModifiers()) || Modifier.isAbstract(method.getModifiers()) || method.getReturnType() != returns) throw new IllegalStateException("Unexpected return type: " + name);
 		return method;
 	}
 }

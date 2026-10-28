@@ -50,4 +50,11 @@ final class WeChatImageProfile {
                             "pa0.y", "oa0.e", "ej", "pa0.x", "x51.j", "pa0.w"});
         return null;
     }
+    static final java.util.List<WeChatProfileSelector.Candidate<WeChatImageProfile>> CANDIDATES =
+            java.util.Arrays.asList(candidate("8.0.79",3182), candidate("8.0.72",3085),
+                    candidate("8.0.77",3160), candidate("8.0.77",3141));
+    private static WeChatProfileSelector.Candidate<WeChatImageProfile> candidate(String name, long code) {
+        return new WeChatProfileSelector.Candidate<>("image-" + name + "/" + code,name,code,forVersion(name,code));
+    }
+
 }
