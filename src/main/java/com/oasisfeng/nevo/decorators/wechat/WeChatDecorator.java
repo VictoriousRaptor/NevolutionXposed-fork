@@ -128,8 +128,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 		 * @param loadPackageParam
 		 */
 		@Override public void hook(PackageHookContext loadPackageParam) {
-			appReplyEvents.install(getAppContext(), loadPackageParam.classLoader, this::onAppSent);
-			recallEvents.install(getAppContext(), loadPackageParam.classLoader, this::onRecalled);
+			appReplyEvents.install(getAppContext(), loadPackageParam.classLoader, this::onAppSent,
+					PROFILE_SELECTOR, mProfileCache);
+			recallEvents.install(getAppContext(), loadPackageParam.classLoader, this::onRecalled,
+					PROFILE_SELECTOR, mProfileCache);
 			if (! mImagePreviewEnabled) {
 				imageLog("hooks_skipped", "reason=preview_disabled scans=0");
 				return;

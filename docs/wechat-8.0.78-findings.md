@@ -1,5 +1,9 @@
 # WeChat 8.0.78 reply findings (2026-09-13)
 
+## 2026-10-28 应用内回复与撤回同名新代码探测
+
+8.0.78/3180 的应用内回复与撤回继续版本名**且**版本码精确优先。其他同名代码仅在对应组件完整签名唯一通过时实验性启用：应用内回复要求 `storage.e9.t1(int): void` 本类覆盖、`z0/M0(): int`、`N0(): String`、`getMsgId/getCreateTime(): long` 和 `Z2/L2/E2(): boolean` 精确实例方法；撤回要求 `NotificationItem.f: Notification/h: String/i: long`、`a(Context): void`、`RevokeMsgEvent.g: fm.ks`、`fm.ks.c: storage.e9`、直接继承 `IEvent`、`IEvent.e(): boolean`、`e9.F0(): long` 和 `N0(): String`。撤回两个 BEFORE hook 全装才 ready，失败后已装回调保持惰性。零命中、歧义或签名失败分别关闭对应组件，保留原通知行为；图片/回复画像不替它们放行。候选的 APK 来源、SHA-256、运行时原名与反编译位置沿用本文 3180 记录，同名未知代码没有 APK。主机合成签名测试与构建不证明未知代码语义、运行时 hook、应用内轮次或撤回效果；模块缓存的跨进程持久性仍待设备验证。
+
 ## 2026-10-28 同名新构建实验性探测补充
 
 已核对的 8.0.78/3180 仍优先按版本名与版本码**同时**命中；历史通知回复 `forPackage()` 对 8.0.78 名称**或** 3180 代码任一匹配的回退保持。未知代码且同名时，唯一通过完整签名才标记实验性：接收器 `MMAutoMessageReplyReceiver.onReceive(Context, Intent): void`、静态 `z2.s1.b(Intent): Bundle`、`bs1.a.c()/g()/b(): boolean`（均静态）；门禁必须全部安装成功。失败时原生 `PendingIntent` 回复及既有回退保持，Emoji、图片、应用内回复和撤回不能据此推断适配。APK 来源、SHA-256、原始名及反编译位置沿用本文件的 3180 证据；同名新代码未提供 APK。主机单元测试不证明目标构建真实行为，正缓存现经模块侧受 UID 校验的 provider 同步写入；真实跨微信进程启动复用仍待设备验证。
