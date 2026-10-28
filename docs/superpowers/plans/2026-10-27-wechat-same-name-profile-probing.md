@@ -24,7 +24,7 @@
 
 - Create `src/main/java/com/oasisfeng/nevo/decorators/wechat/WeChatProfileSelector.java`: build identity, typed candidates, exact-first/unique experimental choice, probe result, and cache keys.
 - Create `src/main/java/com/oasisfeng/nevo/decorators/wechat/WeChatProfileCache.java`: module-owned `SharedPreferences` adapter for positive candidate IDs.
-- Modify `src/main/java/com/oasisfeng/nevo/xposed/MainHook.java`: supply a dedicated remote cache preference group and make synthetic reply gate installation all-or-nothing.
+- Modify `src/main/java/com/oasisfeng/nevo/xposed/MainHook.java`: supply a module-owned provider cache client and make synthetic reply gate installation all-or-nothing. The original remote-preference write assumption was invalid because hooked apps receive read-only preferences.
 - Modify `WeChatReplyProfile.java`, `WeChatEmojiHooks.java`, `WeChatAppReplyEvents.java`, `WeChatRecallEvents.java`, `WeChatImageProfile.java`, `WeChatImageEvents.java`, `WeChatImageDownloader.java`, and `WeChatDecorator.java`: same-name candidate lists, full descriptor probes, selected-profile install, diagnostics and per-feature fallback.
 - Add focused JUnit tests beside current WeChat tests. Update adaptation playbook, 8.0.79/8.0.77 findings, and affected reply/image/Emoji topic documents.
 
@@ -53,12 +53,16 @@
 
 **Files:** Modify `MainHook.java`, `WeChatReplyProfile.java`, `WeChatEmojiHooks.java`, `WeChatDecorator.java`; test `WeChatReplyProfileTest.java`, `WeChatEmojiHooksTest.java`; update `docs/wechat-version-adaptation-playbook.md`, `docs/wechat-8.0.72-findings.md`, `docs/wechat-8.0.77-findings.md`, `docs/wechat-8.0.78-findings.md`, `docs/wechat-8.0.79-findings.md`, `docs/wechat-emoji-notifications.md`, `docs/wechat-reply-debug.md`.
 
-**Interfaces:** Consume Task 1 `select(...)` and `Cache`. `MainHook` obtains `getRemotePreferences("wechat_profile_cache")`, wraps it in `WeChatProfileCache`, and passes it through `WeChatDecorator.Local.configureProfileCache(Cache)` before `hook(...)`; later tasks pass that same cache to their component installers. `WeChatReplyProfile` exposes same-name candidates and `Resolved` with receiver, helper and all three gates; `MainHook` accepts only a unique experimental result with every required descriptor. `WeChatEmojiHooks` selects the 8.0.79 candidate for 3183 after its two exact instance signatures; its existing live enabled predicate remains unchanged.
+**Interfaces:** Consume Task 1 `select(...)` and `Cache`. Task 2 temporarily passes a remote-preference adapter through `WeChatDecorator.Local.configureProfileCache(Cache)` before `hook(...)`; Task 2.5 replaces that read-only channel with a module-owned provider client. Later tasks pass that same cache to their component installers. `WeChatReplyProfile` exposes same-name candidates and `Resolved` with receiver, helper and all three gates; `MainHook` accepts only a unique experimental result with every required descriptor. `WeChatEmojiHooks` selects the 8.0.79 candidate for 3183 after its two exact instance signatures; its existing live enabled predicate remains unchanged.
 
 - [ ] Add failing tests for 3183 accepting a fully resolved 3182 reply/Emoji candidate, changed or missing helper/gate rejecting it, legacy/native fallback, atomic gate failure, and live Emoji toggle.
 - [ ] Run `.\gradlew.bat testDebugUnitTest --tests '*WeChatReplyProfileTest' --tests '*WeChatEmojiHooksTest' --console=plain`; confirm expected failure.
 - [ ] Resolve all descriptors before installing any reply or Emoji hook. Make gate installation failure close synthetic reply availability and inactivate/unhook any partial callbacks. Preserve the 8.0.72/8.0.78 OR rules and other legacy rules. Update every Task 2 document with experimental semantics and absent 3183 APK evidence.
 - [ ] Run focused tests, then all `testDebugUnitTest`; require exit 0. Review staged paths/content/privacy and commit this task with noreply identity.
+
+### Task 2.5: Module-owned writable candidate cache correction
+
+Official libxposed API 102 documents `getRemotePreferences()` as read-only in hooked apps. Add a module-side `ContentProvider.call()` endpoint for positive candidate IDs, restricted by Binder caller UID to WeChat and the module itself. Persist synchronously in private `wechat_profile_candidates` preferences; allow only bounded read/write/remove operations. The WeChat-process client implements `WeChatProfileSelector.Cache`; `MainHook` creates it from the application context before feature probes. IPC failure logs stage and exception type and falls back to live signature probing. Host tests cover caller/field constraints and fresh selector/cache instances. Device-side provider availability and actual WeChat restart persistence remain unverified until authorized runtime testing.
 
 ### Task 3: Application reply and recall events
 

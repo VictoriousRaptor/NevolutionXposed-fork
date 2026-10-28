@@ -2,7 +2,7 @@
 
 ## 2026-10-28 未列出 versionCode 的通知回复探测
 
-8.0.77/3141 与 8.0.77/3160 的精确画像继续按版本名**且**版本码优先。其他同名代码只在完整回复签名唯一匹配时实验性启用：共同接收器 `MMAutoMessageReplyReceiver.onReceive(Context, Intent): void`、静态 `z2.s1.b(Intent): Bundle`，3141 候选是 `bs1.a.e()/g()/c(): boolean`，3160 候选是 `lq1.a.e()/h()/c(): boolean`，三门禁均静态。零命中或两个候选都通过时不选任何实验性画像；原生回复及既有 legacy 回退保留，不能据回复结论开启图片、应用内回复、撤回或 Emoji。候选证据的 APK 来源、SHA-256、反编译位置与原始名见本文件原有两版记录；未知代码未提供 APK。门禁 hook 必须全装才可用；`ready` 不证明真实消息送达。正缓存持久写入仍待模块侧通道验证。
+8.0.77/3141 与 8.0.77/3160 的精确画像继续按版本名**且**版本码优先。其他同名代码只在完整回复签名唯一匹配时实验性启用：共同接收器 `MMAutoMessageReplyReceiver.onReceive(Context, Intent): void`、静态 `z2.s1.b(Intent): Bundle`，3141 候选是 `bs1.a.e()/g()/c(): boolean`，3160 候选是 `lq1.a.e()/h()/c(): boolean`，三门禁均静态。零命中或两个候选都通过时不选任何实验性画像；原生回复及既有 legacy 回退保留，不能据回复结论开启图片、应用内回复、撤回或 Emoji。候选证据的 APK 来源、SHA-256、反编译位置与原始名见本文件原有两版记录；未知代码未提供 APK。门禁 hook 必须全装才可用；`ready` 不证明真实消息送达。正缓存现经模块侧受 UID 校验的 provider 同步写入；真实跨微信进程启动复用仍待设备验证。
 
 更新日期：2026-09-30。分支 `codex/wechat-8.0.77`，基线 `f132a2f1889ea3f4abdbfa78159a411e8b410361`。
 

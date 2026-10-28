@@ -6,7 +6,7 @@
 
 回复完整预检包括 `MMAutoMessageReplyReceiver` 继承 `BroadcastReceiver` 及实例 `onReceive(Context, Intent): void`、`z2.s1.b(Intent): Bundle` 静态方法、对应画像中三道无参数静态 `boolean` 车载门禁。门禁批量安装期间回调保持惰性，任一 hook 失败就撤销已装句柄且关闭合成入口；`profile_ready` 仅表示签名解析，须门禁安装完成才允许合成动作。Emoji 仅有 8.0.79/3182 画像；探测 `com.tencent.mm.smiley.g.d(String): String` 和 `com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9,long,boolean,boolean,String,int,String,String,Intent,boolean): void` 两个实例非 abstract 方法。直接调用者取消优化成功后才激活，微信通知增强及 `WeChatDecorator.preserve_emoji` 仍在回调时实时读取，默认关闭。诊断只记录版本、画像、`exact`/`experimental`、`no_match`/`ambiguous`、阶段及异常类型，不记录消息或身份。
 
-候选 ID 设计为按功能、版本名、长版本码、微信更新时间及画像修订版存于模块自有缓存，新进程仍须复核完整签名。**本阶段的 hook 进程远程偏好写通道尚未完成**：libxposed API 102 的 `getRemotePreferences()` 在被 hook 应用中只读，模块侧 IPC 持久写入及跨微信进程复用仍待后续任务验证；不能把本阶段测试称为“首次匹配后持久缓存已通过”。8.0.79/3183 没有提供 APK，来源、SHA-256 和反编译位置均未知；本阶段仅有主机单元测试与构建，不具备该目标的离线字节码、真实 hook 安装、回复送达、Emoji 展示或 OEM 行为证据。回归须分别覆盖精确优先、3183 唯一签名、8.0.77 歧义、错误 helper/门禁、部分安装失败、原生回复和 Emoji 运行中开关，再在取得 APK 与授权设备后逐层验证。
+候选正缓存按功能、版本名、长版本码、微信更新时间及画像修订版存入模块私有 `wechat_profile_candidates` 偏好组，新进程读取候选后仍复核完整签名。libxposed API 102 的 `getRemotePreferences()` 在被 hook 应用中只读，因此微信主进程通过模块自有 `ContentProvider.call()` 读写候选 ID；provider 用 Binder 调用 UID 核对微信或模块自身，只接受有界的缓存协议，写入须同步提交。IPC 失败只影响跨进程复用，本次完整签名探测可继续；日志按 `read`、`write`、`remove` 阶段及异常类型区分，不能把失败写入称为缓存成功。主机测试验证协议约束与共用存储的新实例复用；provider 在真实微信进程中的可达性、跨启动持久性及 Xposed 注入尚未实测。8.0.79/3183 没有提供 APK，来源、SHA-256 和反编译位置均未知；本阶段不具备该目标的离线字节码、真实 hook 安装、回复送达、Emoji 展示或 OEM 行为证据。回归须分别覆盖精确优先、3183 唯一签名、8.0.77 歧义、错误 helper/门禁、部分安装失败、原生回复和 Emoji 运行中开关，再在取得 APK 与授权设备后逐层验证。
 
 本文档是一次性完成"微信新版本适配"的运行手册：从采集证据、定位混淆类/方法、生成版本画像，到装包、验证与记录。适用于本仓库的维护者与代行实施的 agent。
 

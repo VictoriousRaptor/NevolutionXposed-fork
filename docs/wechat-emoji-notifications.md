@@ -4,7 +4,7 @@
 
 既有 8.0.79/3182 继续按版本名**且**版本码精确匹配；8.0.79/3183 等未列出代码只尝试 3182 的 Emoji 候选，不跨版本名借用。先完整检查 `com.tencent.mm.smiley.g.d(String): String` 和 `com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9,long,boolean,boolean,String,int,String,String,Intent,boolean): void` 均为实例、非 abstract 方法，再对已核对的直接调用者取消优化；仅成功时装两处 hook，安装中途失败撤销句柄并保持惰性。回调每次读取微信通知增强与 `WeChatDecorator.preserve_emoji`，因此进程运行中打开/关闭仍生效。诊断 `emoji_hook_ready` 追加实际版本与 `exact`/`experimental`，失败记录原因/异常类型，不记录通知正文。
 
-3183 APK 未提供，来源、SHA-256、反编译位置及该构建原始方法名均未知；现有 3182 证据见本文原记录。主机合成类测试只验证签名选择与开关回调，不证明 3183 微信实际调用、LSPosed 安装、Emoji 文案或系统显示。正缓存跨进程写入通道仍待接入。
+3183 APK 未提供，来源、SHA-256、反编译位置及该构建原始方法名均未知；现有 3182 证据见本文原记录。主机合成类测试只验证签名选择与开关回调，不证明 3183 微信实际调用、LSPosed 安装、Emoji 文案或系统显示。正缓存已接入模块侧 provider 写入；真实跨微信进程启动复用仍待设备验证。
 
 记录日期：2026-10-23。
 

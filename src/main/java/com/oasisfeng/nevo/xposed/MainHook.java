@@ -27,7 +27,7 @@ import com.oasisfeng.nevo.decorators.wechat.WeChatDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatNotificationRemoval;
 import com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile;
 import com.oasisfeng.nevo.decorators.wechat.WeChatEmojiHooks;
-import com.oasisfeng.nevo.decorators.wechat.WeChatProfileCache;
+import com.oasisfeng.nevo.decorators.wechat.WeChatProfileCacheClient;
 import com.oasisfeng.nevo.decorators.wechat.WeChatProfileSelector;
 import com.oasisfeng.nevo.decorators.wechat.NotificationMarkdownHooks;
 import com.oasisfeng.nevo.decorators.wechat.NotificationAppearanceHooks;
@@ -150,11 +150,6 @@ public class MainHook extends XposedModule {
 			return;
 		}
 		pref = getRemotePreferences(RemotePreferenceStore.GROUP);
-		// API 102 exposes these preferences read-only in hooked apps. This is a temporary
-		// read path until the module-owned cache write IPC is connected; failed writes
-		// never make an experimental signature match usable on a later process by itself.
-		if ("com.tencent.mm".equals(processName))
-			sProfileCache = new WeChatProfileCache(getRemotePreferences(WeChatProfileCache.GROUP));
 		log(Log.INFO, TAG, "Loaded in " + processName + " with " + getFrameworkName()
 				+ " " + getFrameworkVersion() + " API " + getApiVersion());
 	}
@@ -326,6 +321,7 @@ public class MainHook extends XposedModule {
 					if (context != null && ref.compareAndSet(null, context)) {
 						if (BuildConfig.DEBUG) Log.d(TAG, "Application.onCreate context=" + context);
 						NevoDecoratorService.setAppContext(context);
+						sProfileCache = new WeChatProfileCacheClient(context);
 						WeChatEmojiHooks.install(context, loadPackageParam.classLoader,
 								() -> pref.getBoolean("WeChatDecorator.enabled", true)
 										&& pref.getBoolean(RemotePreferenceStore.KEY_PRESERVE_EMOJI, false),

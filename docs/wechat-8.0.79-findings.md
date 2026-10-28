@@ -27,7 +27,7 @@ Android 17 真机、微信 8.0.79/3182、模块通知增强与 Markdown 开启�
 
 3182 精确画像继续要求版本名 **8.0.79 且 versionCode 3182**。3183 无安装包，来源、SHA-256、反编译位置及目标构建的原始混淆名未知；这里只让运行时独立尝试沿用本文件已核对的 3182 候选，绝不宣称 3183 布局相同。合成回复要求 `MMAutoMessageReplyReceiver.onReceive(Context, Intent): void`、静态 `z2.s1.b(Intent): Bundle`、`lt1.a.c()/d()/b(): boolean` 三个静态门禁完整通过，且三道门禁 hook 全部安装成功；失败时只保留原生 `PendingIntent` 与既有 legacy 回退。Emoji 独立要求实例非 abstract `com.tencent.mm.smiley.g.d(String): String` 与 `com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9,long,boolean,boolean,String,int,String,String,Intent,boolean): void` 两个完整签名和直接调用者取消优化成功；开关仍实时读取。其他图片、应用内回复、撤回需各自完成探测，不能借用这两项结果。
 
-日志把新代码标为 `experimental`，`ready` 只表示当前进程 hook 安装，绝非真实回复或 Emoji 显示验收。主机测试覆盖合成类型和失败回退；本轮没有 3183 APK 的离线核对、运行时注入或真机消息/OEM 检验。候选正缓存的模块侧持久写入通道仍待接入并跨启动验证。
+日志把新代码标为 `experimental`，`ready` 只表示当前进程 hook 安装，绝非真实回复或 Emoji 显示验收。主机测试覆盖合成类型和失败回退；本轮没有 3183 APK 的离线核对、运行时注入或真机消息/OEM 检验。候选正缓存由微信进程通过模块 `ContentProvider.call()` 读写模块私有偏好；provider 按调用 UID 限定微信/模块自身并同步提交，只存画像 ID。主机测试只证明代码层的新实例复用和输入约束，真实跨微信进程启动的 provider 可达性与持久性尚未验证。
 
 更新日期：2026-10-16。模块版本：3.2.1 / code 14。
 
