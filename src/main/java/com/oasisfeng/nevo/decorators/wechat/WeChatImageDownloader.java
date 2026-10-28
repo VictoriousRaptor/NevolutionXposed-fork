@@ -363,12 +363,17 @@ final class WeChatImageDownloader {
 			Class<?> msgIdTalkerClass = resolver.find("com.tencent.mm.plugin.msg.MsgIdTalker");
 			r.callbackClass = resolver.find(profile.callback);
             Class<?> downloadInterface = resolver.find(profile.downloadInterface);
-            if (!r.imageServiceClass.isAssignableFrom(imageServiceImplementation)
+            Class<?> serviceBase = resolver.find(profile.serviceBase);
+            if (!serviceBase.isAssignableFrom(r.imageServiceClass)
+                    || !serviceBase.isAssignableFrom(imageServiceImplementation)
+                    || !r.imageServiceClass.isAssignableFrom(imageServiceImplementation)
                     || !downloadInterface.isAssignableFrom(r.downloadServiceClass)
                     || !downloadInterface.isInterface() || !r.callbackClass.isInterface())
                 throw new IllegalStateException("Invalid image service inheritance");
-			r.serviceGet = staticMethod(serviceManager, "c", resolver.find(profile.serviceBase), Class.class);
+			r.serviceGet = staticMethod(serviceManager, "c", serviceBase, Class.class);
 			r.downloadServiceGet = method(imageServiceImplementation, profile.downloadGet, resolver.find(profile.downloadInterface));
+			if (Modifier.isAbstract(msgIdTalkerClass.getModifiers()))
+                throw new IllegalStateException("Abstract message pair");
 			r.msgIdTalkerConstructor = msgIdTalkerClass.getDeclaredConstructor(long.class, String.class);
 			r.msgIdTalkerConstructor.setAccessible(true);
 			r.downloadMethod = method(r.downloadServiceClass, "b", int.class, long.class, msgIdTalkerClass,

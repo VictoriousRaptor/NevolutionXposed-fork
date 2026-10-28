@@ -163,4 +163,31 @@ public class WeChatImageProfileProbeTest {
     }
     public static class Pair { public Pair(long id,String talker) { throw new AssertionError(); } }
     public static class Decoder { public static byte[] wxam2PicBuf(byte[] source,int flags,int format) { throw new AssertionError(); } }
+
+    @Test public void downloaderRejectsUnrelatedServiceBaseDespiteMatchingGetter() {
+        assertThrows(IllegalStateException.class, () -> WeChatImageDownloader.resolve(profile(), name -> {
+            if (name.equals(profile().serviceBase)) return UnrelatedBase.class;
+            if (name.equals(profile().manager)) return UnrelatedBaseManager.class;
+            return downloadClass(name);
+        }));
+    }
+    @Test public void downloaderRejectsAbstractMessagePairDespiteMatchingDownload() {
+        assertThrows(IllegalStateException.class, () -> WeChatImageDownloader.resolve(profile(), name -> {
+            if (name.equals("com.tencent.mm.plugin.msg.MsgIdTalker")) return AbstractPair.class;
+            if (name.equals(profile().download)) return AbstractPairDownload.class;
+            return downloadClass(name);
+        }));
+    }
+    public interface UnrelatedBase {}
+    public static class UnrelatedBaseManager {
+        public static UnrelatedBase c(Class<?> type) { throw new AssertionError("probe invoked service getter"); }
+    }
+    public abstract static class AbstractPair {
+        public AbstractPair(long id,String talker) { throw new AssertionError("probe invoked constructor"); }
+    }
+    public static class AbstractPairDownload implements DownloadService {
+        public int b(long id,AbstractPair pair,int type,Object data,int flag,Callback callback,int priority,boolean original) {
+            throw new AssertionError("probe downloaded image");
+        }
+    }
 }

@@ -250,8 +250,8 @@ SHA-256 `52aee3a34e62da71936a197bf132dd71966878c51f989493c59fbefd24ce8f32`。
 即使随后重试成功也保持 inert。ready 日志增加 `match=exact/experimental`。
 
 大图组件独立解析 static kernel/service getter、唯一非 static 数据库字段、实例 query、
-service 与 download implementation 的继承关系、实例下载 getter、完整 `b(...) : int`、
-`MsgIdTalker(long,String)`、callback interface 和 static WXGF decoder。探测只做反射，
+service base 与 service/implementation、download interface 与 implementation 的继承关系、
+实例下载 getter、完整 `b(...) : int`、非抽象 `MsgIdTalker(long,String)`、callback interface 和 static WXGF decoder。探测只做反射，
 不构造消息对、不查询数据、不获取服务、不触发下载或更改通知。候选正缓存通过模块
 provider 持久化，并在每个新进程重验；缓存不可用时仍执行现场签名探测。
 
