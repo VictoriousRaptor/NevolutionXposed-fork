@@ -10,6 +10,8 @@ import android.os.Bundle;
 import android.os.Process;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Module-owned writable cache endpoint. The hooked WeChat process cannot edit libxposed remote preferences. */
 public final class WeChatProfileCacheProvider extends ContentProvider {
@@ -27,50 +29,44 @@ public final class WeChatProfileCacheProvider extends ContentProvider {
         int uid = Binder.getCallingUid();
         if (!authorizedCaller(uid, Process.myUid(), context.getPackageManager().getPackagesForUid(uid)))
             throw new SecurityException("Cache caller not allowed");
-        if (arg != null || extras == null || !(READ.equals(method) || WRITE.equals(method) || REMOVE.equals(method)))
+        if (arg != null || extras == null)
             throw new IllegalArgumentException("Invalid cache operation");
-        if (extras.size() != (WRITE.equals(method) ? 6 : 5)
-                || !(extras.get(FEATURE) instanceof String) || !(extras.get(VERSION_NAME) instanceof String)
-                || !(extras.get(VERSION_CODE) instanceof Long) || !(extras.get(UPDATE_TIME) instanceof Long)
-                || !(extras.get(REVISION) instanceof Integer)
-                || (WRITE.equals(method) && !(extras.get(CANDIDATE_ID) instanceof String)))
-            throw new IllegalArgumentException("Invalid cache payload");
+        WeChatProfileCache cache = new WeChatProfileCache(
+                context.getSharedPreferences(WeChatProfileCache.GROUP, Context.MODE_PRIVATE));
+        Map<String, Object> request = new HashMap<>();
+        for (String key : extras.keySet()) request.put(key, extras.get(key));
+        Map<String, Object> response = execute(method, request, cache);
+        Bundle result = new Bundle();
+        if (READ.equals(method)) result.putString(CANDIDATE_ID, (String) response.get(CANDIDATE_ID));
+        else result.putBoolean(OK, Boolean.TRUE.equals(response.get(OK)));
+        return result;
+    }
 
-        final String feature, name, candidate;
-        final long code, update;
-        final int revision;
-        try {
-            feature = extras.getString(FEATURE);
-            name = extras.getString(VERSION_NAME);
-            code = extras.getLong(VERSION_CODE, -1);
-            update = extras.getLong(UPDATE_TIME, -1);
-            revision = extras.getInt(REVISION, -1);
-            candidate = WRITE.equals(method) ? extras.getString(CANDIDATE_ID) : null;
-        } catch (ClassCastException invalid) {
-            throw new IllegalArgumentException("Invalid cache value type", invalid);
-        }
+    /** Shared protocol core; the Android entry point performs UID validation before calling it. */
+    static Map<String, Object> execute(String method, Map<String, Object> request, WeChatProfileSelector.Cache cache) {
+        if (request == null || !(READ.equals(method) || WRITE.equals(method) || REMOVE.equals(method))
+                || request.size() != (WRITE.equals(method) ? 6 : 5)
+                || !(request.get(FEATURE) instanceof String) || !(request.get(VERSION_NAME) instanceof String)
+                || !(request.get(VERSION_CODE) instanceof Long) || !(request.get(UPDATE_TIME) instanceof Long)
+                || !(request.get(REVISION) instanceof Integer)
+                || (WRITE.equals(method) && !(request.get(CANDIDATE_ID) instanceof String)))
+            throw new IllegalArgumentException("Invalid cache payload");
+        String feature = (String) request.get(FEATURE), name = (String) request.get(VERSION_NAME);
+        long code = (Long) request.get(VERSION_CODE), update = (Long) request.get(UPDATE_TIME);
+        int revision = (Integer) request.get(REVISION);
+        String candidate = WRITE.equals(method) ? (String) request.get(CANDIDATE_ID) : null;
         if (!validKey(feature, name, code, update, revision)
                 || (WRITE.equals(method) && !validCandidateId(candidate)))
             throw new IllegalArgumentException("Invalid cache key or candidate");
-        WeChatProfileCache cache = new WeChatProfileCache(
-                context.getSharedPreferences(WeChatProfileCache.GROUP, Context.MODE_PRIVATE));
         WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId(name, code, update);
-        Bundle result = new Bundle();
+        Map<String, Object> response = new HashMap<>();
         switch (method) {
-            case READ:
-                result.putString(CANDIDATE_ID, cache.read(feature, build, revision));
-                break;
-            case WRITE:
-                cache.write(feature, build, revision, candidate);
-                result.putBoolean(OK, true);
-                break;
-            case REMOVE:
-                cache.remove(feature, build, revision);
-                result.putBoolean(OK, true);
-                break;
+            case READ: response.put(CANDIDATE_ID, cache.read(feature, build, revision)); break;
+            case WRITE: cache.write(feature, build, revision, candidate); response.put(OK, true); break;
+            case REMOVE: cache.remove(feature, build, revision); response.put(OK, true); break;
             default: throw new AssertionError(method);
         }
-        return result;
+        return response;
     }
 
     @Override public Bundle call(String authority, String method, String arg, Bundle extras) {

@@ -4,9 +4,12 @@ import android.content.SharedPreferences;
 import org.junit.Test;
 
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
 
@@ -59,6 +62,57 @@ public class WeChatProfileCacheProviderTest {
         WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId("8.0.79", 3183, 100);
         assertThrows(IllegalStateException.class, () -> cache.write("reply", build, 1, "wechat-8.0.79/3182"));
         assertNull(cache.read("reply", build, 1));
+    }
+
+    @Test public void clientRoundTripsThroughProviderProtocol() {
+        assertEquals("com.oasisfeng.nevo.xposed.profilecache", WeChatProfileCacheProvider.AUTHORITY);
+        FakePreferences store = new FakePreferences();
+        WeChatProfileCache backing = new WeChatProfileCache(store.preferences());
+        AtomicReference<Map<String, Object>> written = new AtomicReference<>();
+        List<String> operations = new ArrayList<>();
+        WeChatProfileCacheClient client = new WeChatProfileCacheClient((method, request) -> {
+            operations.add(method);
+            if (method.equals("write")) written.set(new HashMap<>(request));
+            return WeChatProfileCacheProvider.execute(method, request, backing);
+        });
+        WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId("8.0.79", 3183, 100);
+        client.write("reply", build, 1, "wechat-8.0.79/3182");
+        assertEquals("reply", written.get().get("feature"));
+        assertEquals("8.0.79", written.get().get("versionName"));
+        assertEquals(3183L, written.get().get("versionCode"));
+        assertEquals(100L, written.get().get("updateTime"));
+        assertEquals(1, written.get().get("revision"));
+        assertEquals("wechat-8.0.79/3182", written.get().get("candidateId"));
+        assertEquals("wechat-8.0.79/3182", client.read("reply", build, 1));
+        client.remove("reply", build, 1);
+        assertNull(client.read("reply", build, 1));
+        assertEquals(Arrays.asList("write", "read", "remove", "read"), operations);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> WeChatProfileCacheProvider.execute("unknown", written.get(), backing));
+        Map<String, Object> extra = new HashMap<>(written.get()); extra.put("extra", "x");
+        assertThrows(IllegalArgumentException.class,
+                () -> WeChatProfileCacheProvider.execute("write", extra, backing));
+        Map<String, Object> wrongType = new HashMap<>(written.get()); wrongType.put("versionCode", "3183");
+        assertThrows(IllegalArgumentException.class,
+                () -> WeChatProfileCacheProvider.execute("write", wrongType, backing));
+    }
+
+    @Test public void failedProviderCommitAndIpcStillAllowLiveProbe() {
+        FakePreferences store = new FakePreferences(); store.commitResult = false;
+        WeChatProfileCache backing = new WeChatProfileCache(store.preferences());
+        WeChatProfileCacheClient failedCommit = new WeChatProfileCacheClient(
+                (method, request) -> WeChatProfileCacheProvider.execute(method, request, backing));
+        WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId("8.0.79", 3183, 100);
+        assertThrows(IllegalStateException.class,
+                () -> failedCommit.write("reply", build, 1, "wechat-8.0.79/3182"));
+        assertNull(backing.read("reply", build, 1));
+        WeChatProfileCacheClient unavailable = new WeChatProfileCacheClient((method, request) -> {
+            throw new IllegalStateException("synthetic IPC failure");
+        });
+        assertEquals(WeChatProfileSelector.MatchKind.EXPERIMENTAL, new WeChatProfileSelector(1).select(
+                "reply", build, Arrays.asList(new WeChatProfileSelector.Candidate<>(
+                        "wechat-8.0.79/3182", "8.0.79", 3182, "profile")), p -> true, unavailable).kind);
     }
 
     private static final class FakePreferences {
