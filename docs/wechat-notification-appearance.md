@@ -1,5 +1,15 @@
 # 微信通知外观
 
+## 2026-10-30 图片显示诊断与修复
+
+Android 17 真机上，微信 8.0.79/3182 的一张不同图片已完成事件解析、解码和补发，通知中有 `nevo.wechat.imageReady=true`，SystemUI 的展开视图 AFTER hook 也已进入且归属检查通过，但用户展开后仍看不到图。通知管理器保存的记录为 `android.picture=null`、`android.pictureIcon` 为 URI 类型；原渲染器只读取 `EXTRA_PICTURE`，所以只克隆并清理旧视图，没有添加新图片。框架回归以仅有 `EXTRA_PICTURE_ICON` 的合成通知复现了此缺口（76/77，通过项中不含新增用例）。
+
+现展开渲染优先使用 `EXTRA_PICTURE` 位图；位图被系统转存后，改用 `EXTRA_PICTURE_ICON` 通过 `RemoteViews.setImageViewIcon` 添加图片。重建新补图时清除可能继承的旧图标，撤回或失效时同时清除两个字段。缺少两个字段、模块资源构造失败或系统视图应用失败时，仍保留消息模板的 `[图片]`。该改动没有新增 hook 目标或版本映射；图片请求仍需 8.0.79 与 3182 同时匹配、原开关开启并通过运行时签名校验。Debug 的 `image_render_entry` 只记录进程、归属及两种图片字段是否存在，不记录 URI、路径或正文。
+
+后续私聊截图显示图片贴在卡片左缘，而同卡片消息文字从头像右侧开始。设备 framework 的 `notification_2025_content_margin_start` 为 58 dp，在该设备密度下对应截图中的约 203 px 差距。私聊和群聊 MessagingStyle 都通过 `withImagePreview()` 将同一个 `wechat_group_image_preview` 添加到系统 `notification_main_column`；该列本身未给新增子视图加入消息内容缩进。现在只在 framework 的 2025 展开会话/消息模板上读取其内容缩进并给图片视图设置对应的起始侧 padding，保留系统原布局、头像、文字和回复区。`ImagePreviewLoader` 的非 MessagingStyle 回退使用另一套 `wechat_image_preview`，标题与图片原本同列，不应用这次缩进。无匹配模板或缩进资源时沿用原视图行为。合成 framework 回归已添加私聊、群聊和回退模板检查；设备拔除后无法运行新增回归或确认真实通知最终对齐。
+
+修复包的主机测试 219/219、Android 17 framework 测试 77/77 通过；测试包在 `finally` 阶段卸载并核验不存在。最终 Debug APK 已在手机原地覆盖，手机与本地 APK SHA-256 相同；用户手动重启 SystemUI 后，同一私聊的新图片通知中看到了缩略图。同期实时日志为 `published`、`image_render_entry ... owned=true bitmap=false pictureIcon=true`、`image_render_result ... viewChanged=true`，支持该图片经 URI 图标路径显示的结论。此项视觉验收只覆盖这次私聊图片；群聊、撤回后的视图、其他系统版本仍未验证。日志、APK 和原通知只留本地忽略目录 `.debug-artifacts/live-diagnosis-20261030/`。
+
 ## 当前行为
 
 - 私聊和群聊的 MessagingStyle 使用微信原通知大图标，由系统 ConversationLayout 提供通知主头像和微信应用角标；群聊使用原群头像，不写入成员 Person。首次及后续文本通知成功重建为 MessagingStyle 后，都清除微信原通知携带的折叠、展开及横幅自定义视图，避免首条消息仍显示微信的联系人列表式卡片。重要会话类型保留，已确认 bot 或无原头像时保留系统回退。
@@ -15,7 +25,7 @@
 
 折叠 AFTER hook 为 `Notification$Builder.createContentView(): RemoteViews`，要求零参数、实例方法、准确返回类型及 `mContext`/`mN` 实例字段。仅在折叠视图克隆上隐藏系统 `app_name_text` 及可用分隔符；不存在对应资源 ID 时保留原视图。展开视图不改应用头。
 
-展开 AFTER hook 优先 `Notification$Builder.createExpandedContentView(): RemoteViews`，方法缺失才使用 `createBigContentView(): RemoteViews`，要求零参数、实例方法和准确返回类型。对私聊/群聊 MessagingStyle 克隆最终 RemoteViews，按完整实例签名 `RemoteViews.removeFromParent(int): void` 反射登记旧模块图片移除动作；有 READY 与 EXTRA_PICTURE 时向 `android:id/notification_main_column` 追加 `wechat_group_image_preview`。无位图时只清旧图，防止重复 reapply 和撤回残留。不修改展开应用名或内容标题。
+展开 AFTER hook 优先 `Notification$Builder.createExpandedContentView(): RemoteViews`，方法缺失才使用 `createBigContentView(): RemoteViews`，要求零参数、实例方法和准确返回类型。对私聊/群聊 MessagingStyle 克隆最终 RemoteViews，按完整实例签名 `RemoteViews.removeFromParent(int): void` 反射登记旧模块图片移除动作；有 READY 且 `EXTRA_PICTURE` 位图或 `EXTRA_PICTURE_ICON` 图标可用时向 `android:id/notification_main_column` 追加 `wechat_group_image_preview`。两者都没有时只清旧图，防止重复 reapply 和撤回残留。不修改展开应用名或内容标题。
 
 模块图片布局使用 libxposed 模块 ApplicationInfo 与完整反射构造 `RemoteViews(ApplicationInfo, int)`，不回退宿主包查询。缺系统容器 ID、移除接口签名不符或资源构造失败时，直接保留原消息模板中的 `[图片]`，不尝试替代接口或其他图片模板。头像、折叠和展开入口独立校验、去优化、安装和回退。日志使用 `WeChat.Appearance` 的 avatar/collapsed/header ready、unavailable 以及 avatar/collapsed_header/message_image 异常类型，不记录通知正文、头像、联系人或设备标识。
 

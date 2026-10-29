@@ -119,6 +119,7 @@ final class ImagePreviewLoader {
 		notification.extras.remove(NOTIFICATION_TOKEN);
 		notification.extras.remove(READY);
 		notification.extras.remove(Notification.EXTRA_PICTURE);
+		notification.extras.remove(Notification.EXTRA_PICTURE_ICON);
 		if (notification.bigContentView != null
 				&& BuildConfig.APPLICATION_ID.equals(notification.bigContentView.getPackage())
 				&& notification.bigContentView.getLayoutId() == R.layout.wechat_image_preview)
@@ -240,7 +241,14 @@ final class ImagePreviewLoader {
 			if (talker == null || talker.isEmpty()) { retryOrFinish(context, manager, tag, id, request, "talker_pending"); return; }
 			ImageEventIndex.Entry event = events.index.select(talker,
 					request.when > 0 ? request.when : request.received, request.started, SystemClock.elapsedRealtime());
-			if (event == null) { retryOrFinish(context, manager, tag, id, request, "no_unique_message_event"); return; }
+			if (event == null) {
+				if (BuildConfig.DEBUG && (request.attempts == 0 || SystemClock.elapsedRealtime() >= request.deadline))
+					log("selection_counts", "request=" + request.token + " "
+						+ events.index.selectionCounts(talker, request.when > 0 ? request.when : request.received,
+								request.started, SystemClock.elapsedRealtime()));
+				retryOrFinish(context, manager, tag, id, request, "no_unique_message_event");
+				return;
+			}
 			request.resolvedTalker = talker;
 			if (request.eventKey != null && !request.eventKey.equals(event.key)) { finish(request, "event_changed"); return; }
 			request.eventKey = event.key;
@@ -586,6 +594,7 @@ final class ImagePreviewLoader {
 		}
 		Notification result = builder.setOnlyAlertOnce(true).build();
 		NotificationMessages.copyIdentityExtras(current, result);
+		result.extras.remove(Notification.EXTRA_PICTURE_ICON); // Do not retain an offloaded icon from an older preview.
 		result.extras.putParcelable(Notification.EXTRA_PICTURE, bitmap);
 		result.extras.putBoolean(READY, true);
 		result.extras.putLong(TOKEN, token);

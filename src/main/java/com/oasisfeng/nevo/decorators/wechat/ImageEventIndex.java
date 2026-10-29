@@ -78,6 +78,30 @@ final class ImageEventIndex {
 		return result;
 	}
 
+	/** Counts only metadata, for diagnosing a rejected selection without exposing identities or paths. */
+	synchronized String selectionCounts(String talker, long notificationTime, long observedAt, long now) {
+		prune(now);
+		int sameTalker = 0, matchingWithPaths = 0, matchingWithoutPaths = 0;
+		int timeWithPaths = 0, timeWithoutPaths = 0;
+		for (Entry entry : entries.values()) {
+			if (!entry.talker.equals(talker)) continue;
+			sameTalker++;
+			if (!matches(entry, notificationTime, observedAt)) continue;
+			boolean timeMatch = entry.created > 0 && notificationTime > 0
+					&& ImageCandidateSelector.isRecent(entry.created, notificationTime);
+			if (entry.paths.isEmpty()) {
+				matchingWithoutPaths++;
+				if (timeMatch) timeWithoutPaths++;
+			} else {
+				matchingWithPaths++;
+				if (timeMatch) timeWithPaths++;
+			}
+		}
+		return "indexed=" + entries.size() + " sameTalker=" + sameTalker
+				+ " matchingWithPaths=" + matchingWithPaths + " matchingWithoutPaths=" + matchingWithoutPaths
+				+ " timeWithPaths=" + timeWithPaths + " timeWithoutPaths=" + timeWithoutPaths;
+	}
+
 	private static boolean matches(Entry entry, long notificationTime, long observedAt) {
 		if (entry.created > 0 && notificationTime > 0 && ImageCandidateSelector.isRecent(entry.created, notificationTime)) return true;
 		return Math.abs(entry.observed - observedAt) <= OBSERVED_WINDOW_MS;

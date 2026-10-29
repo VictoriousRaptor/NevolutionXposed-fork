@@ -2,6 +2,8 @@
 
 2026-10-12：新增“通知内渲染 Markdown”设置，默认关闭，依赖微信通知增强。修改后需重启微信进程。该功能只改变通知消息的显示，不发送转换后的文字。
 
+2026-10-30：在既有有界解析器和系统会话通知模板中加入一级、二级标题。行首（允许至多三个前导空格）的 `# ` 和 `## ` 必须有非空正文；展示时去掉前导标记，保留正文和换行。一级标题为原字号粗体，二级标题为原字号 `sans-serif-medium`，不改系统通知布局。三级及更深标题、四格缩进、转义或行中井号保持字面量；围栏代码内也不识别标题。二级标题中的代码仍保持等宽字体。原文仍用于归档、回复、撤回及重新构建，关闭开关后恢复标记。当前手机已断开，本轮框架测试仅编译，实际标题字重与布局待真机回归。
+
 ## 支持范围
 
 | 输入 | 显示 |
@@ -10,12 +12,14 @@
 | `*斜体*` | 原生斜体样式 |
 | `~~删除线~~` | 原生删除线样式 |
 | `***加粗斜体***` | 同时应用加粗与斜体 |
+| 行首 `# 一级标题` | 去掉标记，原字号粗体 |
+| 行首 `## 二级标题` | 去掉标记，原字号中等字重 |
 | `**加粗和 *斜体* 一起**` | 有界嵌套样式 |
 | 单反引号包围的代码 | 去除反引号，代码文字使用等宽字体和灰色底纹 |
 | 两个或更多等长反引号包围的行内代码 | 允许代码内容包含较短或不同长度的反引号 |
 | 独立行的三个或更多反引号围栏 | 去除围栏和语言标签，保留正文缩进和换行，应用代码样式 |
 
-这是有界 Markdown 子集，不是完整 CommonMark 渲染器。不实现下划线语法、标题、表格、链接点击、图片、HTML 或语法高亮。代码内容不再解析加粗、斜体、删除线或反斜杠；行内代码保留空白和换行，不执行 CommonMark 的空白归一化。反斜杠转义保留原样，转义的反引号串不会被再次解析。未闭合的反引号保护其后全文；空围栏保留原样。
+这是有界 Markdown 子集，不是完整 CommonMark 渲染器。不实现下划线语法、三级及更深标题、表格、链接点击、图片、HTML 或语法高亮。代码内容不再解析加粗、斜体、删除线或反斜杠；行内代码保留空白和换行，不执行 CommonMark 的空白归一化。反斜杠转义保留原样，转义的反引号串不会被再次解析。未闭合的反引号保护其后全文；空围栏保留原样。
 
 围栏起止行允许至多三个前导空格；开头语言标签不可包含反引号，结束围栏必须独占一行，长度不短于开始围栏，尾部只允许空格或制表符。代码正文及最后一行的换行保留，结束围栏行连同其换行移除。加粗、斜体和删除线不跨行配对；残缺标记、空白相邻的起止标记和四个以上连续星号保留原样。其它语法的结构标记保留，但普通文本中的受支持行内语法仍可渲染。
 
@@ -23,7 +27,7 @@
 
 最终样式受系统通知模板控制。[AOSP `Notification.MessagingStyle.Message`](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/core/java/android/app/Notification.java) 在 `Flags.cleanUpSpansAndNewLines()` 分支下调用 `stripNonStyleSpans`，会移除字体和背景 span；[颜色清理逻辑](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/core/java/com/android/internal/util/ContrastColorUtil.java) 也可能移除背景颜色。2026-10-13 已从 PJZ110 Android 16 / ColorOS 16.0.10 的实际 framework 确认清理开关默认返回 true，白名单不包含这两种代码 span。字体服务中 monospace 指向 `DroidSansMono.ttf`，sans-serif 指向 `Roboto-Regular.ttf`，均存在。原 APK 的反引号已解析，但代码字体和底纹在通知重建时会丢失。
 
-现新增 `NotificationMarkdownHooks`，在微信主进程及 SystemUI 的消息清理方法完成后，仅恢复本模块代码范围中的字体和灰底。原方法继续执行；其他被清理的 span 不恢复。需完整签名校验、两个功能开关开启、消息带 `nevo.markdown.owner=com.tencent.mm` 和原文标记，且清理后的文字与解析结果完全一致；不一致、超限、缺少标记、没有代码或 hook 不可用时保留原生输出。已存在的代码 span 不重复添加，文字和身份元数据不改变。Android/OEM 其他清理路径仍需独立验证，完整 hook、日志与失败语义见[适配指南](wechat-version-adaptation-playbook.md)。
+`NotificationMarkdownHooks` 在微信主进程及 SystemUI 的消息清理方法完成后，仅恢复本模块代码范围中的字体、灰底和二级标题的中等字重字体。原方法继续执行；其他被清理的 span 不恢复。需完整签名校验、两个功能开关开启、消息带 `nevo.markdown.owner=com.tencent.mm` 和原文标记，且清理后的文字与解析结果完全一致；不一致、超限、缺少标记、没有待恢复样式或 hook 不可用时保留原生输出。已存在的目标 span 不重复添加，文字和身份元数据不改变。Android/OEM 其他清理路径仍需独立验证，完整 hook、日志与失败语义见[适配指南](wechat-version-adaptation-playbook.md)。
 
 2026-10-25：Android 17 / API 37 的 framework 测试报告表明旧入口 `Message.ensureColorContrastOrStripStyling(int)` 不存在。[AOSP Android 17 固定源码](https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/core/java/android/app/Notification.java) 已改为 `Message.stripNonStyleSpans(): void`，并缩短消息序列化调用者的参数列表。生产 hook 和仪器测试现在共用完整签名画像：保留 Android 16 的返回值恢复路径；新布局在无参数清理完成后读取正文，仅在需要恢复样式时写回已验证类型和修饰符的 `mText: CharSequence`。选择依据是完整运行时签名，不是系统或微信版本号；缺少任何必要方法/域或取消优化失败仍回退原生输出。就绪日志通过 `layout=return_value/message_field` 区分布局。
 

@@ -84,11 +84,26 @@ final class WeChatNotificationAppearance {
             throw new NoSuchMethodException("Unsupported RemoteViews.removeFromParent signature");
         remove.setAccessible(true);
         remove.invoke(result, R.id.wechat_preview_image);
-        Bitmap bitmap = ImagePreviewLoader.isPreview(notification)
-                ? notification.extras.getParcelable(Notification.EXTRA_PICTURE) : null;
-        if (bitmap == null) return result;
+        if (!ImagePreviewLoader.isPreview(notification)) return result;
+        Bitmap bitmap = notification.extras.getParcelable(Notification.EXTRA_PICTURE);
+        Icon pictureIcon = notification.extras.getParcelable(Notification.EXTRA_PICTURE_ICON);
+        if (bitmap == null && pictureIcon == null) return result;
         RemoteViews image = ImagePreviewRemoteViews.create(moduleInfo, R.layout.wechat_group_image_preview);
-        image.setImageViewBitmap(R.id.wechat_preview_image, bitmap);
+        // NotificationManager may offload the bitmap and retain only a URI-backed picture icon.
+        if (bitmap != null) image.setImageViewBitmap(R.id.wechat_preview_image, bitmap);
+        else image.setImageViewIcon(R.id.wechat_preview_image, pictureIcon);
+        // The 2025 MessagingStyle body is inset from the card edge, but children appended here are not.
+        // Use the framework's own content inset so OEM dimensions and RTL follow the surrounding message.
+        int conversation = resources.getIdentifier("notification_2025_template_expanded_conversation", "layout", "android");
+        int messaging = resources.getIdentifier("notification_2025_template_expanded_messaging", "layout", "android");
+        if (original.getLayoutId() == conversation || original.getLayoutId() == messaging) {
+            int insetId = resources.getIdentifier("notification_2025_content_margin_start", "dimen", "android");
+            if (insetId != 0) {
+                int inset = resources.getDimensionPixelSize(insetId);
+                boolean rtl = resources.getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+                image.setViewPadding(R.id.wechat_preview_image, rtl ? 0 : inset, 0, rtl ? inset : 0, 0);
+            }
+        }
         // Keep the system's conversation title, sender rows, avatars and actions; append only the picture.
         result.addView(column, image);
         return result;

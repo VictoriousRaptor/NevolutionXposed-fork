@@ -15,6 +15,9 @@ import android.util.Log;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** Presentation adapter. The archive and reply/recall policies always read the retained source. */
 final class NotificationMarkdown {
     static final String PREF = "WeChatDecorator.markdown";
@@ -23,6 +26,7 @@ final class NotificationMarkdown {
     private static final String TAG = "WeChat.Markdown";
     // Translucent neutral gray works over light and dark backgrounds without fixing text color.
     static final int CODE_BACKGROUND = 0x30808080;
+    private static final String HEADING_2_FONT = "sans-serif-medium";
 
     static CharSequence originalText(Bundle extras) {
         CharSequence raw = extras.getCharSequence(RAW_TEXT);
@@ -77,8 +81,8 @@ final class NotificationMarkdown {
         if (output != null) extras.putParcelableArray(Notification.EXTRA_MESSAGES, output);
     }
 
-    /** Restore only our code ranges after framework sanitization, keeping its other decisions. */
-    static CharSequence restoreCodeStyles(CharSequence cleaned, Bundle metadata) {
+    /** Restore only module-owned non-style ranges after framework sanitization. */
+    static CharSequence restoreStylesAfterCleanup(CharSequence cleaned, Bundle metadata) {
         if (cleaned == null || metadata == null
                 || !WeChatDecorator.WECHAT_PACKAGE.equals(metadata.getString(OWNER))) return cleaned;
         CharSequence raw = metadata.getCharSequence(RAW_TEXT);
@@ -87,13 +91,19 @@ final class NotificationMarkdown {
         if (parsed.limited || !TextUtils.equals(cleaned, parsed.text)) return cleaned;
         SpannableStringBuilder output = null;
         for (InlineMarkdown.Range range : parsed.spans) {
+            if ((range.style & InlineMarkdown.HEADING_2) == 0) continue;
+            for (InlineMarkdown.Range segment : mediumSegments(parsed.spans, range)) {
+                if (hasTypeface(cleaned, segment, HEADING_2_FONT)) continue;
+                if (output == null) output = new SpannableStringBuilder(cleaned);
+                output.setSpan(new TypefaceSpan(HEADING_2_FONT), segment.start, segment.end,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+        }
+        for (InlineMarkdown.Range range : parsed.spans) {
             if ((range.style & InlineMarkdown.CODE) == 0) continue;
-            boolean font = false, background = false;
+            boolean font = hasTypeface(cleaned, range, "monospace"), background = false;
             if (cleaned instanceof Spanned) {
                 Spanned spans = (Spanned) cleaned;
-                for (TypefaceSpan span : spans.getSpans(range.start, range.end, TypefaceSpan.class))
-                    if ("monospace".equals(span.getFamily()) && spans.getSpanStart(span) == range.start
-                            && spans.getSpanEnd(span) == range.end) font = true;
                 for (BackgroundColorSpan span : spans.getSpans(range.start, range.end, BackgroundColorSpan.class))
                     if (span.getBackgroundColor() == CODE_BACKGROUND && spans.getSpanStart(span) == range.start
                             && spans.getSpanEnd(span) == range.end) background = true;
@@ -104,6 +114,28 @@ final class NotificationMarkdown {
             if (!background) output.setSpan(new BackgroundColorSpan(CODE_BACKGROUND), range.start, range.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         return output == null ? cleaned : output;
+    }
+
+    private static boolean hasTypeface(CharSequence text, InlineMarkdown.Range range, String family) {
+        if (!(text instanceof Spanned)) return false;
+        Spanned styled = (Spanned) text;
+        for (TypefaceSpan span : styled.getSpans(range.start, range.end, TypefaceSpan.class))
+            if (family.equals(span.getFamily()) && styled.getSpanStart(span) == range.start
+                    && styled.getSpanEnd(span) == range.end) return true;
+        return false;
+    }
+
+    /** Keep inline code monospace even when it appears inside an H2 line. */
+    private static List<InlineMarkdown.Range> mediumSegments(List<InlineMarkdown.Range> ranges, InlineMarkdown.Range heading) {
+        List<InlineMarkdown.Range> segments = new ArrayList<>();
+        int start = heading.start;
+        for (InlineMarkdown.Range range : ranges) {
+            if ((range.style & InlineMarkdown.CODE) == 0 || range.end <= start || range.start >= heading.end) continue;
+            if (start < range.start) segments.add(new InlineMarkdown.Range(start, range.start, InlineMarkdown.HEADING_2));
+            start = Math.min(heading.end, range.end);
+        }
+        if (start < heading.end) segments.add(new InlineMarkdown.Range(start, heading.end, InlineMarkdown.HEADING_2));
+        return segments;
     }
 
     static CharSequence render(CharSequence source) {
@@ -118,12 +150,17 @@ final class NotificationMarkdown {
                 InlineMarkdown.Range range = parsed.removed.get(i);
                 text.delete(range.start, range.end);
             }
+            for (InlineMarkdown.Range range : parsed.spans)
+                if ((range.style & InlineMarkdown.HEADING_2) != 0)
+                    for (InlineMarkdown.Range segment : mediumSegments(parsed.spans, range))
+                        text.setSpan(new TypefaceSpan(HEADING_2_FONT), segment.start, segment.end,
+                                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             for (InlineMarkdown.Range range : parsed.spans) {
                 if ((range.style & InlineMarkdown.CODE) != 0) {
                     text.setSpan(new TypefaceSpan("monospace"), range.start, range.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     text.setSpan(new BackgroundColorSpan(CODE_BACKGROUND), range.start, range.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
-                int style = ((range.style & InlineMarkdown.BOLD) != 0 ? Typeface.BOLD : 0)
+                int style = ((range.style & (InlineMarkdown.BOLD | InlineMarkdown.HEADING_1)) != 0 ? Typeface.BOLD : 0)
                         | ((range.style & InlineMarkdown.ITALIC) != 0 ? Typeface.ITALIC : 0);
                 if (style != 0) text.setSpan(new StyleSpan(style), range.start, range.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 if ((range.style & InlineMarkdown.STRIKE) != 0)

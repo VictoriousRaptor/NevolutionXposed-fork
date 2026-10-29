@@ -5,9 +5,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-/** Bounded Markdown subset: emphasis, strike, backtick code spans and fenced code. */
+/** Bounded Markdown subset: headings, emphasis, strike, backtick code spans and fenced code. */
 final class InlineMarkdown {
-    static final int BOLD = 1, ITALIC = 2, STRIKE = 4, CODE = 8;
+    static final int BOLD = 1, ITALIC = 2, STRIKE = 4, CODE = 8, HEADING_1 = 16, HEADING_2 = 32;
     static final int MAX_LENGTH = 4096, MAX_SPANS = 128, MAX_DEPTH = 12, MAX_WORK = 65536;
 
     static final class Range {
@@ -52,6 +52,18 @@ final class InlineMarkdown {
         if (depth > MAX_DEPTH) throw new LimitReached();
         for (int i = start; i < end;) {
             step();
+            if (depth == 0 && (i == 0 || source.charAt(i - 1) == '\n' || source.charAt(i - 1) == '\r')) {
+                int body = headingBody(i, end);
+                if (body > i) {
+                    int finish = lineEnd(body, end), spanStart = output.length();
+                    removed.add(new Range(i, body, 0));
+                    append(body, finish, depth + 1);
+                    addSpan(spanStart, output.length(), body - 3 >= i && source.charAt(body - 3) == '#'
+                            ? HEADING_2 : HEADING_1);
+                    i = finish;
+                    continue;
+                }
+            }
             char c = source.charAt(i);
             if (c == '\\') {
                 int next = escapedEnd(i, end);
@@ -90,6 +102,21 @@ final class InlineMarkdown {
                 i += length;
             }
         }
+    }
+
+    private int headingBody(int line, int end) {
+        int marker = line;
+        while (marker < end && marker - line < 3 && source.charAt(marker) == ' ') { step(); marker++; }
+        if (marker >= end || source.charAt(marker) != '#') return -1;
+        int hashes = marker + 1 < end && source.charAt(marker + 1) == '#' ? 2 : 1;
+        int space = marker + hashes;
+        if (space >= end || source.charAt(space) != ' ') return -1;
+        int body = space + 1, finish = lineEnd(body, end);
+        for (int i = body; i < finish; i++) {
+            step();
+            if (!Character.isWhitespace(source.charAt(i))) return body;
+        }
+        return -1;
     }
 
     private void addSpan(int start, int end, int style) {

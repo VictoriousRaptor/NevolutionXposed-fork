@@ -127,7 +127,29 @@ public class InlineMarkdownTest {
     }
 
     @Test public void unsupportedSyntaxIsNotInterpreted() {
-        assertUnchanged("# 标题\n- 列表\n[链接](https://example.com)\n![图片](image.png)\n<b>HTML</b>");
+        assertUnchanged("### 标题\n- 列表\n[链接](https://example.com)\n![图片](image.png)\n<b>HTML</b>");
+    }
+
+    @Test public void headingsAndInlineStylesUseUtf16Offsets() {
+        InlineMarkdown.Result result = InlineMarkdown.parse("# 😀 **First**\n ## Second\n~~123~~");
+        assertEquals("😀 First\nSecond\n123", result.text);
+        assertRange(result, 0, 3, 8, InlineMarkdown.BOLD);
+        assertRange(result, 1, 0, 8, 16);
+        assertRange(result, 2, 9, 15, 32);
+        assertRange(result, 3, 16, 19, InlineMarkdown.STRIKE);
+        assertEquals(0, result.removed.get(0).start);
+        assertEquals(2, result.removed.get(0).end);
+        assertEquals(15, result.removed.get(3).start);
+        assertEquals(19, result.removed.get(3).end);
+    }
+
+    @Test public void headingBoundariesStayLiteral() {
+        for (String source : new String[]{"# ", "## ", "# \n", "    # title", "### title", "x # title", "\\# title", "#", "##"})
+            assertUnchanged(source);
+        InlineMarkdown.Result code = InlineMarkdown.parse("```\n# title\n## next\n```\n");
+        assertEquals("# title\n## next\n", code.text);
+        assertEquals(1, code.spans.size());
+        assertRange(code, 0, 0, code.text.length(), InlineMarkdown.CODE);
     }
 
     @Test public void lengthLimitKeepsEntireSource() {

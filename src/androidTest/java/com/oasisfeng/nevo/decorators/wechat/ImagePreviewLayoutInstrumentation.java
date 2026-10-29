@@ -38,6 +38,77 @@ final class ImagePreviewLayoutInstrumentation {
         }
     }
 
+    static void messagingImageUsesSystemContentInset(Instrumentation instrumentation) {
+        Context module = instrumentation.getTargetContext();
+        int insetId = module.getResources().getIdentifier("notification_2025_content_margin_start", "dimen", "android");
+        if (insetId == 0) return; // Older framework layout; this regression targets the 2025 conversation template.
+        int expectedInset = module.getResources().getDimensionPixelSize(insetId);
+        for (boolean group : new boolean[]{false, true}) {
+            Notification current = new Notification.Builder(module, "synthetic-image-alignment")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setStyle(new Notification.MessagingStyle(new Person.Builder().setName("Synthetic self").build())
+                            .setConversationTitle("Synthetic chat").setGroupConversation(group)
+                            .addMessage("[图片]", 100, new Person.Builder().setName("Synthetic peer").build()))
+                    .build();
+            Notification preview = ImagePreviewLoader.buildPreviewNotification(module, module.getApplicationInfo(),
+                    current, Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888), group ? 83 : 82);
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+            instrumentation.runOnMainSync(() -> {
+                try {
+                    RemoteViews original = Notification.Builder.recoverBuilder(module, preview).createBigContentView();
+                    int conversation = module.getResources().getIdentifier(
+                            "notification_2025_template_expanded_conversation", "layout", "android");
+                    int messaging = module.getResources().getIdentifier(
+                            "notification_2025_template_expanded_messaging", "layout", "android");
+                    check(original.getLayoutId() == conversation || original.getLayoutId() == messaging,
+                            "synthetic preview did not use the 2025 MessagingStyle layout");
+                    RemoteViews expanded = WeChatNotificationAppearance.withImagePreview(original, module.getResources(),
+                            module.getApplicationInfo(), preview);
+                    View root = expanded.apply(module, new FrameLayout(module));
+                    ImageView image = root.findViewById(R.id.wechat_preview_image);
+                    check(image != null && image.getPaddingStart() == expectedInset && image.getPaddingEnd() == 0,
+                            "image did not align to the system content inset: expected=" + expectedInset
+                                    + " actual=" + (image == null ? "missing" : image.getPaddingStart()));
+                } catch (Throwable error) { failure.set(error); }
+            });
+            if (failure.get() != null) throw new AssertionError("Messaging image alignment failed", failure.get());
+        }
+        Notification fallback = ImagePreviewLoader.buildPreviewNotification(module, module.getApplicationInfo(),
+                new Notification.Builder(module, "synthetic-image-alignment")
+                        .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Synthetic chat").build(),
+                Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888), 84);
+        check(fallback.bigContentView != null && fallback.bigContentView.getLayoutId() == R.layout.wechat_image_preview,
+                "non-MessagingStyle fallback layout changed");
+    }
+
+    static void offloadedPictureIconStillRenders(Instrumentation instrumentation) {
+        Context module = instrumentation.getTargetContext();
+        Bitmap bitmap = Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888);
+        Notification current = new Notification.Builder(module, "synthetic-offloaded-preview")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setStyle(new Notification.MessagingStyle(new Person.Builder().setName("Synthetic self").build())
+                        .setConversationTitle("Synthetic chat").setGroupConversation(false)
+                        .addMessage("[图片]", 100, new Person.Builder().setName("Synthetic peer").build()))
+                .build();
+        Notification preview = ImagePreviewLoader.buildPreviewNotification(module, module.getApplicationInfo(), current, bitmap, 81);
+        preview.extras.remove(Notification.EXTRA_PICTURE);
+        preview.extras.putParcelable(Notification.EXTRA_PICTURE_ICON, Icon.createWithBitmap(bitmap));
+        preview = roundTrip(preview);
+        Notification offloaded = preview;
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        instrumentation.runOnMainSync(() -> {
+            try {
+                RemoteViews original = Notification.Builder.recoverBuilder(module, offloaded).createBigContentView();
+                RemoteViews expanded = WeChatNotificationAppearance.withImagePreview(original, module.getResources(),
+                        module.getApplicationInfo(), offloaded);
+                View root = expanded.apply(module, new FrameLayout(module));
+                ImageView image = root.findViewById(R.id.wechat_preview_image);
+                check(image != null && image.getDrawable() != null, "offloaded picture icon was omitted");
+            } catch (Throwable error) { failure.set(error); }
+        });
+        if (failure.get() != null) throw new AssertionError("Offloaded picture rendering failed", failure.get());
+    }
+
     private static void verifyGroup(Instrumentation instrumentation, Context module) {
         Notification.MessagingStyle style = new Notification.MessagingStyle(new Person.Builder().setName("Synthetic self").build())
                 .setConversationTitle("Synthetic group").setGroupConversation(true)
@@ -162,10 +233,13 @@ final class ImagePreviewLayoutInstrumentation {
                 .setContentText("[图片]").build();
         Notification preview = ImagePreviewLoader.buildPreviewNotification(context, context.getApplicationInfo(), current,
                 Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888), 78);
+        preview.extras.putParcelable(Notification.EXTRA_PICTURE_ICON,
+                Icon.createWithBitmap(Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888)));
         new ImagePreviewLoader(null).discard("synthetic", 778, preview);
         check(!ImagePreviewLoader.isPreview(preview), "discard kept preview marker");
         check(preview.bigContentView == null, "discard kept image layout");
         check(!preview.extras.containsKey(Notification.EXTRA_PICTURE), "discard kept picture");
+        check(!preview.extras.containsKey(Notification.EXTRA_PICTURE_ICON), "discard kept offloaded picture icon");
     }
 
     static void modulePackageLookupUnavailable(Context context) {

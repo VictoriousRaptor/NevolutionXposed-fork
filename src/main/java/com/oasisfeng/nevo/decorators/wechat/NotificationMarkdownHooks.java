@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
-/** Preserve module-owned code spans in the existing WeChat and SystemUI scopes. */
+/** Preserve module-owned code and H2 font spans in the existing WeChat and SystemUI scopes. */
 public final class NotificationMarkdownHooks {
     private static final String TAG = "WeChat.Markdown";
     private static boolean installed;
@@ -45,7 +45,7 @@ public final class NotificationMarkdownHooks {
                         Notification.MessagingStyle.Message message = (Notification.MessagingStyle.Message) param.thisObject;
                         CharSequence cleaned = profile.textField == null
                                 ? (CharSequence) param.getResult() : message.getText();
-                        CharSequence restored = NotificationMarkdown.restoreCodeStyles(cleaned, message.getExtras());
+                        CharSequence restored = NotificationMarkdown.restoreStylesAfterCleanup(cleaned, message.getExtras());
                         if (restored == cleaned) return;
                         if (profile.textField == null) param.setResult(restored);
                         else profile.textField.set(message, restored);

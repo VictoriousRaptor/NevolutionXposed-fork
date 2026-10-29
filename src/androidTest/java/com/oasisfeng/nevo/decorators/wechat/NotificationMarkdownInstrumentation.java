@@ -12,6 +12,8 @@ import android.text.style.ForegroundColorSpan;
 import android.text.style.StrikethroughSpan;
 import android.text.style.StyleSpan;
 import android.text.style.TypefaceSpan;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.AbsoluteSizeSpan;
 
 import androidx.core.app.NotificationCompat.MessagingStyle;
 import androidx.core.app.NotificationCompat.MessagingStyle.Message;
@@ -26,6 +28,85 @@ import java.lang.reflect.Method;
 
 /** Framework regression cases, registered in the existing runner. Compilation is not execution. */
 final class NotificationMarkdownInstrumentation {
+    static void headingsKeepSystemSizeAndInlineStyles() {
+        String raw = "# Bold\n## Medium ~~123~~";
+        Bundle bundle = new Bundle();
+        bundle.putCharSequence("text", NotificationMarkdown.render(raw));
+        Spanned text = (Spanned) parcel(bundle).getCharSequence("text");
+        check("Bold\nMedium 123".contentEquals(text), "heading markers remained");
+        StyleSpan[] bold = text.getSpans(0, 4, StyleSpan.class);
+        check(bold.length == 1 && bold[0].getStyle() == Typeface.BOLD
+                && text.getSpanStart(bold[0]) == 0 && text.getSpanEnd(bold[0]) == 4, "H1 weight");
+        TypefaceSpan[] medium = text.getSpans(5, 15, TypefaceSpan.class);
+        check(medium.length == 1 && "sans-serif-medium".equals(medium[0].getFamily())
+                && text.getSpanStart(medium[0]) == 5 && text.getSpanEnd(medium[0]) == 15, "H2 weight");
+        StrikethroughSpan[] strike = text.getSpans(12, 15, StrikethroughSpan.class);
+        check(strike.length == 1 && text.getSpanStart(strike[0]) == 12 && text.getSpanEnd(strike[0]) == 15,
+                "heading strike lost");
+        check(text.getSpans(0, text.length(), RelativeSizeSpan.class).length == 0
+                && text.getSpans(0, text.length(), AbsoluteSizeSpan.class).length == 0, "heading changed size");
+    }
+
+    static void headingRebuildAndDisable(Context context) {
+        String raw = "# Bold\n## Medium ~~123~~";
+        Conversation conversation = conversation();
+        Notification notification = normalized(conversation, notification(context, raw, 100));
+        for (int round = 0; round < 3; round++) {
+            NotificationMarkdown.apply(notification, true);
+            check("Bold\nMedium 123".contentEquals(notification.extras.getCharSequence(Notification.EXTRA_TEXT)),
+                    "heading render changed on repeat");
+            notification.extras = parcel(notification.extras);
+            check(raw.contentEquals(NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true)
+                    .get(0).getText()), "heading source lost");
+            notification = normalized(conversation, notification);
+        }
+        NotificationMarkdown.apply(notification, false);
+        Bundle message = (Bundle) notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES)[0];
+        check(raw.contentEquals(message.getCharSequence("text"))
+                && raw.contentEquals(notification.extras.getCharSequence(Notification.EXTRA_TEXT)), "heading markers not restored");
+        check(message.getBundle("extras") == null || !message.getBundle("extras").containsKey(NotificationMarkdown.OWNER),
+                "stale heading owner");
+    }
+
+    static void frameworkHeadingCleanupRoundTrip() {
+        try {
+            String raw = "# Bold\n## Medium `code` ~~123~~";
+            Notification.MessagingStyle.Message message = new Notification.MessagingStyle.Message(
+                    NotificationMarkdown.render(raw), 100, (android.app.Person) null);
+            message.getExtras().putAll(codeMetadata(raw));
+            NotificationMarkdownHookProfile profile = NotificationMarkdownHookProfile.resolve(
+                    message.getClass(), Notification.MessagingStyle.class, Bundle.class, android.widget.RemoteViews.class);
+            Field textField = message.getClass().getDeclaredField("mText");
+            textField.setAccessible(true);
+            Method toBundle = message.getClass().getDeclaredMethod("toBundle");
+            toBundle.setAccessible(true);
+            Method fromBundle = message.getClass().getDeclaredMethod("getMessageFromBundle", Bundle.class);
+            fromBundle.setAccessible(true);
+            for (int round = 0; round < 3; round++) {
+                if (profile.textField == null) profile.callers[0].invoke(message, 0xffeeeeee);
+                else profile.cleanup.invoke(message);
+                CharSequence cleaned = message.getText();
+                CharSequence restored = NotificationMarkdown.restoreStylesAfterCleanup(cleaned, message.getExtras());
+                check("Bold\nMedium code 123".contentEquals(restored), "heading cleanup changed characters");
+                Spanned styled = (Spanned) restored;
+                TypefaceSpan[] fonts = styled.getSpans(0, styled.length(), TypefaceSpan.class);
+                int medium = 0, code = 0;
+                for (TypefaceSpan font : fonts) {
+                    if ("sans-serif-medium".equals(font.getFamily())) medium++;
+                    else if ("monospace".equals(font.getFamily())) code++;
+                }
+                check(medium == 2 && code == 1, "heading/code font lost or duplicated");
+                check(styled.getSpans(0, styled.length(), StyleSpan.class).length == 1, "H1 bold lost");
+                check(styled.getSpans(0, styled.length(), StrikethroughSpan.class).length == 1, "strike lost");
+                check(styled.getSpans(0, styled.length(), RelativeSizeSpan.class).length == 0, "heading size changed");
+                check(NotificationMarkdown.restoreStylesAfterCleanup(restored, message.getExtras()) == restored,
+                        "heading restoration not idempotent");
+                textField.set(message, restored);
+                message = (Notification.MessagingStyle.Message) fromBundle.invoke(null, parcel((Bundle) toBundle.invoke(message)));
+            }
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+
     static void stylesSurviveParcelAndExistingSpans() {
         SpannableStringBuilder source = new SpannableStringBuilder("😀 **粗体** *斜体* ~~旧~~");
         source.setSpan(new ForegroundColorSpan(0xff123456), 0, 2, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -179,14 +260,14 @@ final class NotificationMarkdownInstrumentation {
                 if (profile.textField == null) profile.callers[0].invoke(message, 0xffeeeeee);
                 else profile.cleanup.invoke(message);
                 CharSequence cleaned = message.getText();
-                CharSequence restored = NotificationMarkdown.restoreCodeStyles(cleaned, message.getExtras());
+                CharSequence restored = NotificationMarkdown.restoreStylesAfterCleanup(cleaned, message.getExtras());
                 check(cleaned.toString().contentEquals(restored), "restoration changed message characters");
                 Spanned styled = (Spanned) restored;
                 check(styled.getSpans(0, styled.length(), TypefaceSpan.class).length == 2, "code fonts lost or duplicated");
                 check(styled.getSpans(0, styled.length(), BackgroundColorSpan.class).length == 2, "code backgrounds lost or duplicated");
                 check(styled.getSpans(0, styled.length(), StyleSpan.class).length == 1, "sanitized emphasis lost");
                 check(styled.getSpans(0, styled.length(), ForegroundColorSpan.class).length == 0, "unrelated source color restored");
-                check(NotificationMarkdown.restoreCodeStyles(restored, message.getExtras()) == restored, "restoration not idempotent");
+                check(NotificationMarkdown.restoreStylesAfterCleanup(restored, message.getExtras()) == restored, "restoration not idempotent");
                 textField.set(message, restored);
                 Bundle bundle = (Bundle) toBundle.invoke(message);
                 message = (Notification.MessagingStyle.Message) fromBundle.invoke(null, parcel(bundle));
@@ -198,15 +279,22 @@ final class NotificationMarkdownInstrumentation {
 
     static void restorationRejectsUnownedOrChangedText() {
         CharSequence cleaned = "code";
-        check(NotificationMarkdown.restoreCodeStyles(cleaned, new Bundle()) == cleaned, "unmarked message changed");
+        check(NotificationMarkdown.restoreStylesAfterCleanup(cleaned, new Bundle()) == cleaned, "unmarked message changed");
         Bundle metadata = codeMetadata("`code`");
         metadata.remove(NotificationMarkdown.OWNER);
-        check(NotificationMarkdown.restoreCodeStyles(cleaned, metadata) == cleaned, "ownerless message changed");
+        check(NotificationMarkdown.restoreStylesAfterCleanup(cleaned, metadata) == cleaned, "ownerless message changed");
         metadata.putString(NotificationMarkdown.OWNER, "another.app");
-        check(NotificationMarkdown.restoreCodeStyles(cleaned, metadata) == cleaned, "other app message changed");
-        check(NotificationMarkdown.restoreCodeStyles("modified", codeMetadata("`code`")) == "modified", "changed text restyled");
-        check(NotificationMarkdown.restoreCodeStyles(cleaned, codeMetadata("**code**")) == cleaned, "emphasis-only message restyled");
-        check(NotificationMarkdown.restoreCodeStyles(cleaned, codeMetadata("`" + "a".repeat(InlineMarkdown.MAX_LENGTH) + "`")) == cleaned,
+        check(NotificationMarkdown.restoreStylesAfterCleanup(cleaned, metadata) == cleaned, "other app message changed");
+        check(NotificationMarkdown.restoreStylesAfterCleanup("modified", codeMetadata("`code`")) == "modified", "changed text restyled");
+        check(NotificationMarkdown.restoreStylesAfterCleanup(cleaned, codeMetadata("**code**")) == cleaned, "emphasis-only message restyled");
+        CharSequence heading = "Medium";
+        check(NotificationMarkdown.restoreStylesAfterCleanup(heading, codeMetadata("## Other")) == heading,
+                "changed heading restyled");
+        Bundle foreignHeading = codeMetadata("## Medium");
+        foreignHeading.putString(NotificationMarkdown.OWNER, "another.app");
+        check(NotificationMarkdown.restoreStylesAfterCleanup(heading, foreignHeading) == heading,
+                "foreign heading restyled");
+        check(NotificationMarkdown.restoreStylesAfterCleanup(cleaned, codeMetadata("`" + "a".repeat(InlineMarkdown.MAX_LENGTH) + "`")) == cleaned,
                 "over-limit source restyled");
     }
 
@@ -214,14 +302,14 @@ final class NotificationMarkdownInstrumentation {
         Bundle metadata = codeMetadata("😀 `Wi.i`");
         SpannableStringBuilder cleaned = new SpannableStringBuilder("😀 Wi.i");
         cleaned.setSpan(new TypefaceSpan("monospace"), 3, 7, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        Spanned restored = (Spanned) NotificationMarkdown.restoreCodeStyles(cleaned, metadata);
+        Spanned restored = (Spanned) NotificationMarkdown.restoreStylesAfterCleanup(cleaned, metadata);
         check(restored.getSpans(0, restored.length(), TypefaceSpan.class).length == 1, "existing code font duplicated");
         BackgroundColorSpan[] backgrounds = restored.getSpans(0, restored.length(), BackgroundColorSpan.class);
         check(backgrounds.length == 1 && restored.getSpanStart(backgrounds[0]) == 3 && restored.getSpanEnd(backgrounds[0]) == 7,
                 "missing code background or wrong emoji offsets");
         check(backgrounds[0].getBackgroundColor() == NotificationMarkdown.CODE_BACKGROUND, "wrong background color");
         check(cleaned.getSpans(0, cleaned.length(), BackgroundColorSpan.class).length == 0, "cleaned source was mutated");
-        check(NotificationMarkdown.restoreCodeStyles(restored, metadata) == restored, "partial repair duplicates styles");
+        check(NotificationMarkdown.restoreStylesAfterCleanup(restored, metadata) == restored, "partial repair duplicates styles");
     }
 
     private static Bundle codeMetadata(String raw) {

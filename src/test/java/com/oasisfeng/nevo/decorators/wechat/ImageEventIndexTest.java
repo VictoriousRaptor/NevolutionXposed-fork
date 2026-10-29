@@ -27,6 +27,26 @@ public class ImageEventIndexTest {
 		index.put("a", 2, 10001, Arrays.asList("/second"), 2);
 		assertNull(index.select("a", 10000, 2, 3));
 	}
+	@Test public void rereadOfOldImageIdentityKeepsSelectionAmbiguous() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.putRanked("a", 2, 20000, Arrays.asList(new ImageEventIndex.Path("/current", 1)), 300);
+		// WeChat can reread older image records while posting the current notification.
+		index.putIdentity("a", 1, 9001, 10000, 301);
+		assertNull(index.select("a", 20000, 302, 303));
+	}
+	@Test public void anotherCurrentImageIdentityStillBlocksAmbiguousPathEvent() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.putRanked("a", 2, 20000, Arrays.asList(new ImageEventIndex.Path("/current", 1)), 300);
+		index.putIdentity("a", 3, 9003, 20001, 301);
+		assertNull(index.select("a", 20000, 302, 303));
+	}
+	@Test public void laggedCurrentIdentityNeverSelectsOldPath() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.putRanked("a", 1, 20000, Arrays.asList(new ImageEventIndex.Path("/old", 1)), 300);
+		index.putIdentity("a", 2, 9002, 30000, 301);
+		// The notification timestamp may lag the current message, so it cannot resolve this ambiguity.
+		assertNull(index.select("a", 20000, 302, 303));
+	}
 	@Test public void repeatedEventMergesPathsWithoutDuplicatingMessage() {
 		ImageEventIndex index = new ImageEventIndex();
 		index.put("a", 1, 10000, Arrays.asList("/thumb"), 1);

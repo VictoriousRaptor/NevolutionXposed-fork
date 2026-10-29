@@ -4,6 +4,18 @@
 
 配合脚本：`tools/collect-device-info.ps1`（只读取设备与 APK，不在手机上做任何修改）。
 
+## 2026-10-30 图片图标与展开布局缩进
+
+- 既有 `Notification$Builder.createExpandedContentView(): RemoteViews` AFTER hook（缺失时回退 `createBigContentView(): RemoteViews`）在微信主进程及 SystemUI 中处理带模块外观标记的私聊、群聊 `MessagingStyle`。从 `EXTRA_PICTURE` 读取位图；系统转存位图后从 `EXTRA_PICTURE_ICON` 读取图标并调用 `RemoteViews.setImageViewIcon(int, Icon)`。两个字段都缺失时只登记旧图片移除动作，保留原消息模板的 `[图片]`。图片失效清理同时删除两个字段，新补图时清除继承的旧图标。
+- 私聊和群聊的展开视图均向系统 `notification_main_column` 追加同一个 `wechat_group_image_preview`。Android 17 设备的 2025 展开会话/消息模板把原消息内容缩进 58 dp，新增子视图没有继承该缩进，因此此前图片贴在卡片左缘。仅当展开视图布局 ID 匹配这两种 2025 模板时，从 framework 的 `notification_2025_content_margin_start` 读取设备实际像素值，给图片起始侧设置同等 padding（含 RTL）。无布局或尺寸资源时沿用原视图。非 `MessagingStyle` 回退使用独立的 `wechat_image_preview`，标题与图片同列，不施加该缩进。原头像、标题、消息文字和回复区继续由系统模板管理。
+- 沿用原完整 hook 签名、运行时字段/接口校验、微信 Context、模块归属、非汇总、通知增强与图片开关，以及独立图片画像的版本名和版本号同时匹配语义。缺容器、隐藏移除接口或模块资源时回退原生消息视图。Debug 的 `image_render_entry/result` 和 `selection_counts` 只记状态与计数，不含图标 URI、图片路径、联系人或正文；Release 不执行这些诊断扫描。当前真实私聊已验证图标缩略图及重复同图显示，图片缩进和标题修正因手机断开尚未做新包真机视觉验收；合成图片缩进框架用例已编译但尚未执行。事件索引继续在同会话多个候选时保守拒选，避免通知时间滞后时把旧图误配给新消息。
+
+## 2026-10-30 通知 Markdown 一级与二级标题
+
+- 既有 `WeChatDecorator.markdown` 展示路径识别独占行首（允许零至三个前导空格）的 `# ` 和 `## `，正文须非空。移除前缀后，一级标题使用原字号粗体，二级标题使用原字号 `sans-serif-medium`；行内强调、删除线和代码仍照常解析，代码字体优先。三级及更深标题、四格缩进、转义或行中标记、围栏代码中的井号保持字面量。不改变 `MessagingStyle` 系统模板或通知字号。
+- 原始正文继续保存在 `nevo.markdown.rawText`，重复重建、回复、归档和撤回读原文，关闭开关后恢复标记。已有微信主进程和 SystemUI 的 `Message.stripNonStyleSpans` AFTER hook 同时补回模块所有的代码字体/底纹与二级标题字体；保留完整签名、调用者取消优化、进程与双开关门禁、owner 和清理后全文一致校验。缺任一条件或 hook 不可用时保留原生清理结果，不扩大微信版本画像。诊断沿用 `source=code_styles_*`，不记录消息内容。
+- 新增解析边界和标题与删除线共存的主机用例，及 native Parcel、实际 framework 清理、三轮重建与关闭开关的框架用例。2026-10-30 当前手机已断开，框架用例仅能编译；真实 Android 17 / 微信 8.0.79/3182 的标题字重、系统模板显示和 hook 回调仍待真机验收。详见[通知 Markdown](wechat-notification-markdown.md)。
+
 ## 2026-10-29 私聊首条文本的通知视图一致性
 
 - 微信原通知即使是普通私聊文本，也可能携带自定义折叠、展开或横幅视图。成功重建为 `MessagingStyle` 后统一清除这三种原生视图，确保首条与后续更新都由系统会话模板显示微信原头像及应用角标；私聊的 `isGroupConversation=false`、会话标题及消息历史沿用现有规则。仅原生媒体卡片成功拼接回复动作时继续保留微信布局；构建失败仍保持原通知。
@@ -19,7 +31,7 @@
 ## 2026-10-27 通知应用头与消息头像统一
 
 - 当前外观策略：带模块外观标记的私聊、群聊消息统一保留微信原通知 `getLargeIcon()`；系统 `ConversationLayout` 以该图标作为会话头像并提供微信应用角标。群聊成员 `Person` 仍只表示消息发送者，不以群头像覆盖成员头像；已确认 bot、无原头像和无支持的 framework 布局保持系统回退。媒体卡片若成功在微信原生通知上拼接原生回复动作，保留原生模板、内容视图与回复实现；未拼接时才进入现有 `MessagingStyle` 会话构建，并在构建成功后清除原生自定义折叠/展开/横幅视图，避免它们遮住会话头像。构建失败仍保留原通知。
-- 私聊与群聊图片补图都保留 `MessagingStyle`、原大图标、会话标题、发送者身份和回复动作；`Builder.createExpandedContentView(): RemoteViews` AFTER hook（该方法缺失才回退 `createBigContentView(): RemoteViews`）克隆系统展开视图，按已校验的 `RemoteViews.removeFromParent(int): void` 清除旧图片，再向 `android:id/notification_main_column` 追加模块 160 dp `fitStart` 图片。群图标题和成员排版继续与群文本共用系统模板；私聊图片不再切换 `DecoratedCustomViewStyle`。原生非消息模板的图片构建仍保守使用原有自定义展开回退。
+- 私聊与群聊图片补图都保留 `MessagingStyle`、原大图标、会话标题、发送者身份和回复动作；`Builder.createExpandedContentView(): RemoteViews` AFTER hook（该方法缺失才回退 `createBigContentView(): RemoteViews`）克隆系统展开视图，按已校验的 `RemoteViews.removeFromParent(int): void` 清除旧图片，再向 `android:id/notification_main_column` 追加模块 160 dp `fitStart` 图片。先用 `EXTRA_PICTURE` 位图，若被系统转存则用 `EXTRA_PICTURE_ICON` 及 `RemoteViews.setImageViewIcon(int, Icon)`；两者都没有时只清旧图。群图标题和成员排版继续与群文本共用系统模板；私聊图片不再切换 `DecoratedCustomViewStyle`。原生非消息模板的图片构建仍保守使用原有自定义展开回退。
 - 新增 `Notification$Builder.createContentView(): RemoteViews` AFTER hook，仅对实际微信 Context、`nevo.wechat.appearance=com.tencent.mm`、非汇总通知且微信增强开启时，克隆折叠 `RemoteViews` 并隐藏系统 `app_name_text` 及存在的分隔符；展开 hook 不修改应用头，因此展开继续显示“微信”。不恢复已删除的设置键。折叠入口要求零参数、实例方法、准确 `RemoteViews` 返回类型及 `mContext: Context`、`mN: Notification` 实例字段；与头像和展开入口各自独立去优化、安装及失败回退。诊断使用 `WeChat.Appearance source=collapsed_hook_ready/collapsed_hook_unavailable/collapsed_header`、`message_image` 与原 avatar/header 来源，只记录异常类型，不记录内容或身份。
 - framework 外观 hook 仍按完整运行时签名判定，不新增微信版本白名单。图片获取仍只适配 8.0.72/3085、8.0.77/3141、8.0.77/3160、8.0.79/3182，版本名与版本码必须同时匹配；图片开关、等待值和微信主进程签名校验不变。回复、应用内回复、撤回各有独立门禁，不能据外观成功推断这些功能适配。缺头像、容器、`removeFromParent` 或模块资源时保留原消息文字/原生样式。回归需分别检查私聊链接原生回复与无回复、私聊文本/图片、群聊文本/图片、折叠/展开应用头、补图前后、连续更新与撤回；本节是源码及构建范围说明，真实微信/SystemUI hook 安装和 OEM 视觉结果尚未验证。
 - 2026-10-27 Android 17 / API 37 设备框架回归：69/69 instrumentation 通过，设备已安装微信 8.0.79/3182 的描述符检查 40 项通过。测试使用现有 release 证书签名的 Debug 与 androidTest APK；`finally` 清理并独立核验测试包和 runner 均不存在，测试前与测试后模块 APK 的回拉哈希均与本地 Release 相同，最终模块非 debuggable。使用了 instrumentation 的 `--no-hidden-api-checks`，结果只证明该测试上下文的 framework 布局与描述符；未发送真实消息，未验证微信/SystemUI 内的 hook 安装或 OEM 实际通知视觉，也未重启整机。原始日志、APK 备份和结果只保存在本地忽略目录 `.debug-artifacts/notification-style-device-20261027/`。

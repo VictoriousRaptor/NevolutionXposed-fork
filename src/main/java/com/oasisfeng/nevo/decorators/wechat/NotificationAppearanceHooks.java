@@ -6,6 +6,7 @@ import android.graphics.drawable.Icon;
 import android.util.Log;
 import android.widget.RemoteViews;
 
+import com.oasisfeng.nevo.xposed.BuildConfig;
 import com.oasisfeng.nevo.xposed.compat.XC_MethodHook;
 import com.oasisfeng.nevo.xposed.compat.XposedBridge;
 
@@ -77,12 +78,21 @@ public final class NotificationAppearanceHooks {
                         if (!enabled.getAsBoolean()) return;
                         Context context = (Context) profile.context.get(param.thisObject);
                         Notification notification = (Notification) profile.notification.get(param.thisObject);
+                        boolean preview = BuildConfig.DEBUG && notification != null && ImagePreviewLoader.isPreview(notification);
+                        if (preview) Log.i(TAG, "source=image_render_entry process=" + process
+                                + " contextReady=" + (context != null) + " owned="
+                                + (context != null && WeChatNotificationAppearance.owned(context.getPackageName(), notification))
+                                + " bitmap=" + (notification.extras.getParcelable(Notification.EXTRA_PICTURE) != null)
+                                + " pictureIcon=" + (notification.extras.getParcelable(Notification.EXTRA_PICTURE_ICON) != null));
                         if (context == null || notification == null
                                 || !WeChatNotificationAppearance.owned(context.getPackageName(), notification)) return;
                         RemoteViews expanded = (RemoteViews) param.getResult();
                         if (WeChatNotificationAppearance.isMessaging(notification)) try {
-                            expanded = WeChatNotificationAppearance.withImagePreview(expanded, context.getResources(),
+                            RemoteViews withImage = WeChatNotificationAppearance.withImagePreview(expanded, context.getResources(),
                                     XposedBridge.getModuleApplicationInfo(), notification);
+                            if (preview) Log.i(TAG, "source=image_render_result process=" + process
+                                    + " viewChanged=" + (withImage != expanded));
+                            expanded = withImage;
                         } catch (Throwable failure) {
                             // Keep the original MessagingStyle text ([图片]); do not try another rendering interface.
                             fallback("message_image", failure);
