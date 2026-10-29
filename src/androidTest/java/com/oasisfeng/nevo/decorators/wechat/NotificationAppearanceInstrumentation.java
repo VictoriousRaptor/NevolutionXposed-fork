@@ -1,6 +1,7 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
 import android.app.Notification;
+import android.app.NotificationManager;
 import android.app.Instrumentation;
 import android.app.Person;
 import android.content.Context;
@@ -9,6 +10,8 @@ import android.graphics.drawable.Icon;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.RemoteViews;
+
+import com.oasisfeng.nevo.sdk.Decorating;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -108,6 +111,52 @@ final class NotificationAppearanceInstrumentation {
         check(restored.getMessages().size() == 1
                 && "Synthetic peer".contentEquals(restored.getMessages().get(0).getPerson().getName()),
                 "group sender identity changed");
+    }
+
+    static void privateTextReplacesNativeViewsFromFirstMessage(Context context) {
+        final int id = 983;
+        WeChatDecorator.Local local = new WeChatDecorator.Local("WeChatDecorator");
+        local.onCreate(context.getSharedPreferences("identity-test", Context.MODE_PRIVATE));
+        try {
+            NotificationManager manager = context.getSystemService(NotificationManager.class);
+            Icon avatar = Icon.createWithBitmap(Bitmap.createBitmap(24, 24, Bitmap.Config.ARGB_8888));
+            Notification first = privateText(context, "A", 100, avatar);
+            RemoteViews nativeCard = new RemoteViews(context.getPackageName(), android.R.layout.simple_list_item_1);
+            first.contentView = nativeCard;
+            first.bigContentView = nativeCard;
+            first.headsUpContentView = nativeCard;
+            check(Notification.Builder.recoverBuilder(context, first).createContentView().getLayoutId()
+                    == nativeCard.getLayoutId(), "synthetic first notification did not select its native card");
+            check(local.apply(manager, null, id, first) == Decorating.Processed, "first private message was not rebuilt");
+            check("android.app.Notification$MessagingStyle".equals(first.extras.getString(Notification.EXTRA_TEMPLATE)),
+                    "first private message lost MessagingStyle");
+            check(!first.extras.getBoolean("android.isGroupConversation"), "first private message became a group");
+            check(first.getLargeIcon() != null, "first private message lost its avatar");
+            check(first.contentView == null && first.bigContentView == null && first.headsUpContentView == null,
+                    "first private message kept WeChat's native card over MessagingStyle");
+            RemoteViews firstSystemView = Notification.Builder.recoverBuilder(context, first).createContentView();
+            check(firstSystemView != null && firstSystemView.getLayoutId() != nativeCard.getLayoutId(),
+                    "first private message still selected WeChat's native card");
+
+            Notification second = privateText(context, "B", 200, avatar);
+            second.contentView = nativeCard;
+            second.bigContentView = nativeCard;
+            second.headsUpContentView = nativeCard;
+            check(local.apply(manager, null, id, second) == Decorating.Processed, "next private message was not rebuilt");
+            check(second.contentView == null && second.bigContentView == null && second.headsUpContentView == null,
+                    "next private message did not use the same system layout");
+            check(!second.extras.getBoolean("android.isGroupConversation") && second.getLargeIcon() != null,
+                    "next private message changed conversation presentation");
+            RemoteViews secondSystemView = Notification.Builder.recoverBuilder(context, second).createContentView();
+            check(secondSystemView != null && secondSystemView.getLayoutId() == firstSystemView.getLayoutId(),
+                    "private message layout changed on its next update");
+        } finally { local.onDestroy(); }
+    }
+
+    private static Notification privateText(Context context, String text, long when, Icon avatar) {
+        return new Notification.Builder(context, "identity-test").setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Alice").setContentText(text).setTicker("Alice: " + text)
+                .setLargeIcon(avatar).setWhen(when).build();
     }
 
     private static Notification.Builder builder(Context context) {

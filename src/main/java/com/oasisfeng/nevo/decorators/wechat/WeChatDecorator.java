@@ -446,7 +446,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 				sLastCallType = null;
 				sLastCallTime = 0;
 			}
-			boolean replaceNativeMediaLayout = false;
 			// Keep WeChat's rich layout when its native notification only needs our reply action.
 			// Without a native reply to append, use the same conversation avatar/badge layout as text.
 			if (content != null) {
@@ -458,7 +457,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 						if (BuildConfig.DEBUG) Log.d(TAG, "Keeping native media layout with appended reply");
 						return Decorating.Unprocessed;
 					}
-					replaceNativeMediaLayout = true;
 				}
 				// 转换微信内置表情标记为 Emoji（如 [得意] -> 😎）
 				if (content.startsWith("[") && content.endsWith("]")) {
@@ -547,7 +545,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 			WeChatNotificationAppearance.mark(n);
 			NotificationMarkdown.apply(n, mMarkdownEnabled);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
-			if (replaceNativeMediaLayout) WeChatNotificationAppearance.clearNativeContentViews(n);
+			// A native text card also takes precedence over MessagingStyle on the first post.
+			WeChatNotificationAppearance.clearNativeContentViews(n);
 
 			if (extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) != null)
 				n.flags |= Notification.FLAG_ONLY_ALERT_ONCE;		// No more alert for direct-replied notification.

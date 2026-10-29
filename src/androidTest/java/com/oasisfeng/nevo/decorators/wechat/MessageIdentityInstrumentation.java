@@ -71,7 +71,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "markdownCodeStylesAndParcel", "markdownCodeSourceAndReply",
                 "markdownFrameworkCodeCleanup", "markdownRestorationScope", "markdownPartialCodeStyles",
                 "imagePreviewFitStartAndActions", "imagePreviewDiscardClearsLayout", "imagePreviewModulePackageLookupUnavailable", "imageWaitPreferenceSync",
-                "notificationNativeAvatar", "notificationAppearanceScope", "notificationCollapsedAppName" };
+                "notificationNativeAvatar", "notificationAppearanceScope", "notificationCollapsedAppName",
+                "privateTextReplacesNativeViewsFromFirstMessage" };
         Runnable[] tests = { () -> NotificationCompatibilityInstrumentation.carExtensionWithoutConversation(getTargetContext()),
                 NotificationCompatibilityInstrumentation::channelMigrationPreservesSettings,
                 this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
@@ -121,7 +122,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> com.oasisfeng.nevo.xposed.RemotePreferenceStoreInstrumentation.imageWaitSync(getTargetContext()),
                 () -> NotificationAppearanceInstrumentation.nativeAvatarAndGroupScope(getTargetContext()),
                 () -> NotificationAppearanceInstrumentation.ownershipAndPreviewMetadata(getTargetContext()),
-                () -> NotificationAppearanceInstrumentation.collapsedAppNameOnly(this) };
+                () -> NotificationAppearanceInstrumentation.collapsedAppNameOnly(this),
+                () -> NotificationAppearanceInstrumentation.privateTextReplacesNativeViewsFromFirstMessage(getTargetContext()) };
         int failures = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();

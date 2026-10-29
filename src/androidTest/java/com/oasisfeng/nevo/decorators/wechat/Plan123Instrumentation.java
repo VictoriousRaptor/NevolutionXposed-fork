@@ -340,6 +340,11 @@ final class Plan123Instrumentation {
             Notification n = car(context, nativeReply);
             n.tickerText = "Alice: [动画表情]";
             n.extras.putCharSequence(Notification.EXTRA_TEXT, "[动画表情]");
+            android.widget.RemoteViews nativeCard = new android.widget.RemoteViews(context.getPackageName(),
+                    android.R.layout.simple_list_item_1);
+            n.contentView = nativeCard;
+            n.bigContentView = nativeCard;
+            n.headsUpContentView = nativeCard;
 
             Notification.Action nonReplyAction = new Notification.Action.Builder(null, "NonReply", otherActionIntent).build();
             n.actions = new Notification.Action[]{nonReplyAction};
@@ -350,6 +355,8 @@ final class Plan123Instrumentation {
             // First apply: hits media branch
             com.oasisfeng.nevo.sdk.Decorating result = local.apply(manager, null, 912, n);
             check(result == com.oasisfeng.nevo.sdk.Decorating.Unprocessed, "animated sticker did not return Unprocessed");
+            check(n.contentView == nativeCard && n.bigContentView == nativeCard && n.headsUpContentView == nativeCard,
+                    "native media reply lost WeChat's own layout");
             check("[动画表情]".contentEquals(n.extras.getCharSequence(Notification.EXTRA_TEXT)), "text changed on first apply");
             check(countFreeFormReplyActions(n) == 1, "free form reply action count != 1 on first apply");
             check(n.actions != null && n.actions.length == 2, "actions length != 2 on first apply");
