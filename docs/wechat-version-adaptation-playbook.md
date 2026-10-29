@@ -1,12 +1,20 @@
 # 微信版本适配手册
 
-## 2026-10-28 同版本名不同 versionCode 的实验性签名探测（实施中）
+## 2026-10-28 同版本名不同 versionCode 的实验性签名探测（3183 待验）
 
 微信主进程 `Application.onCreate(): void` AFTER 首次初始化时，通知栏合成回复及通知原生 Emoji 保留各自按已知 `versionName` 取候选；已知精确 `versionName && versionCode` 组合优先。未知代码只探测**同版本名**候选，完整签名唯一命中后才标记 `experimental` 并安装该功能的 hook；零命中或 8.0.77 多候选歧义均不启用实验性画像。回复原有 8.0.72/8.0.78 的名称**或**代码匹配和 legacy 回退继续保留，原生 `PendingIntent` 回复与不依赖微信混淆布局的 framework 外观仍独立工作。图片事件、大图下载、应用内回复、撤回均已分别接入独立的同版本名完整签名探测，不能从回复或 Emoji 通过推断其他组件可用。
 
 回复完整预检包括 `MMAutoMessageReplyReceiver` 继承 `BroadcastReceiver` 及实例 `onReceive(Context, Intent): void`、`z2.s1.b(Intent): Bundle` 静态方法、对应画像中三道无参数静态 `boolean` 车载门禁。门禁批量安装期间回调保持惰性，任一 hook 失败就撤销已装句柄且关闭合成入口；`profile_ready` 仅表示签名解析，须门禁安装完成才允许合成动作。Emoji 仅有 8.0.79/3182 画像；探测 `com.tencent.mm.smiley.g.d(String): String` 和 `com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9,long,boolean,boolean,String,int,String,String,Intent,boolean): void` 两个实例非 abstract 方法。直接调用者取消优化成功后才激活，微信通知增强及 `WeChatDecorator.preserve_emoji` 仍在回调时实时读取，默认关闭。诊断只记录版本、画像、`exact`/`experimental`、`no_match`/`ambiguous`、阶段及异常类型，不记录消息或身份。
 
-候选正缓存按功能、版本名、长版本码、微信更新时间及画像修订版存入模块私有 `wechat_profile_candidates` 偏好组，新进程读取候选后仍复核完整签名。libxposed API 102 的 `getRemotePreferences()` 在被 hook 应用中只读，因此微信主进程通过模块自有 `ContentProvider.call()` 读写候选 ID；provider 用 Binder 调用 UID 核对微信或模块自身，只接受有界的缓存协议，写入须同步提交。IPC 失败只影响跨进程复用，本次完整签名探测可继续；日志按 `read`、`write`、`remove` 阶段及异常类型区分，不能把失败写入称为缓存成功。主机测试验证协议约束与共用存储的新实例复用；provider 在真实微信进程中的可达性、跨启动持久性及 Xposed 注入尚未实测。8.0.79/3183 没有提供 APK，来源、SHA-256 和反编译位置均未知；本阶段不具备该目标的离线字节码、真实 hook 安装、回复送达、Emoji 展示或 OEM 行为证据。回归须分别覆盖精确优先、3183 唯一签名、8.0.77 歧义、错误 helper/门禁、部分安装失败、原生回复和 Emoji 运行中开关，再在取得 APK 与授权设备后逐层验证。
+候选正缓存按功能、版本名、长版本码、微信更新时间及画像修订版存入**微信应用自身私有**的 `wechat_profile_candidates` 偏好组，只保存候选画像 ID，不保存消息或身份。注入代码可在微信主进程同步提交；下一次微信进程启动命中缓存时，仍对该组件重新校验完整运行时签名，不把缓存当作 hook 成功。打开偏好组失败时记录 `stage=open type=...` 并使用不可写的空缓存；读写失败只影响跨进程复用，当前进程仍可完成现场探测。精确版本优先、歧义关闭和各功能独立门禁不变。libxposed API 102 的 `getRemotePreferences()` 在被 hook 应用中只读，无法用于此处写入。
+
+2026-10-28 至 29 日在 Android API 36、微信 8.0.79/3200 的已授权测试中，模块 provider 在微信进程报 `Unknown authority`；显式广播引导 Binder 已入队却长期未分发，前台优先广播仍超时；显式服务绑定立即返回 `false`。这些试验版本均未确认持久化，相关 IPC 入口已从最终代码移除。改用微信私有偏好后，首次启动日志出现 `stage=candidate_persisted feature=emoji`，下一次进程启动出现 `stage=cache_revalidated feature=emoji`。这证明 3200 上该候选的写入、读取和再次完整签名复核；不证明 Emoji 已实际显示，也不能推广至 3183 或其他功能。
+
+`candidate_persisted` 只在同步提交成功后记录，`cache_revalidated` 只在缓存候选再次完整签名通过后记录；日志仅带功能名，不输出缓存键、版本更新时间、账号或消息。主机测试覆盖独立选择会话复核、构建键隔离和提交失败；设备回归仍须分别检查回复、Emoji、图片事件/下载、应用内回复、撤回的 hook 安装及真实功能行为。离线源码、测试构建、运行时 hook 安装与真实设备效果分别记录。
+
+2026-10-29 最终签名 Debug 构建通过 249 项主机测试；模块 APK 与测试 APK 均匹配既有 release 证书，手机安装包回拉 SHA-256 与本地最终 APK 一致，独立测试包已确认不存在。API 36、微信 8.0.79/3200 的微信主进程日志显示：Emoji `emoji_hook_ready match=experimental`，缓存 `cache_revalidated`；framework 头像、折叠头、展开头分别 `*_hook_ready`。合成回复 `profile_rejected match=no_match`，应用内回复、撤回、图片事件和大图下载分别 `no_match` 并关闭；Markdown 代码样式因 `NoSuchMethodException` 关闭。SystemUI 尚需在最终 APK 安装后重新启动才能核对该进程的本次 hook；上述 ready 均未执行真实消息、回复、图片下载、撤回或通知视觉验收。
+
+8.0.79/3183 没有提供 APK，来源、SHA-256 和反编译位置均未知；本阶段不具备该目标的离线字节码、真实 hook 安装、回复送达、Emoji 展示或 OEM 行为证据。回归须分别覆盖精确优先、3183 唯一签名、8.0.77 歧义、错误 helper/门禁、部分安装失败、原生回复和 Emoji 运行中开关，再在取得 APK 与授权设备后逐层验证。
 
 应用内回复与撤回现在各自使用同名候选和完整描述符预检：已列出的名称**且**代码组合仍精确优先；同名未知代码只有该组件唯一签名通过才标为 `experimental`，零命中或多候选通过分别记录 `no_match` / `ambiguous` 并关闭该组件。应用内回复核对消息类、本类状态更新覆盖、发送方向/状态/会话、消息 ID/时间和三个排除方法的精确实例签名；撤回核对 `NotificationItem`、事件直接父类、payload 字段类型、服务端 ID/会话 accessor，并在两个 BEFORE hook 全部安装前保持回调惰性。任一安装失败只关闭相应组件，不影响原生回复、另一事件组件或图片开关。日志为 `app_reply_ready` / `recall_ready`，包含画像和 `exact` / `experimental`；失败记录原因、阶段和异常类型。主机合成类型测试与构建不能证明未知代码的字段语义、事件时序或真实撤回裁剪；3183 APK 和运行时证据仍缺失。
 
@@ -666,8 +674,8 @@ adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oa
 大图组件独立解析 static kernel/service getter、唯一非 static 数据库字段、实例 query、
 service base 与 service/implementation、download interface 与 implementation 的继承关系、
 实例下载 getter、完整 `b(...) : int`、非抽象 `MsgIdTalker(long,String)`、callback interface 和 static WXGF decoder。探测只做反射，
-不构造消息对、不查询数据、不获取服务、不触发下载或更改通知。候选正缓存通过模块
-provider 持久化，并在每个新进程重验；缓存不可用时仍执行现场签名探测。
+不构造消息对、不查询数据、不获取服务、不触发下载或更改通知。候选正缓存写入
+微信应用自身私有偏好，并在每个新进程重验；缓存不可用时仍执行现场签名探测。
 
 现有图片预览和大图开关继续分别控制安装；本地图片优先、缩略图和等待超时回退保持不变。
 失败诊断保留 `events_unavailable` / `large_unavailable` 与原因或 stage/type。
@@ -682,3 +690,5 @@ provider 持久化，并在每个新进程重验；缓存不可用时仍执行�
 `Application.onCreate(): void` AFTER 的初始化只有在该画像接收器 hook 成功且三道门禁全部安装成功后，`MainHook.isSyntheticReplyAvailable()` 才返回 true；接收器 hook 失败保留 `hookAutoReplyReceiver failed` 诊断并关闭合成动作，不能仅凭 `profile_ready` 或门禁 ready 判为可用。原生 `PendingIntent` 回复独立于上述条件，现有聊天、会话 key、contentIntent 和功能开关条件继续生效；应用内回复、图片和撤回也各自独立。版本名与代码的既有精确/OR/legacy 规则以及同名未知代码唯一匹配规则不变。
 
 主机回归覆盖 receiver hook 未成功而门禁已 ready、成功状态恢复，以及 abstract、无无参构造、private 无参构造和非 public 接收器的拒绝；覆盖构造与安装门禁不代表消息已送达。3183 仍无 APK 来源、SHA-256 或反编译证据，本轮未安装设备、未验证运行时 hook、真实回复或 OEM 展示。
+
+2026-10-28 试验性 IPC 版本的设备 instrumentation 为 4/70；大量旧用例因测试 APK 与目标 APK 跨类加载器的 package-private `IllegalAccessError` 失败。单独修正后的接收器故障注入用例为 1/1 通过，但只证明直接调用的异常保护。该 IPC 路径已移除，这些结果不能当作当前画像缓存或真实微信行为验收。当前缓存的设备证据见本手册开头；完整 framework instrumentation 仍需使用最终 APK 重新运行，测试包必须在 finally 卸载并核验。

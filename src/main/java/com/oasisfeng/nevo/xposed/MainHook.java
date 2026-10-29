@@ -27,7 +27,7 @@ import com.oasisfeng.nevo.decorators.wechat.WeChatDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatNotificationRemoval;
 import com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile;
 import com.oasisfeng.nevo.decorators.wechat.WeChatEmojiHooks;
-import com.oasisfeng.nevo.decorators.wechat.WeChatProfileCacheClient;
+import com.oasisfeng.nevo.decorators.wechat.WeChatProfileCache;
 import com.oasisfeng.nevo.decorators.wechat.WeChatProfileSelector;
 import com.oasisfeng.nevo.decorators.wechat.NotificationMarkdownHooks;
 import com.oasisfeng.nevo.decorators.wechat.NotificationAppearanceHooks;
@@ -57,6 +57,17 @@ public class MainHook extends XposedModule {
 	private static volatile com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile.Resolved sReplyProfile = null;
 	/** Gate callbacks are inert until the whole batch has been installed. */
 	private static final WeChatReplyProfile.GateBatch sCarModeGates = new WeChatReplyProfile.GateBatch();
+	private static final WeChatProfileSelector.Cache NO_PROFILE_CACHE = new WeChatProfileSelector.Cache() {
+		@Override public String read(String feature, WeChatProfileSelector.BuildId build, int revision) {
+			throw new IllegalStateException("Profile cache unavailable");
+		}
+		@Override public void write(String feature, WeChatProfileSelector.BuildId build, int revision, String id) {
+			throw new IllegalStateException("Profile cache unavailable");
+		}
+		@Override public void remove(String feature, WeChatProfileSelector.BuildId build, int revision) {
+			throw new IllegalStateException("Profile cache unavailable");
+		}
+	};
 	private static WeChatProfileSelector.Cache sProfileCache;
 	/** A rejected profile is retried, but never more often than this. */
 	private static final long PROFILE_RETRY_INTERVAL_MS = 5_000L;
@@ -322,7 +333,13 @@ public class MainHook extends XposedModule {
 					if (context != null && ref.compareAndSet(null, context)) {
 						if (BuildConfig.DEBUG) Log.d(TAG, "Application.onCreate context=" + context);
 						NevoDecoratorService.setAppContext(context);
-						sProfileCache = new WeChatProfileCacheClient(context);
+						try {
+							sProfileCache = new WeChatProfileCache(context.getSharedPreferences(
+									WeChatProfileCache.GROUP, Context.MODE_PRIVATE));
+						} catch (RuntimeException failure) {
+							sProfileCache = NO_PROFILE_CACHE;
+							Log.w("WeChat.ProfileCache", "stage=open type=" + failure.getClass().getSimpleName());
+						}
 						WeChatEmojiHooks.install(context, loadPackageParam.classLoader,
 								() -> pref.getBoolean("WeChatDecorator.enabled", true)
 										&& pref.getBoolean(RemotePreferenceStore.KEY_PRESERVE_EMOJI, false),

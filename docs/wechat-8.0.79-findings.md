@@ -31,7 +31,9 @@ Android 17 真机、微信 8.0.79/3182、模块通知增强与 Markdown 开启�
 
 3182 精确画像继续要求版本名 **8.0.79 且 versionCode 3182**。3183 无安装包，来源、SHA-256、反编译位置及目标构建的原始混淆名未知；这里只让运行时独立尝试沿用本文件已核对的 3182 候选，绝不宣称 3183 布局相同。合成回复要求 `MMAutoMessageReplyReceiver.onReceive(Context, Intent): void`、静态 `z2.s1.b(Intent): Bundle`、`lt1.a.c()/d()/b(): boolean` 三个静态门禁完整通过，且三道门禁 hook 全部安装成功；失败时只保留原生 `PendingIntent` 与既有 legacy 回退。Emoji 独立要求实例非 abstract `com.tencent.mm.smiley.g.d(String): String` 与 `com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9,long,boolean,boolean,String,int,String,String,Intent,boolean): void` 两个完整签名和直接调用者取消优化成功；开关仍实时读取。其他图片、应用内回复、撤回需各自完成探测，不能借用这两项结果。
 
-日志把新代码标为 `experimental`，`ready` 只表示当前进程 hook 安装，绝非真实回复或 Emoji 显示验收。主机测试覆盖合成类型和失败回退；本轮没有 3183 APK 的离线核对、运行时注入或真机消息/OEM 检验。候选正缓存由微信进程通过模块 `ContentProvider.call()` 读写模块私有偏好；provider 按调用 UID 限定微信/模块自身并同步提交，只存画像 ID。主机测试只证明代码层的新实例复用和输入约束，真实跨微信进程启动的 provider 可达性与持久性尚未验证。
+日志把新代码标为 `experimental`，`ready` 只表示当前进程 hook 安装，绝非真实回复或 Emoji 显示验收。主机测试覆盖合成类型和失败回退；3183 仍无 APK 的离线核对、运行时注入或真机消息/OEM 检验。2026-10-28 至 29 日 API 36、8.0.79/3200 的真机试验确认旧模块 provider 报 `Unknown authority`，显式广播引导 Binder 长期排队，显式服务绑定返回 `false`；这些跨进程入口已从最终代码移除。当前候选缓存仅在微信应用自身私有偏好中同步保存画像 ID，键包含功能、版本名、长版本码、更新时间及画像修订版。3200 首次运行记录 `candidate_persisted feature=emoji`，下次微信进程启动记录 `cache_revalidated feature=emoji`，证明该候选的缓存读取和完整签名再次通过。两项日志不代表 hook 安装或 Emoji 实际显示；回复、图片、应用内回复、撤回门禁及运行时验证仍独立。
+
+2026-10-29 最终签名 Debug 版在 8.0.79/3200 的微信主进程记录 `emoji_hook_ready match=experimental`；合成回复、应用内回复、撤回、图片事件和大图下载均因各自 `no_match` 关闭。framework 头像、折叠头和展开头 hook 均 ready；Markdown 代码样式目标因 `NoSuchMethodException` 不可用。最终版 249 项主机测试通过，安装包回拉哈希一致，测试包不存在。3200 的这些日志仅证明对应 hook 安装或保守门禁；没有真实消息、回复、图片、撤回和通知显示验收，3183 也未获 APK。
 
 更新日期：2026-10-16。模块版本：3.2.1 / code 14。
 
@@ -268,3 +270,5 @@ provider 持久化，并在每个新进程重验；缓存不可用时仍执行�
 `Application.onCreate(): void` AFTER 的初始化只有在该画像接收器 hook 成功且三道门禁全部安装成功后，`MainHook.isSyntheticReplyAvailable()` 才返回 true；接收器 hook 失败保留 `hookAutoReplyReceiver failed` 诊断并关闭合成动作，不能仅凭 `profile_ready` 或门禁 ready 判为可用。原生 `PendingIntent` 回复独立于上述条件，现有聊天、会话 key、contentIntent 和功能开关条件继续生效；应用内回复、图片和撤回也各自独立。版本名与代码的既有精确/OR/legacy 规则以及同名未知代码唯一匹配规则不变。
 
 主机回归覆盖 receiver hook 未成功而门禁已 ready、成功状态恢复，以及 abstract、无无参构造、private 无参构造和非 public 接收器的拒绝；覆盖构造与安装门禁不代表消息已送达。3183 仍无 APK 来源、SHA-256 或反编译证据，本轮未安装设备、未验证运行时 hook、真实回复或 OEM 展示。
+
+2026-10-28 试验性 IPC 版本的设备 instrumentation 为 4/70，大量旧用例因测试 APK 与目标 APK 跨类加载器的 package-private `IllegalAccessError` 失败；单独修正后的接收器故障注入为 1/1 通过。该 IPC 路径已移除，这些数字不代表当前缓存实现的验收。3200 当前实现的首次持久化及下次进程复核由上述运行时日志单独确认；3183 仍待取得 APK 和对应真机证据。

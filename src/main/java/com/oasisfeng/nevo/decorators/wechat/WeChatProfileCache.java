@@ -3,11 +3,11 @@ package com.oasisfeng.nevo.decorators.wechat;
 import android.content.SharedPreferences;
 import java.util.Objects;
 
-/** Stores candidate IDs in the module app's private preference group, never in WeChat storage. */
+/** Stores non-sensitive candidate IDs in the hooked WeChat app's private preference group. */
 public final class WeChatProfileCache implements WeChatProfileSelector.Cache {
     public static final String GROUP = "wechat_profile_candidates";
     private final SharedPreferences preferences;
-    /** Caller supplies writable module-owned preferences for {@link #GROUP}. */
+    /** Caller supplies writable preferences from the hooked WeChat application for {@link #GROUP}. */
     public WeChatProfileCache(SharedPreferences preferences) { this.preferences = Objects.requireNonNull(preferences); }
     @Override public String read(String feature, WeChatProfileSelector.BuildId build, int revision) {
         return preferences.getString(WeChatProfileSelector.cacheKey(feature, build, revision), null);

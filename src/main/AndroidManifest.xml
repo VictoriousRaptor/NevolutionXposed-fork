@@ -17,10 +17,6 @@
 		android:roundIcon="@mipmap/ic_launcher_round"
 		android:supportsRtl="true"
 		android:theme="@style/AppTheme">
-		<provider
-			android:name="com.oasisfeng.nevo.decorators.wechat.WeChatProfileCacheProvider"
-			android:authorities="${applicationId}.profilecache"
-			android:exported="true" />
 		<activity
 			android:name=".MainActivity"
 			android:enabled="true"

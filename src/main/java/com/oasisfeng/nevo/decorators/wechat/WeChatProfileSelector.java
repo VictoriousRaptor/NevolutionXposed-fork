@@ -72,7 +72,10 @@ public final class WeChatProfileSelector {
         if (cached != null) {
             for (Candidate<P> candidate : candidates)
                 if (candidate.id.equals(cached) && candidate.versionName.equals(build.versionName)
-                        && valid(probe, candidate)) return new Selection<>(candidate, MatchKind.EXPERIMENTAL);
+                        && valid(probe, candidate)) {
+                    diagnostic("cache_revalidated", feature);
+                    return new Selection<>(candidate, MatchKind.EXPERIMENTAL);
+                }
             try { cache.remove(feature, build, revision); } catch (RuntimeException ignored) { }
         }
         Candidate<P> matched = null;
@@ -82,11 +85,18 @@ public final class WeChatProfileSelector {
             matched = candidate;
         }
         if (matched == null) return new Selection<>(null, MatchKind.NO_MATCH);
-        try { cache.write(feature, build, revision, matched.id); } catch (RuntimeException ignored) { }
+        try {
+            cache.write(feature, build, revision, matched.id);
+            diagnostic("candidate_persisted", feature);
+        } catch (RuntimeException ignored) { }
         return new Selection<>(matched, MatchKind.EXPERIMENTAL);
     }
     private static <P> boolean valid(Probe<P> probe, Candidate<P> candidate) {
         try { return probe.valid(candidate.profile); } catch (Throwable ignored) { return false; }
+    }
+    private static void diagnostic(String stage, String feature) {
+        try { android.util.Log.i("WeChat.ProfileCache", "stage=" + stage + " feature=" + feature); }
+        catch (RuntimeException ignored) { }
     }
     static String cacheKey(String feature, BuildId build, int revision) {
         String name = build.versionName;
