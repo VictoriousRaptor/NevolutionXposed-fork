@@ -51,6 +51,12 @@ public final class WeChatReplyProfile {
 	private static final WeChatReplyProfile RELEASE_8_0_79_3182 = new WeChatReplyProfile(
 			"wechat-8.0.79/3182", new String[] { RECEIVER_CLASS }, new String[] { "z2.s1" },
 			new String[] { "lt1.a" }, new String[] { "c", "d", "b" });
+	private static final WeChatReplyProfile RELEASE_8_0_79_3183 = new WeChatReplyProfile(
+			"wechat-8.0.79/3183", new String[] { RECEIVER_CLASS }, new String[] { "z2.s1" },
+			new String[] { "lt1.a" }, new String[] { "c", "d", "b" });
+	private static final WeChatReplyProfile RELEASE_8_0_79_3200 = new WeChatReplyProfile(
+			"wechat-8.0.79/3200", new String[] { RECEIVER_CLASS }, new String[] { "z2.s1" },
+			new String[] { "os1.a" }, new String[] { "c", "d", "b" });
 
 	/** Device APK-verified 8.0.77/3141; distinct from the supplied 3160 build. */
 	private static final WeChatReplyProfile RELEASE_8_0_77_3141 = new WeChatReplyProfile(
@@ -91,6 +97,9 @@ public final class WeChatReplyProfile {
 	public static List<WeChatProfileSelector.Candidate<WeChatReplyProfile>> candidates() {
 		return Arrays.asList(
 				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_79_3182.label, "8.0.79", 3182L, RELEASE_8_0_79_3182),
+				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_79_3183.label, "8.0.79", 3183L,
+						RELEASE_8_0_79_3183, RELEASE_8_0_79_3182.label),
+				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_79_3200.label, "8.0.79", 3200L, RELEASE_8_0_79_3200),
 				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_77_3141.label, "8.0.77", 3141L, RELEASE_8_0_77_3141),
 				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_77.label, "8.0.77", 3160L, RELEASE_8_0_77),
 				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_78.label, "8.0.78", 3180L, RELEASE_8_0_78),
@@ -114,7 +123,9 @@ public final class WeChatReplyProfile {
 
 	public static WeChatReplyProfile forPackage(String versionName, long versionCode) {
 		if ("8.0.79".equals(versionName) && versionCode == 3182L) return RELEASE_8_0_79_3182;
-		if ("8.0.79".equals(versionName) || versionCode == 3182L) return LEGACY;
+		if ("8.0.79".equals(versionName) && versionCode == 3183L) return RELEASE_8_0_79_3183;
+		if ("8.0.79".equals(versionName) && versionCode == 3200L) return RELEASE_8_0_79_3200;
+		if ("8.0.79".equals(versionName) || versionCode == 3182L || versionCode == 3183L || versionCode == 3200L) return LEGACY;
 		if ("8.0.77".equals(versionName) && versionCode == 3141L) return RELEASE_8_0_77_3141;
 		if ("8.0.77".equals(versionName) && versionCode == 3160L) return RELEASE_8_0_77;
 		// Other 8.0.77 builds must not reuse a different build's obfuscated layout.

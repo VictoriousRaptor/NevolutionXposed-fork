@@ -9,8 +9,8 @@ public class WeChatAppReplyEventsProfileTest {
     private static final WeChatProfileSelector.BuildId UNKNOWN_79 =
             new WeChatProfileSelector.BuildId("8.0.79", 3183, 100);
 
-    @Test public void unknown3183RequiresCompleteResolvedMessage() {
-        assertEquals(WeChatProfileSelector.MatchKind.EXPERIMENTAL,
+    @Test public void build3183RequiresCompleteResolvedMessage() {
+        assertEquals(WeChatProfileSelector.MatchKind.EXACT,
                 select(UNKNOWN_79, Valid79.class).kind);
         assertEquals(WeChatProfileSelector.MatchKind.NO_MATCH,
                 select(UNKNOWN_79, BadStatus79.class).kind);

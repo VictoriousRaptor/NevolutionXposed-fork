@@ -27,6 +27,20 @@ final class WeChatImageProfile {
                     new String[]{"com.tencent.mm.storage.e9", "N0", "C0", "I0"},
                     new String[]{"pq0.i1", "pq0.a0", "lh5.k0", "x", "f", "kj5.n0", "kj5.m",
                             "eb0.y", "db0.e", "Bj", "eb0.x", "v61.j", "eb0.w"});
+        if ("8.0.79".equals(name) && code == 3183)
+            return new WeChatImageProfile("8.0.79/3183",
+                    new String[]{"gh5.z", "lr3.f", "sb0.l", "jh5.b", "h61.e", "gb0.d",
+                            "v61.l0", "I3", "com.tencent.mm.vfs.z6", "f"},
+                    new String[]{"com.tencent.mm.storage.e9", "N0", "C0", "I0"},
+                    new String[]{"pq0.i1", "pq0.a0", "lh5.k0", "x", "f", "kj5.n0", "kj5.m",
+                            "eb0.y", "db0.e", "Bj", "eb0.x", "v61.j", "eb0.w"});
+        if ("8.0.79".equals(name) && code == 3200)
+            return new WeChatImageProfile("8.0.79/3200",
+                    new String[]{"jg5.z", "oq3.f", "sa0.l", "mg5.b", "h51.e", "ga0.d",
+                            "v51.l0", "s4", "com.tencent.mm.vfs.z6", "f"},
+                    new String[]{"com.tencent.mm.storage.e9", "N0", "z0", "H0"},
+                    new String[]{"pp0.i1", "pp0.a0", "og5.k0", "x", "f", "ni5.n0", "ni5.m",
+                            "ea0.y", "da0.e", "Bj", "ea0.x", "v51.j", "ea0.w"});
         if ("8.0.72".equals(name) && code == 3085)
             return new WeChatImageProfile("8.0.72/3085",
                     new String[]{"v65.z", "yh3.f", "b80.m", "y65.b", "x01.e", "p70.d",
@@ -51,10 +65,13 @@ final class WeChatImageProfile {
         return null;
     }
     static final java.util.List<WeChatProfileSelector.Candidate<WeChatImageProfile>> CANDIDATES =
-            java.util.Arrays.asList(candidate("8.0.79",3182), candidate("8.0.72",3085),
+            java.util.Arrays.asList(candidate("8.0.79",3182), candidate("8.0.79",3183),
+                    candidate("8.0.79",3200), candidate("8.0.72",3085),
                     candidate("8.0.77",3160), candidate("8.0.77",3141));
     private static WeChatProfileSelector.Candidate<WeChatImageProfile> candidate(String name, long code) {
-        return new WeChatProfileSelector.Candidate<>("image-" + name + "/" + code,name,code,forVersion(name,code));
+        String id = "image-" + name + "/" + code;
+        return new WeChatProfileSelector.Candidate<>(id,name,code,forVersion(name,code),
+                code == 3183 ? "image-8.0.79/3182" : id);
     }
 
 }

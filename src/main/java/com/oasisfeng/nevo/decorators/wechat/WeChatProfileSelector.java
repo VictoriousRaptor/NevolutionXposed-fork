@@ -3,9 +3,11 @@ package com.oasisfeng.nevo.decorators.wechat;
 import android.content.pm.PackageInfo;
 import android.os.Build;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** Per-process selection session. Each feature must consistently use one profile type and candidate list. */
 public final class WeChatProfileSelector {
@@ -22,12 +24,16 @@ public final class WeChatProfileSelector {
         }
     }
     public static final class Candidate<P> {
-        public final String id, versionName;
+        public final String id, versionName, probeGroup;
         public final long verifiedCode;
         public final P profile;
         public Candidate(String id, String versionName, long verifiedCode, P profile) {
+            this(id, versionName, verifiedCode, profile, id);
+        }
+        public Candidate(String id, String versionName, long verifiedCode, P profile, String probeGroup) {
             this.id = Objects.requireNonNull(id); this.versionName = Objects.requireNonNull(versionName);
             this.verifiedCode = verifiedCode; this.profile = Objects.requireNonNull(profile);
+            this.probeGroup = Objects.requireNonNull(probeGroup);
         }
     }
     public interface Probe<P> { boolean valid(P profile) throws Throwable; }
@@ -79,8 +85,10 @@ public final class WeChatProfileSelector {
             try { cache.remove(feature, build, revision); } catch (RuntimeException ignored) { }
         }
         Candidate<P> matched = null;
+        Set<String> probed = new HashSet<>();
         for (Candidate<P> candidate : candidates) {
-            if (!candidate.versionName.equals(build.versionName) || !valid(probe, candidate)) continue;
+            if (!candidate.versionName.equals(build.versionName) || !probed.add(candidate.probeGroup)
+                    || !valid(probe, candidate)) continue;
             if (matched != null) return new Selection<>(null, MatchKind.AMBIGUOUS);
             matched = candidate;
         }

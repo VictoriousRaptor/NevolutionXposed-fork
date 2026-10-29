@@ -25,17 +25,25 @@ public final class WeChatEmojiHooks {
     private WeChatEmojiHooks() {}
 
     static boolean supports(String versionName, long versionCode) {
-        return "8.0.79".equals(versionName) && versionCode == 3182;
+        return "8.0.79".equals(versionName)
+                && (versionCode == 3182 || versionCode == 3183 || versionCode == 3200);
     }
 
-    private static final WeChatProfileSelector.Candidate<String> PROFILE =
+    private static final WeChatProfileSelector.Candidate<String> PROFILE_3182 =
             new WeChatProfileSelector.Candidate<>("emoji-8.0.79/3182", "8.0.79", 3182, "8.0.79/3182");
+    private static final WeChatProfileSelector.Candidate<String> PROFILE_3183 =
+            new WeChatProfileSelector.Candidate<>("emoji-8.0.79/3183", "8.0.79", 3183, "8.0.79/3183");
+    private static final WeChatProfileSelector.Candidate<String> PROFILE_3200 =
+            new WeChatProfileSelector.Candidate<>("emoji-8.0.79/3200", "8.0.79", 3200, "8.0.79/3200");
 
     /** The candidate is accepted only after both methods have been checked in full. */
     static boolean selectCandidate(WeChatProfileSelector.BuildId build, WeChatProfileSelector selector,
                                    WeChatProfileSelector.Cache cache, Class<?> emoji, Class<?> notifications,
                                    Class<?> message) {
-        return selector.select("emoji", build, Collections.singletonList(PROFILE), profile -> {
+        // The three APKs share this complete descriptor. Probe it once for a later unknown code.
+        WeChatProfileSelector.Candidate<String> candidate = build.versionCode == 3183 ? PROFILE_3183
+                : build.versionCode == 3200 ? PROFILE_3200 : PROFILE_3182;
+        return selector.select("emoji", build, Collections.singletonList(candidate), profile -> {
             resolve(emoji, notifications, message);
             return true;
         }, cache).profile != null;

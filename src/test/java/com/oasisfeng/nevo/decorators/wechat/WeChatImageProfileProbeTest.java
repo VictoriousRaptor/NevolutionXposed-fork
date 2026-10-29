@@ -2,10 +2,24 @@ package com.oasisfeng.nevo.decorators.wechat;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public class WeChatImageProfileProbeTest {
+    @Test public void build3200ResolvesCompleteImageEvents() throws Exception {
+        WeChatImageProfile profile = WeChatImageProfile.forVersion("8.0.79", 3200);
+        assertEquals("sa0.l", profile.flow);
+        WeChatImageEvents.Resolved resolved = WeChatImageEvents.resolve(profile,
+                name -> eventClassFor(profile, name));
+        assertNotNull(resolved.initial);
+        java.util.List<java.lang.reflect.Method> hooked = new java.util.ArrayList<>();
+        WeChatImageEvents events = new WeChatImageEvents();
+        assertTrue(events.installResolved(resolved, (method, callback) -> hooked.add(method)));
+        assertEquals(5, hooked.size());
+        assertTrue(hooked.contains(resolved.serverId));
+        assertTrue(hooked.contains(resolved.pathMethod));
+        assertNotNull(WeChatImageDownloader.resolve(profile, name -> downloadClassFor(profile, name)));
+    }
     @Test public void independentSameNameChoicesAndExactPriority() {
         WeChatProfileSelector selector = new WeChatProfileSelector(1);
         WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId("8.0.79",3183,100);
-        assertEquals(WeChatProfileSelector.MatchKind.EXPERIMENTAL,
+        assertEquals(WeChatProfileSelector.MatchKind.EXACT,
             selector.select("image_events",build,WeChatImageProfile.CANDIDATES,p -> true,null).kind);
         assertEquals(WeChatProfileSelector.MatchKind.NO_MATCH,
             selector.select("image_download",build,WeChatImageProfile.CANDIDATES,p -> false,null).kind);
@@ -24,9 +38,9 @@ public class WeChatImageProfileProbeTest {
     @Test public void actual3183DescriptorsSelectEachComponentIndependently() {
         WeChatProfileSelector.BuildId build = new WeChatProfileSelector.BuildId("8.0.79",3183,100);
         WeChatProfileSelector selector = new WeChatProfileSelector(1);
-        assertEquals(WeChatProfileSelector.MatchKind.EXPERIMENTAL, selector.select("image_events",build,
+        assertEquals(WeChatProfileSelector.MatchKind.EXACT, selector.select("image_events",build,
             WeChatImageProfile.CANDIDATES,p -> WeChatImageEvents.resolve(p,WeChatImageProfileProbeTest::eventClass) != null,null).kind);
-        assertEquals(WeChatProfileSelector.MatchKind.EXPERIMENTAL, selector.select("image_download",build,
+        assertEquals(WeChatProfileSelector.MatchKind.EXACT, selector.select("image_download",build,
             WeChatImageProfile.CANDIDATES,p -> WeChatImageDownloader.resolve(p,WeChatImageProfileProbeTest::downloadClass) != null,null).kind);
         assertEquals(WeChatProfileSelector.MatchKind.NO_MATCH, new WeChatProfileSelector(1).select("image_download",build,
             WeChatImageProfile.CANDIDATES,p -> WeChatImageDownloader.resolve(p,name -> name.equals(profile().download)
@@ -98,6 +112,8 @@ public class WeChatImageProfileProbeTest {
         public String N0() { throw new AssertionError(); }
         public int C0() { throw new AssertionError(); }
         public long I0() { throw new AssertionError(); }
+        public int z0() { throw new AssertionError(); }
+        public long H0() { throw new AssertionError(); }
         public long getMsgId() { throw new AssertionError(); }
         public long getCreateTime() { throw new AssertionError(); }
         public int getType() { throw new AssertionError(); }
@@ -108,7 +124,7 @@ public class WeChatImageProfileProbeTest {
         public Result handleDataFromRemote(State state,Remote remote) { throw new AssertionError(); }
         public Result handleDataFromFile(State state,Local local) { throw new AssertionError(); }
     }
-    public static class Paths { public String N2(Message msg,String path,boolean flag) { throw new AssertionError(); } public String d3(Message msg,String path,boolean flag) { throw new AssertionError(); } public String I3(Message msg,String path,boolean flag) { throw new AssertionError(); } }
+    public static class Paths { public String N2(Message msg,String path,boolean flag) { throw new AssertionError(); } public String d3(Message msg,String path,boolean flag) { throw new AssertionError(); } public String I3(Message msg,String path,boolean flag) { throw new AssertionError(); } public String s4(Message msg,String path,boolean flag) { throw new AssertionError(); } }
     public static class Vfs { public static String i(String path,boolean flag) { throw new AssertionError(); } }
 
     static Class<?> downloadClass(String name) throws ClassNotFoundException {

@@ -16,8 +16,8 @@ public class WeChatRecallEventsProfileTest {
     private static final WeChatProfileSelector.BuildId UNKNOWN_79 =
             new WeChatProfileSelector.BuildId("8.0.79", 3183, 100);
 
-    @Test public void unknown3183RequiresFullRecallDescriptorGraph() {
-        assertEquals(WeChatProfileSelector.MatchKind.EXPERIMENTAL,
+    @Test public void build3183RequiresFullRecallDescriptorGraph() {
+        assertEquals(WeChatProfileSelector.MatchKind.EXACT,
                 select(UNKNOWN_79, NotificationItem.class, Revoke79.class, Payload79.class, Message79.class).kind);
         assertEquals(WeChatProfileSelector.MatchKind.NO_MATCH,
                 select(UNKNOWN_79, BadNotificationItem.class, Revoke79.class, Payload79.class, Message79.class).kind);

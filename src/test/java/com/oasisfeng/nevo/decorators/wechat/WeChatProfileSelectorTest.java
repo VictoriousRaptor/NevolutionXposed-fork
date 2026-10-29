@@ -26,6 +26,19 @@ public class WeChatProfileSelectorTest {
         Selection<String> result = selector().select("reply", build("8.0.79", 3183), candidates, p -> true, cache);
         assertEquals(MatchKind.EXPERIMENTAL, result.kind); assertEquals("79", result.id);
     }
+    @Test public void identicalVerifiedLayoutsAreProbedOnceForUnknownBuild() {
+        List<Candidate<String>> profiles = Arrays.asList(
+                new Candidate<>("3182", "8.0.79", 3182, "old", "old-layout"),
+                new Candidate<>("3183", "8.0.79", 3183, "same", "old-layout"),
+                new Candidate<>("3200", "8.0.79", 3200, "new"));
+        List<String> probed = new ArrayList<>();
+        Selection<String> selection = selector().select("image", build("8.0.79", 3201), profiles,
+                profile -> { probed.add(profile); return profile.equals("old") || profile.equals("same"); }, cache);
+        assertEquals(MatchKind.EXPERIMENTAL, selection.kind);
+        assertEquals(Arrays.asList("old", "new"), probed);
+        assertEquals(MatchKind.EXACT, selector().select("image", build("8.0.79", 3183), profiles,
+                profile -> true, cache).kind);
+    }
     @Test public void unknown77RequiresUniqueCompleteMatch() {
         assertEquals("77b", selector().select("reply", build("8.0.77", 9999), candidates,
                 p -> p.equals("77b"), cache).profile);

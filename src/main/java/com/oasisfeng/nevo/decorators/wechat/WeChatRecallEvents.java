@@ -33,16 +33,21 @@ final class WeChatRecallEvents {
             this.serverId = serverId; this.talker = talker;
         }
         private static final Profile WX79 = new Profile("8.0.79/3182", "com.tencent.mm.storage.e9", "en.js", "I0", "N0");
+        private static final Profile WX79_3183 = new Profile("8.0.79/3183", "com.tencent.mm.storage.e9", "en.js", "I0", "N0");
+        private static final Profile WX79_3200 = new Profile("8.0.79/3200", "com.tencent.mm.storage.e9", "fm.js", "H0", "N0");
         private static final Profile WX72 = new Profile("8.0.72/3085", "com.tencent.mm.storage.f9", "pm.ds", "I0", "O0");
         private static final Profile WX78 = new Profile("8.0.78/3180", "com.tencent.mm.storage.e9", "fm.ks", "F0", "N0");
         private static final Profile WX77_3160 = new Profile("8.0.77/3160", "com.tencent.mm.storage.e9", "fm.fs", "K0", "Q0");
         private static final Profile WX77_3141 = new Profile("8.0.77/3141", "com.tencent.mm.storage.e9", "en.gs", "J0", "N0");
         static final List<WeChatProfileSelector.Candidate<Profile>> CANDIDATES = Arrays.asList(
-                candidate(WX79, "8.0.79", 3182), candidate(WX72, "8.0.72", 3085),
+                candidate(WX79, "8.0.79", 3182), candidate(WX79_3183, "8.0.79", 3183),
+                candidate(WX79_3200, "8.0.79", 3200), candidate(WX72, "8.0.72", 3085),
                 candidate(WX78, "8.0.78", 3180), candidate(WX77_3160, "8.0.77", 3160),
                 candidate(WX77_3141, "8.0.77", 3141));
         private static WeChatProfileSelector.Candidate<Profile> candidate(Profile profile, String name, long code) {
-            return new WeChatProfileSelector.Candidate<>("recall-" + profile.label, name, code, profile);
+            String id = "recall-" + profile.label;
+            return new WeChatProfileSelector.Candidate<>(id, name, code, profile,
+                    code == 3183 ? "recall-8.0.79/3182" : id);
         }
         static Profile forVersion(String name, long code) {
             for (WeChatProfileSelector.Candidate<Profile> candidate : CANDIDATES)

@@ -1,4 +1,29 @@
-# 微信 8.0.79 / 3182 适配记录
+# 微信 8.0.79 / 3182、3183、3200 适配记录
+
+## 2026-10-29 APKMirror 3183/3200 离线适配
+
+下文 2026-10-28 至 29 日写的“3183 无 APK”“3200 仅 Emoji 命中”是当时的历史状态；本节记录新取得安装包后的实现。两个构建的画像仅在 `versionName == 8.0.79 && versionCode == 对应值` 时精确优先；同名未知代码仍逐功能探测完整签名，零命中或多候选歧义时关闭该组件。画像缓存修订版升至 2，新进程读取旧候选不会直接启用，缓存命中也须重新探测。原生 `PendingIntent` 回复及 framework 通知外观与这些微信画像独立。
+
+| 构建与来源 | 本地忽略目录文件 | SHA-256 | 包签名 |
+| --- | --- | --- | --- |
+| [APKMirror 8.0.79/3183 APKM](https://www.apkmirror.com/apk/wechat/wechat/wechat-8-0-79-release/wechat-8-0-79-3-android-apk-download/)，32 splits | `.debug-artifacts/wechat-same-name-profile-probing/apkmirror-8079/wechat-8.0.79-3183.apkm`；抽取 `3183-base.apk` | APKM `11a4fe01140090ae14874db2cd6a40a34680504bd0394fb547c10126c0ecab0c`；base `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0` | Tencent 证书 SHA-256 `0fe4ff85c215918396dadc7cd8ce6963339af33d37751a56e54c7206b63a3c7c` |
+| [APKMirror 8.0.79/3200 APK](https://www.apkmirror.com/apk/wechat/wechat/wechat-8-0-79-release/wechat-8-0-79-2-android-apk-download/)；腾讯官方 CDN 取得的文件与该页 MD5、SHA-256、字节数完全一致 | `.debug-artifacts/wechat-same-name-profile-probing/apkmirror-8079/wechat-8.0.79-3200.apk` | `f2a725bc04302ad218a563533ae79356e66b64aa711b275bc919a8d432f7e15d` | 同一 Tencent 证书 |
+
+`apkanalyzer` 对 base/APK 分别读出 3183/3200 和 `8.0.79`；`apksigner` 核对证书。反编译证据保存在同目录 `3183-sources/sources/`、`3200-sources/sources/` 和同目录的单类源码文件；以下均采用 JADX 注释里的**原始**混淆名，不能使用它生成的 `f数字` 别名作为 hook 名。
+
+| 独立功能 | 3183 原始描述符 | 3200 原始描述符 |
+| --- | --- | --- |
+| 通知栏合成回复 | `MMAutoMessageReplyReceiver.onReceive(Context, Intent): void`；`z2.s1.b(Intent): Bundle` static；`lt1.a.c()/d()/b(): boolean` static | 接收器、helper 相同；门禁为 `os1.a.c()/d()/b(): boolean` static |
+| 通知原生 Emoji | `com.tencent.mm.smiley.g.d(String): String`；`com.tencent.mm.booter.notification.m0.a(storage.e9,long,boolean,boolean,String,int,String,String,Intent,boolean): void` | 两个实例方法签名相同 |
+| 应用内回复 | `storage.e9.r1(int): void` 本类覆盖；`C0/M0(): int`、`N0(): String`、`getMsgId/getCreateTime(): long`、`a3/M2/F2(): boolean` | `storage.e9.s1(int): void` 本类覆盖；`z0/M0(): int`，其余相同 |
+| 撤回 | `RevokeMsgEvent.g: en.js`、`en.js.c: storage.e9`；`e9.I0(): long`、`N0(): String` | `RevokeMsgEvent.g: fm.js`、`fm.js.c: storage.e9`；`e9.H0(): long`、`N0(): String` |
+| 图片事件 | `gh5.z.f(String): Object`、`lr3.f`、`sb0.l.l(gh5.z): jh5.b`、`handleDataFromRemote(gh5.z,h61.e): jh5.b`、`handleDataFromFile(gh5.z,gb0.d): jh5.b`；`v61.l0.I3(e9,String,boolean): String` | `jg5.z.f(String): Object`、`oq3.f`、`sa0.l.l(jg5.z): mg5.b`、`handleDataFromRemote(jg5.z,h51.e): mg5.b`、`handleDataFromFile(jg5.z,ga0.d): mg5.b`；`v51.l0.s4(e9,String,boolean): String` |
+| 图片消息身份 | `e9.N0(): String`、`C0(): int`、`I0(): long`；父类 `hn.c8.field_msgSvrId: long` | `e9.N0(): String`、`z0(): int`、`H0(): long`；父类 `im.c8.field_msgSvrId: long` |
+| 普通大图下载 | `pq0.i1.x(): pq0.a0` static、`pq0.a0.f: lh5.k0`、`lh5.k0.f(String,String[],int): Cursor`；`kj5.n0.c(Class): kj5.m` static，`db0.e implements eb0.y`、`Bj(): eb0.x`、`v61.j implements eb0.x`、`v61.j.b(long,MsgIdTalker,int,Object,int,eb0.w,int,boolean): int` | `pp0.i1.x(): pp0.a0` static、`pp0.a0.f: og5.k0`、`og5.k0.f(String,String[],int): Cursor`；`ni5.n0.c(Class): ni5.m` static，`da0.e implements ea0.y`、`Bj(): ea0.x`、`v51.j implements ea0.x`、`v51.j.b(long,MsgIdTalker,int,Object,int,ea0.w,int,boolean): int` |
+
+两版图片都继续校验 `com.tencent.mm.vfs.z6.i(String,boolean): String` static、`MsgIdTalker(long,String)` 和 `MMWXGFJNI.wxam2PicBuf(byte[],int,int): byte[]` static。`simplemsginfo` 的原始 `d: int` 基准偏移与消息字段类型逐项核对；3200 的 `sa0.k` 是另一个协程远端下载阶段，事件 hook 选择仍具有完整同步签名的 `sa0.l`，不把 `sa0.k.i(...)` 当成旧 hook。撤回还要求 `NotificationItem.f/h/i`、`a(Context): void`、事件直接继承 `IEvent` 及 `IEvent.e(): boolean`，不因负载类存在就直接启用。
+
+各组件在微信主进程分别做完整反射签名校验并批量安装：回复看 `profile_ready` 与接收器/门禁安装，Emoji 看 `emoji_hook_ready`，图片看事件/下载 ready，应用内回复看 `app_reply_ready`，撤回看 `recall_ready`。任一组件签名或安装失败只关闭自身，保留微信原生行为；日志不记录账号、消息或身份。以上是 APK 离线源码核对与主机测试范围，不等于 3183/3200 的运行时 hook 安装或真实回复、收图、撤回、通知 UI 验收；此前 3200 的 `emoji_hook_ready match=experimental` 只属于旧模块，不代表本次精确画像已做真机回归。
 
 ## 2026-10-31 图片占位与刷新呈现
 

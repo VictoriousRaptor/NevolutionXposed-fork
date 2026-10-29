@@ -36,6 +36,10 @@ final class WeChatAppReplyEvents {
 
         private static final Profile WX79 = new Profile("8.0.79/3182", "com.tencent.mm.storage.e9",
                 "r1", "C0", "M0", "N0", "a3", "M2", "F2");
+        private static final Profile WX79_3183 = new Profile("8.0.79/3183", "com.tencent.mm.storage.e9",
+                "r1", "C0", "M0", "N0", "a3", "M2", "F2");
+        private static final Profile WX79_3200 = new Profile("8.0.79/3200", "com.tencent.mm.storage.e9",
+                "s1", "z0", "M0", "N0", "a3", "M2", "F2");
         private static final Profile WX72 = new Profile("8.0.72/3085", "com.tencent.mm.storage.f9",
                 "q1", "C0", "M0", "O0", "b3", "N2", "F2");
         private static final Profile WX78 = new Profile("8.0.78/3180", "com.tencent.mm.storage.e9",
@@ -46,12 +50,15 @@ final class WeChatAppReplyEvents {
                 "r1", "C0", "M0", "N0", "a3", "M2", "F2");
 
         static final List<WeChatProfileSelector.Candidate<Profile>> CANDIDATES = Arrays.asList(
-                candidate(WX79, "8.0.79", 3182), candidate(WX72, "8.0.72", 3085),
+                candidate(WX79, "8.0.79", 3182), candidate(WX79_3183, "8.0.79", 3183),
+                candidate(WX79_3200, "8.0.79", 3200), candidate(WX72, "8.0.72", 3085),
                 candidate(WX78, "8.0.78", 3180), candidate(WX77_3160, "8.0.77", 3160),
                 candidate(WX77_3141, "8.0.77", 3141));
 
         private static WeChatProfileSelector.Candidate<Profile> candidate(Profile profile, String name, long code) {
-            return new WeChatProfileSelector.Candidate<>("app-reply-" + profile.label, name, code, profile);
+            String id = "app-reply-" + profile.label;
+            return new WeChatProfileSelector.Candidate<>(id, name, code, profile,
+                    code == 3183 ? "app-reply-8.0.79/3182" : id);
         }
 
         static Profile forVersion(String name, long code) {

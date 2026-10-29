@@ -16,6 +16,8 @@ import static org.junit.Assert.assertTrue;
 public class WeChatEmojiHooksTest {
     @Test public void requiresBothVerifiedVersionFields() {
         assertTrue(WeChatEmojiHooks.supports("8.0.79", 3182));
+        assertTrue(WeChatEmojiHooks.supports("8.0.79", 3183));
+        assertTrue(WeChatEmojiHooks.supports("8.0.79", 3200));
         assertFalse(WeChatEmojiHooks.supports("8.0.79", 3180));
         assertFalse(WeChatEmojiHooks.supports("8.0.78", 3182));
         assertFalse(WeChatEmojiHooks.supports(null, 3182));
