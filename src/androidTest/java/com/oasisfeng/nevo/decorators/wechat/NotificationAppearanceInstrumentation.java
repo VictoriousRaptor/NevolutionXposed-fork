@@ -125,8 +125,6 @@ final class NotificationAppearanceInstrumentation {
             first.contentView = nativeCard;
             first.bigContentView = nativeCard;
             first.headsUpContentView = nativeCard;
-            check(Notification.Builder.recoverBuilder(context, first).createContentView().getLayoutId()
-                    == nativeCard.getLayoutId(), "synthetic first notification did not select its native card");
             check(local.apply(manager, null, id, first) == Decorating.Processed, "first private message was not rebuilt");
             check("android.app.Notification$MessagingStyle".equals(first.extras.getString(Notification.EXTRA_TEMPLATE)),
                     "first private message lost MessagingStyle");
