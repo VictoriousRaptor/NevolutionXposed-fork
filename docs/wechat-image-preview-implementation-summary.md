@@ -1,5 +1,9 @@
 # 微信图片通知预览实现总结与性能分析
 
+2026-10-31 图片与占位互斥：只在 render-only `EXTRA_MESSAGES` 副本中清空服务器 ID 精确命中的 incoming `[图片]`/`图片` 行，源 transcript 保持原样；目标不唯一、身份不符或图片字段缺失时保持文本回退。对预览开关开启且含占位的待图 RemoteViews 先核验并设置 `FLAG_REAPPLY_DISALLOWED`，让已缓存该标志的 SystemUI 旧树在下一次补图时 inflate 新树，避免消息行 transient 淡出与图片并存。AOSP `canReapplyRemoteView()` 只检查旧树，因此不能只在 READY 更新设 flag；旧版无 flag 缓存或待图 inflate 被更新取消时，首次转换仍未保证。反射接口或消息模板不可用时不清除占位、不添加图片。图片发布后，后续文字更新对同一 token 安排 4 次、每 150ms 的主线程重检，覆盖图片先发布、原微信 notify 后提交的短窗口；不跨通知锁调用 manager。主机身份测试和 framework 合成用例不证明 SystemUI/OEM 真实视觉或跨线程提交顺序。
+
+2026-10-30 重复图片修复：复用通知身份 hook 已核验的会话和服务器消息 ID，在归一化前固定身份，图片选择与后续连续性检查优先精确匹配该消息。相同图片路径、正文和时间均不能合并不同消息或复用旧请求；精确目标未出现/路径未就绪时继续等待该目标，不选另一条图片。缺少核验身份时保持原有窗口和歧义拒选，索引 TTL、等待预算、下载及渲染保持原限制。没有新增 hook、版本映射或设置；本轮仅离线验证和构建，真实重复收图及 SystemUI 显示待设备验收。详见[适配手册](wechat-version-adaptation-playbook.md)。
+
 2026-10-30 事件选择补充：真机上重复发送相同图片时，索引曾出现一条带路径事件与多条只有身份的事件，导致 `no_unique_message_event` 回退。Debug 的 `selection_counts` 只在拒选时记录计数，不记录联系人、消息 ID、路径或正文。审查发现按创建时间排除刚观察到的无路径身份事件，可能在微信通知时间滞后时误选另一条消息的图片，因此撤回该筛选；新增主机回归要求新旧身份有歧义时继续拒选。随后用户在同一私聊重复发送相同图片，通知仍显示缩略图；这只验证了该轮实际链路，不代表歧义情况下也能补图。系统转存位图为 `EXTRA_PICTURE_ICON` 的渲染修复及后续图片对齐修复见[通知外观](wechat-notification-appearance.md)。
 
 2026-10-27 布局所有者修复：微信进程中按模块包名构造 RemoteViews 可在图片解码后失败。首次发布与重新挂接现改为从 libxposed 获取模块 ApplicationInfo，通过准确的隐藏构造签名 `RemoteViews(ApplicationInfo, int)` 反射创建，避免微信侧包查询及较新 API 的直接链接；minSdk 26 保持不变。不可用时保留文字通知，不回退到包名查询。fitStart、通知/回复身份、等待与下载策略保持原逻辑。包查询失败回归及设备验证边界见[适配手册](wechat-version-adaptation-playbook.md)；本次不安装、不运行真机测试。

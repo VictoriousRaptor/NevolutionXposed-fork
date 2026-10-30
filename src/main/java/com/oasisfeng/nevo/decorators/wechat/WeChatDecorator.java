@@ -341,6 +341,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 		@Override public synchronized Decorating apply(NotificationManager nm, String tag, int id, Notification n) {
 			if (n.extras.getBoolean(EXTRA_SUPPRESSED_RECALL)) return Decorating.StopPost;
 			if (ImagePreviewLoader.isPreview(n)) return Decorating.Processed;
+			// Preserve the verified source key before conversation normalization can rewrite presentation extras.
+			final ImageNotificationIdentity imageIdentity = mImagePreviewEnabled ? ImagePreviewLoader.notificationIdentity(n) : null;
 			NotificationMarkdown.restoreText(n.extras);
 			if (mWeChatTargetingO == null) mWeChatTargetingO = isWeChatTargeting26OrAbove();
 			if (BuildConfig.DEBUG) Log.d(TAG, "apply tag " + tag + " id " + id);
@@ -534,7 +536,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (mImagePreviewEnabled) {
 				if (content != null && content.endsWith("[图片]")) {
 					// The car conversation resolves the talker (key_username) while rebuilding; queue on that identity.
-					imagePreviews.request(getAppContext(), nm, tag, id, n, () -> cached.knownKey(), messages);
+					imagePreviews.request(getAppContext(), nm, tag, id, n, () -> cached.knownKey(), messages, imageIdentity);
 				} else {
 					// A later message replaces the notification; keep the image while it is still part of the conversation.
 					imagePreviews.keepPreview(getAppContext(), nm, tag, id, n, conversation.key, messages);

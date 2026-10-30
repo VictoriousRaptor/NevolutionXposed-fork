@@ -5,6 +5,53 @@ import java.util.Arrays;
 import static org.junit.Assert.*;
 
 public class ImageEventIndexTest {
+	@Test public void verifiedMessageSurvivesRereadOldIdentities() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("a", 10, 9010, 20000, Arrays.asList("/same-image"), 300);
+		for (int i = 1; i <= 4; i++) index.putIdentity("a", i, 9000 + i, 10000 + i, 301 + i);
+		assertNull(index.select("a", 20000, 305, 306));
+		assertEquals("a:10", index.select("a", 9010, 20000, 305, 306).key);
+	}
+	@Test public void identicalImagePathsStillBelongToSeparateMessages() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("a", 1, 9001, 20000, Arrays.asList("/same-image"), 300);
+		index.put("a", 2, 9002, 20000, Arrays.asList("/same-image"), 301);
+		assertEquals("a:1", index.select("a", 9001, 20000, 302, 303).key);
+		assertEquals("a:2", index.select("a", 9002, 20000, 302, 303).key);
+		assertNull(index.select("a", 0, 20000, 302, 303));
+	}
+	@Test public void verifiedMessageWaitsForItsOwnPaths() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("a", 1, 9001, 20000, Arrays.asList("/same-image"), 300);
+		index.putIdentity("a", 2, 9002, 20001, 301);
+		ImageEventIndex.Entry waiting = index.select("a", 9002, 20000, 302, 303);
+		assertEquals("a:2", waiting.key);
+		assertTrue(waiting.paths.isEmpty());
+		index.put("a", 2, 0, 20001, Arrays.asList("/same-image"), 304);
+		ImageEventIndex.Entry ready = index.select("a", 9002, 20000, 302, 305);
+		assertEquals("a:2", ready.key);
+		assertEquals(9002, ready.msgSvrId);
+		assertEquals("/same-image", ready.paths.get(0).value);
+	}
+	@Test public void verifiedMessageNeverFallsBackToAnotherImage() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("a", 1, 9001, 20000, Arrays.asList("/other-image"), 300);
+		assertNull(index.select("a", 9002, 20000, 302, 303));
+		assertNull(index.select("b", 9001, 20000, 302, 303));
+	}
+	@Test public void duplicateServerIdentityStillFailsClosed() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("a", 1, 9001, 20000, Arrays.asList("/first"), 300);
+		index.put("a", 2, 9001, 20000, Arrays.asList("/second"), 301);
+		assertNull(index.select("a", 9001, 20000, 302, 303));
+	}
+	@Test public void verifiedSelectionIgnoresNotificationClockButHonorsTtl() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("a", 1, 9001, 20000, Arrays.asList("/image"), 300);
+		index.putIdentity("b", 2, 9001, 20000, 301);
+		assertEquals("a:1", index.select("a", 9001, 10000, 10000, 302).key);
+		assertNull(index.select("a", 9001, 20000, 302, 30300));
+	}
 	@Test public void keepsOlderHdWhenNewPathsFillCapacity() {
 		ImageEventIndex index = new ImageEventIndex();
 		index.putRanked("a", 1, 10000, Arrays.asList(new ImageEventIndex.Path("/hd", 2)), 1);

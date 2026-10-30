@@ -1,5 +1,19 @@
 # 微信 8.0.79 / 3182 适配记录
 
+## 2026-10-31 图片占位与刷新呈现
+
+本次没有新增或修改微信混淆 hook、映射或版本门禁。重复图片仍用下文已核验的会话/服务器消息 ID 选取事件；展开视图只在 render 副本中清空精确 incoming 图片占位。为避免已显示的 SystemUI `MessagingLayout` 把旧占位行留在淡出 transient view 中，对图片预览开启且带占位的待图 RemoteViews 反射设置并验证 `FLAG_REAPPLY_DISALLOWED`。AOSP 固定源码只检查旧 RemoteViews 的该标志，并在重绑禁止时 inflate 新展开树；接口不可用时不显示补图，保留 `[图片]`。若 SystemUI 仍缓存变更前的无 flag 视图，或待图 inflate 被更新取消，新 READY 视图的 flag 不能保证首次转换也 inflate；这项边界未在真机验证。源通知、原始消息与回复历史不改写。
+
+图片获取与微信下一条文字通知存在异步交错：发布前仍检查请求实例和活动 token；安全连续的文字通知会安排最多 4 次、每 150ms 的重检，在补图先于原文字 notify 提交时尝试重新挂图。未用 loader 锁覆盖 `NotificationManager.notify()`，避免反向锁序。该机制尚无真机/SystemUI 回调与 OEM 视觉验收；固定 AOSP 源码说明见[适配手册](wechat-version-adaptation-playbook.md)。
+
+## 2026-10-30 重复图片的精确通知身份复用
+
+图片请求改为优先使用通知中已有的核验会话与服务器消息 ID。沿用本文件“应用内回复与撤回”的离线证据：`notification/x.java:533` 将消息 `I0(): long` 传给 `m0.a(...)`，`m0.java:543/963` 写入 `NotificationItem.i: long`；`NotificationItem.a(Context): void` 同步发布 `f: Notification`。已有 BEFORE hook 将 `h: String` 会话与 `i` 写入通知 extras，图片路径事件的 `hn.c8.field_msgSvrId: long` 及身份事件的 `I0()` 与之关联。源码位置、来源 APK SHA-256 与下文记录相同，本轮未更换 APK 或增加混淆目标。
+
+通知增强在归一化前固定这组身份。对核验消息按会话和服务器 ID 精确选取，避免重复发送同一图片时重新观察到的旧身份造成误冲突；相同文件不合并消息。有精确 ID 但事件未到、路径未到或多个本地消息声称同一 ID 时不退回其他图片；缺核验身份时原时间窗口与多候选拒选保持。待处理请求去重也比较该身份，后续文字仍验证原图片的连续性。图片仅精确匹配版本名 `8.0.79` **且**版本码 `3182`；其他图片画像、通知身份、回复、普通大图、应用内回复和撤回保持原独立门禁。没有修改 hook 签名或回调时机。
+
+本轮新增主机回归及补图/Parcel 身份保留的 framework 用例；没有手机，运行时 hook 安装、真实重复图片收发、跨会话及 SystemUI 显示均未执行。先前临时 Debug 包的真机通过不能当作本次最终代码的验收。
+
 ## 2026-10-30 真实通知复测补记
 
 Android 17 真机、微信 8.0.79/3182、模块通知增强与 Markdown 开启。在微信私聊中，单独发送 `~~123~~` 后用户确认通知显示删除线；`## Lorem ipsum` 保留 `##`，因为当前解析器未实现标题。图片补图的 Debug 实时日志曾出现 `no_unique_message_event`，另一次不同图片完成解析、解码和发布，系统通知记录包含 `imageReady=true`。SystemUI 已加载展开 Hook 并通过归属检查，但用户展开后仍看不到图；记录中 `EXTRA_PICTURE` 已为空，`EXTRA_PICTURE_ICON` 为 URI 图标。详见[通知外观](wechat-notification-appearance.md)。

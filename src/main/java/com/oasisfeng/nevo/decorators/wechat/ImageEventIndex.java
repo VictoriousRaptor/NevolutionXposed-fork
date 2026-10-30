@@ -66,16 +66,27 @@ final class ImageEventIndex {
 		if (quality == null || quality < path.quality) merged.put(path.value, path.quality);
 	}
 
-	synchronized Entry select(String talker, long notificationTime, long observedAt, long now) {
+	synchronized Entry select(String talker, long serverId, long notificationTime, long observedAt, long now) {
 		prune(now);
 		if (talker == null || talker.isEmpty()) return null;
 		Entry result = null;
 		for (Entry entry : entries.values()) {
-			if (!entry.talker.equals(talker) || !matches(entry, notificationTime, observedAt)) continue;
+			if (!entry.talker.equals(talker)) continue;
+			// A verified notification message ID is stronger than either clock. Never fall back to another image.
+			if (serverId > 0 ? entry.msgSvrId != serverId : !matches(entry, notificationTime, observedAt)) continue;
 			if (result != null) return null; // Never guess between messages in the same conversation.
 			result = entry;
 		}
 		return result;
+	}
+
+	synchronized Entry select(String talker, long notificationTime, long observedAt, long now) {
+		return select(talker, 0, notificationTime, observedAt, now);
+	}
+
+	Entry select(String talker, ImageNotificationIdentity identity, long notificationTime, long observedAt, long now) {
+		if (identity != null && !identity.talker.equals(talker)) return null;
+		return select(talker, identity == null ? 0 : identity.serverId, notificationTime, observedAt, now);
 	}
 
 	/** Counts only metadata, for diagnosing a rejected selection without exposing identities or paths. */

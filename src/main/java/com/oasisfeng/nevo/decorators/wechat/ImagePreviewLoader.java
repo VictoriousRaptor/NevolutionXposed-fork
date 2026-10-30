@@ -39,9 +39,10 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /** Decodes private WeChat files in WeChat and transports a bounded bitmap, not a private file URI. */
 final class ImagePreviewLoader {
-	private static final String TOKEN = "nevo.wechat.imageRequest";
+	static final String TOKEN = "nevo.wechat.imageRequest";
 	private static final String READY = "nevo.wechat.imageReady";
 	private static final String NOTIFICATION_TOKEN = "nevo.wechat.imageNotificationToken";
+	static final String IMAGE_MESSAGE_ID = "nevo.wechat.imageMessageServerId";
 	private static final AtomicLong SEQUENCE = new AtomicLong(SystemClock.elapsedRealtimeNanos());
 	private final Handler main = new Handler(Looper.getMainLooper());
 	private final WeChatImageEvents events;
@@ -74,11 +75,18 @@ final class ImagePreviewLoader {
 	private volatile int waitMillis = ImagePreviewPolicy.DEFAULT_WAIT_MS;
 
 	private static final long PREVIEW_KEEP_MS = 30000;
+	private static final long PREVIEW_REATTACH_RETRY_MS = 150;
+	private static final int PREVIEW_REATTACH_RETRIES = 4;
 	private static final int PREVIEW_CACHE = 4;
 	private static final long PREVIEW_CACHE_BYTES = (long) ImagePreviewPolicy.MAX_PIXELS * 4 * PREVIEW_CACHE;
 	private static final long MAX_SOURCE_BYTES = 20L * 1024 * 1024;
 
 	static boolean isPreview(Notification n) { return n.extras.getBoolean(READY); }
+	static boolean isTracked(Notification n) { return n.extras.getLong(TOKEN) != 0; }
+	static ImageNotificationIdentity notificationIdentity(Notification n) {
+		return ImageNotificationIdentity.verified(n.extras.getBoolean(WeChatRecallEvents.VERIFIED_KEY),
+				n.extras.getString(NotificationMessages.KEY), n.extras.getLong(NotificationMessages.SERVER_ID));
+	}
 
 	/** A recalled message must not leave a picture or allow its pending worker to publish again. */
 	synchronized void discard(String tag, int id, Notification notification) {
@@ -118,6 +126,7 @@ final class ImagePreviewLoader {
 		notification.extras.remove(TOKEN);
 		notification.extras.remove(NOTIFICATION_TOKEN);
 		notification.extras.remove(READY);
+		notification.extras.remove(IMAGE_MESSAGE_ID);
 		notification.extras.remove(Notification.EXTRA_PICTURE);
 		notification.extras.remove(Notification.EXTRA_PICTURE_ICON);
 		if (notification.bigContentView != null
@@ -148,7 +157,7 @@ final class ImagePreviewLoader {
 		if (request == null && preview != null) request = preview.request;
 		if (request == null) return;
 		Notification previous = active(manager, tag, id);
-		ImageEventIndex.Entry event = events.index.select(talker, request.when, request.started, SystemClock.elapsedRealtime());
+		ImageEventIndex.Entry event = events.index.select(talker, request.identity, request.when, request.started, SystemClock.elapsedRealtime());
 		boolean safe = ImageNotificationIdentity.continues(request.token, previous == null ? 0 : previous.extras.getLong(TOKEN),
 				request.resolvedTalker, talker, request.eventKey, event == null ? null : event.key,
 				request.messages, messageIdentity(messages), imageCount(messages));
@@ -166,7 +175,23 @@ final class ImagePreviewLoader {
 		n.extras.putLong(TOKEN, request.token);
 		n.extras.putLong(NOTIFICATION_TOKEN, request.notificationToken);
 		log("continuity", "request=" + request.token + " pending=" + pending.containsKey(key));
-		if (preview != null) main.postDelayed(() -> reattach(context, manager, tag, id, preview), 150);
+		scheduleReattach(context, manager, tag, id, request, PREVIEW_REATTACH_RETRIES);
+	}
+
+	/** Recheck after the source notification has left its notify hook; its final system commit follows Local.apply(). */
+	private void scheduleReattach(Context context, NotificationManager manager, String tag, int id,
+			Request request, int retriesRemaining) {
+		if (retriesRemaining <= 0) return;
+		main.postDelayed(() -> {
+			String key = id + ":" + tag;
+			Preview preview = previews.get(key);
+			if (preview != null && preview.request == request) reattach(context, manager, tag, id, preview);
+			boolean pendingRequest = pending.get(key) == request;
+			boolean cachedPreview = preview != null && preview.request == request
+					&& SystemClock.elapsedRealtime() - preview.publishedAt < PREVIEW_KEEP_MS;
+			if (pendingRequest || cachedPreview)
+				scheduleReattach(context, manager, tag, id, request, retriesRemaining - 1);
+		}, PREVIEW_REATTACH_RETRY_MS);
 	}
 
 	private static int imageCount(List<NotificationCompat.MessagingStyle.Message> messages) {
@@ -197,13 +222,14 @@ final class ImagePreviewLoader {
 	}
 
 	synchronized void request(Context context, NotificationManager manager, String tag, int id, Notification n, TalkerSource talker,
-			List<NotificationCompat.MessagingStyle.Message> messages) {
+			List<NotificationCompat.MessagingStyle.Message> messages, ImageNotificationIdentity identity) {
 		if (context == null || n.extras.containsKey(TOKEN)) return;
 		if (!events.isAvailable()) { log("fallback", "reason=events_unavailable scans=0"); return; }
 		String key = id + ":" + tag;
 		Request old = pending.get(key);
 		Notification previous = active(manager, tag, id);
 		if (old != null && previous != null && previous.extras.getLong(TOKEN) == old.token
+				&& Objects.equals(old.identity, identity)
 				&& old.messages.equals(messageIdentity(messages)) && old.when == n.when
 				&& Objects.equals(old.talker(), talker.talker()) && TextUtils.equals(old.title, n.extras.getCharSequence(Notification.EXTRA_TITLE))
 				&& TextUtils.equals(old.text, n.extras.getCharSequence(Notification.EXTRA_TEXT))) {
@@ -220,7 +246,7 @@ final class ImagePreviewLoader {
 		}
 		probes.values().removeIf(probe -> probe.key.equals(key));
 		previews.remove(key);
-		Request request = new Request(key, talker, n, messageIdentity(messages), waitMillis);
+		Request request = new Request(key, talker, n, messageIdentity(messages), waitMillis, identity);
 		pending.put(key, request);
 		n.extras.putLong(TOKEN, request.token);
 		n.extras.putLong(NOTIFICATION_TOKEN, request.notificationToken);
@@ -239,14 +265,15 @@ final class ImagePreviewLoader {
 		try {
 			String talker = request.talker();
 			if (talker == null || talker.isEmpty()) { retryOrFinish(context, manager, tag, id, request, "talker_pending"); return; }
-			ImageEventIndex.Entry event = events.index.select(talker,
+			ImageEventIndex.Entry event = events.index.select(talker, request.identity,
 					request.when > 0 ? request.when : request.received, request.started, SystemClock.elapsedRealtime());
 			if (event == null) {
 				if (BuildConfig.DEBUG && (request.attempts == 0 || SystemClock.elapsedRealtime() >= request.deadline))
 					log("selection_counts", "request=" + request.token + " "
 						+ events.index.selectionCounts(talker, request.when > 0 ? request.when : request.received,
 								request.started, SystemClock.elapsedRealtime()));
-				retryOrFinish(context, manager, tag, id, request, "no_unique_message_event");
+				retryOrFinish(context, manager, tag, id, request,
+						request.identity == null ? "no_unique_message_event" : "verified_message_pending");
 				return;
 			}
 			request.resolvedTalker = talker;
@@ -559,7 +586,8 @@ final class ImagePreviewLoader {
 						+ " pendingMatches=" + (pending.get(request.key) == request));
 				return;
 			}
-			Notification result = buildPreviewNotification(context, XposedBridge.getModuleApplicationInfo(), current, bitmap, request.token);
+			Notification result = buildPreviewNotification(context, XposedBridge.getModuleApplicationInfo(), current, bitmap, request.token,
+					request.identity == null ? 0 : request.identity.serverId);
 			manager.notify(tag, id, result);
 			log("published", "request=" + request.token + " style=FitStart actions="
 					+ (result.actions == null ? 0 : result.actions.length) + " picture=" + pictureSize(result));
@@ -581,6 +609,12 @@ final class ImagePreviewLoader {
 	}
 
 	static Notification buildPreviewNotification(Context context, ApplicationInfo moduleInfo, Notification current, Bitmap bitmap, long token) {
+		ImageNotificationIdentity identity = notificationIdentity(current);
+		return buildPreviewNotification(context, moduleInfo, current, bitmap, token, identity == null ? 0 : identity.serverId);
+	}
+
+	static Notification buildPreviewNotification(Context context, ApplicationInfo moduleInfo, Notification current, Bitmap bitmap,
+			long token, long imageServerId) {
 		Notification.Builder builder = Notification.Builder.recoverBuilder(context, current);
 		if (WeChatNotificationAppearance.isMessaging(current)) {
 			// The expanded renderer appends the image to the native messaging layout.
@@ -597,6 +631,7 @@ final class ImagePreviewLoader {
 		result.extras.remove(Notification.EXTRA_PICTURE_ICON); // Do not retain an offloaded icon from an older preview.
 		result.extras.putParcelable(Notification.EXTRA_PICTURE, bitmap);
 		result.extras.putBoolean(READY, true);
+		result.extras.putLong(IMAGE_MESSAGE_ID, imageServerId);
 		result.extras.putLong(TOKEN, token);
 		// recoverBuilder() already parceled the actions, so the notify hook may skip its own rebuild.
 		NevoDecoratorService.LocalDecorator.markActionsSerialized(result);
@@ -609,7 +644,8 @@ final class ImagePreviewLoader {
 				|| previews.get(id + ":" + tag) != preview
 				|| SystemClock.elapsedRealtime() - preview.publishedAt >= PREVIEW_KEEP_MS) return;
 		try {
-			Notification result = buildPreviewNotification(context, XposedBridge.getModuleApplicationInfo(), current, preview.bitmap, preview.request.token);
+			Notification result = buildPreviewNotification(context, XposedBridge.getModuleApplicationInfo(), current, preview.bitmap,
+					preview.request.token, preview.request.identity == null ? 0 : preview.request.identity.serverId);
 			manager.notify(tag, id, result);
 			log("reattached", "request=" + preview.request.token + " id=" + id + " style=FitStart");
 		} catch (Exception failure) {
@@ -705,6 +741,7 @@ final class ImagePreviewLoader {
 
 	private static final class Request {
 		final CandidateCache.Owner cacheOwner = new CandidateCache.Owner();
+		final ImageNotificationIdentity identity;
 		final List<String> messages;
 		volatile String eventKey;
 		List<ImageEventIndex.Path> probePaths;
@@ -728,7 +765,9 @@ final class ImagePreviewLoader {
 		volatile String resolvedTalker;
 		volatile ScheduledFuture<?> future;
 		final CharSequence title, text;
-		Request(String key, TalkerSource talkerSource, Notification n, List<String> messages, int waitMillis) {
+		Request(String key, TalkerSource talkerSource, Notification n, List<String> messages, int waitMillis,
+				ImageNotificationIdentity identity) {
+			this.identity = identity;
 			this.waitMillis = waitMillis;
 			deadline = started + waitMillis;
 			this.messages = messages;

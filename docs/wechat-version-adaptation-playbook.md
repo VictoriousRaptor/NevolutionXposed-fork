@@ -4,11 +4,30 @@
 
 配合脚本：`tools/collect-device-info.ps1`（只读取设备与 APK，不在手机上做任何修改）。
 
+## 2026-10-30 重复图片通知的消息身份关联
+
+- 图片索引的候选是消息事件，键为会话和消息本地 ID；同一文件或相同内容可属于多条消息。微信重读旧消息服务器 ID 时会刷新身份事件的观察时间，旧身份因此可能与新图片同时进入窗口。本轮不按图片哈希、路径相同或通知时间排除这些身份。
+- 复用既有 `NotificationItem.a(android.content.Context): void` BEFORE hook 写入的 `nevo.wechat.verifiedNotificationKey`、`nevo.conversationKey` 和 `nevo.wechat.messageServerId`。图片请求在通知归一化前固定核验标记、会话和正数服务器 ID，使用“会话与服务器 ID 同时匹配”的事件；通知时钟滞后不削弱这个精确关联。目标尚未进入索引或同一服务器 ID 对应多个本地消息时保留文字并重试/到期回退，不改选其他消息；目标身份先到且路径未到时也只等待该消息。30 秒索引 TTL、请求等待预算、事件已分配检查、原图限制和发布 token 均保留。
+- 缺少核验标记、有效会话或正数服务器 ID 时保留原时间/观察窗口算法，多候选仍拒选。相同正文、时间或图片不能使不同核验身份复用待处理请求；后续文字的图片连续性检查使用原图片请求的身份，仍须 live token、消息前缀和单图片条件。
+- 没有新增或修改 hook、完整签名、回调时机、进程、设置及版本画像。图片继续只在微信主进程、通知增强和图片预览开启且图片完整签名核验成功时运行；图片画像为版本名与版本码同时匹配的 `8.0.79/3182`、`8.0.72/3085`、`8.0.77/3160`、`8.0.77/3141`。精确身份另外依赖既有通知身份 hook；该链路不可用时只走旧的保守算法，不借用其他版本映射。回复、普通大图请求、应用内回复、撤回及 Android/SystemUI 渲染各自门禁保持独立。
+- Debug 在已提供核验身份但尚未取得唯一事件时使用 `verified_message_pending` 原因；无核验身份仍为 `no_unique_message_event`，`selection_counts` 保留计数诊断，不记录会话、消息 ID、图片路径、哈希或正文。Release 不新增诊断日志。
+- 展开图片只改 RemoteViews 的呈现副本：按正数服务器 ID 唯一定位 incoming `[图片]`/`图片` 行，清空该行文本并追加图片；源通知、回复历史和消息归档不变。图片预览开关开启且存在占位时，从待图 RemoteViews 起反射设置并验证 `FLAG_REAPPLY_DISALLOWED`，因为本次核对的 AOSP `NotificationRowContentBinderImpl.canReapplyRemoteView()` 只看旧 RemoteViews 的 flag。当 SystemUI 缓存中的旧展开视图已带该 flag，图片到达时它会重新 inflate 展开树，避免对已显示的 MessagingLayout 重绑该行并留下淡出占位。flag 接口/资源不可用、目标不唯一或身份不符时保留原生 `[图片]` 并不显示补图；AOSP 依据为[固定源码中的重绑判定](https://github.com/aosp-mirror/platform_frameworks_base/blob/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationRowContentBinderImpl.kt#L1709-L1717)及[展开树替换](https://github.com/aosp-mirror/platform_frameworks_base/blob/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationContentView.java#L466-L510)。仍缓存旧版无 flag 视图或 pending inflate 被更新取消时，新 READY 视图的 flag 不能保证首次转换也走 inflate；该边界及 OEM 视觉都待实机。
+- 图片解析在线程池执行，发布在主线程并检查 active token 与 pending 请求实例。后续文字通知即使在图片刚发布前已进入模块装饰，也会给同一请求安排最多 4 次、每 150ms 的有界重检，以覆盖原微信 notify 在 `Local.apply()` 返回后才提交的窗口；重检仍要求同一请求/preview 和活动通知 token。没有在 loader monitor 内跨 `NotificationManager.notify()`，避免与 `Local.apply()` 的锁序形成死锁。窗口以外的跨线程系统提交顺序仍需设备验证，不声称获得全局原子性。
+- 主机回归覆盖同路径不同消息、多个旧身份、精确目标缺失/路径迟到、同 ID 冲突、跨会话、时钟滞后、TTL、未核验身份回退和新身份不复用旧请求的值语义；framework 用例验证呈现副本仅清空精确目标、原占位保留、RemoteViews flag 和后续文本中的图片身份。4×150ms 重挂重检只做代码审查，未单独做调度单测。运行时 hook 安装与真实重复图片/SystemUI 验收本轮未执行，framework 用例仅编译；离线证据与真实设备效果分开记录。
+- 本轮结果：完整 Debug 主机测试 232/232，在实际 Release 编译类上直接执行的图片选择/身份纯 Java 回归 28/28。规定的签名 Debug、androidTest、Release 构建及 Release lint 成功；三类 APK 均与既有 Release 证书一致。完整 Debug lint 在测试源码分析阶段超过 6 分钟无新输出后主动停止，未记为通过；没有 `testReleaseUnitTest` Gradle 任务，不把 28 项补充回归写成完整 Release 测试。
+
+## 2026-10-31 图片与占位互斥及通知刷新
+
+- 既有展开 AFTER hook 不变。图片预览开关开启且存在 incoming 图片占位时，待图 RemoteViews 即反射设置并验证 `FLAG_REAPPLY_DISALLOWED`；此阶段设置是必要条件，因为 AOSP SystemUI 比较 `newView` 与 `oldView` 时仅检查旧 RemoteViews。只有旧缓存已带 flag 时，补图才确定走新树 inflate；仍缓存无 flag 的旧视图或 pending inflate 被取消时首次转换仍有竞态。补图后只在 render-only `Bundle` 中清空精确目标消息，再追加图片；系统树/接口或目标核验失败时保持文字。原始 `EXTRA_MESSAGES`、图片身份和回复数据不修改。
+- 图片获取 worker 与通知刷新可交错。旧图片发布前后仍由 request instance、active token、talker、消息前缀和精确图片身份约束。每次安全的后续文字通知都会触发最多 4 次、间隔 150ms 的重检；若图片在其原通知提交前发布，重检可从已提交的新通知重新挂图。未在 loader 锁内调用 `notify()`；这些重检只覆盖模块可观测的短窗口，无法替代真机的 Android/OEM 提交时序验证。
+- 本轮未增改 hook 目标、完整签名、回调时机或微信版本画像。framework 合成用例覆盖 fresh-inflate flag、只隐藏精确消息和源占位保留；host 用例覆盖身份连续性。4×150ms 刷新重挂调度做代码审查，未单独做调度单测；无手机时不把源码与构建结果写成 hook 安装或 OEM 视觉通过。
+- 最终主机测试 237/237；Debug、androidTest 与 Release APK 使用既有 Release 证书构建并核对一致，Release lint 为 0 error / 4 warnings。androidTest APK 仅编译，未安装或执行；SystemUI hook 安装、已附着视图动画、首次旧 flag 缓存过渡及 OEM 显示均未实测。
+
 ## 2026-10-30 图片图标与展开布局缩进
 
 - 既有 `Notification$Builder.createExpandedContentView(): RemoteViews` AFTER hook（缺失时回退 `createBigContentView(): RemoteViews`）在微信主进程及 SystemUI 中处理带模块外观标记的私聊、群聊 `MessagingStyle`。从 `EXTRA_PICTURE` 读取位图；系统转存位图后从 `EXTRA_PICTURE_ICON` 读取图标并调用 `RemoteViews.setImageViewIcon(int, Icon)`。两个字段都缺失时只登记旧图片移除动作，保留原消息模板的 `[图片]`。图片失效清理同时删除两个字段，新补图时清除继承的旧图标。
 - 私聊和群聊的展开视图均向系统 `notification_main_column` 追加同一个 `wechat_group_image_preview`。Android 17 设备的 2025 展开会话/消息模板把原消息内容缩进 58 dp，新增子视图没有继承该缩进，因此此前图片贴在卡片左缘。仅当展开视图布局 ID 匹配这两种 2025 模板时，从 framework 的 `notification_2025_content_margin_start` 读取设备实际像素值，给图片起始侧设置同等 padding（含 RTL）。无布局或尺寸资源时沿用原视图。非 `MessagingStyle` 回退使用独立的 `wechat_image_preview`，标题与图片同列，不施加该缩进。原头像、标题、消息文字和回复区继续由系统模板管理。
-- 沿用原完整 hook 签名、运行时字段/接口校验、微信 Context、模块归属、非汇总、通知增强与图片开关，以及独立图片画像的版本名和版本号同时匹配语义。缺容器、隐藏移除接口或模块资源时回退原生消息视图。Debug 的 `image_render_entry/result` 和 `selection_counts` 只记状态与计数，不含图标 URI、图片路径、联系人或正文；Release 不执行这些诊断扫描。当前真实私聊已验证图标缩略图及重复同图显示，图片缩进和标题修正因手机断开尚未做新包真机视觉验收；合成图片缩进框架用例已编译但尚未执行。事件索引继续在同会话多个候选时保守拒选，避免通知时间滞后时把旧图误配给新消息。
+- 沿用原完整 hook 签名、运行时字段/接口校验、微信 Context、模块归属、非汇总、通知增强与图片开关，以及独立图片画像的版本名和版本号同时匹配语义。缺容器、隐藏移除接口或模块资源时回退原生消息视图。Debug 的 `image_render_entry/result` 和 `selection_counts` 只记状态与计数，不含图标 URI、图片路径、联系人或正文；Release 不执行这些诊断扫描。当时真实私聊已验证图标缩略图及重复同图显示，图片缩进和标题修正因手机断开尚未做新包真机视觉验收；合成图片缩进框架用例已编译但尚未执行。没有核验消息身份时，事件索引继续在同会话多个候选时保守拒选，避免通知时间滞后时把旧图误配给新消息；本日后续的精确关联见上节。
 
 ## 2026-10-30 通知 Markdown 一级与二级标题
 

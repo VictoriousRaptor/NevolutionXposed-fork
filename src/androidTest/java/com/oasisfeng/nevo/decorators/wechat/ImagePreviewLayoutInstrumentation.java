@@ -26,6 +26,108 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Framework/resource checks of the production layout, without sending WeChat messages. */
 final class ImagePreviewLayoutInstrumentation {
+    static void pictureAndPlaceholderAreExclusive(Instrumentation instrumentation) {
+        Context module = instrumentation.getTargetContext();
+        Person peer = new Person.Builder().setName("Synthetic peer").build();
+        Notification.MessagingStyle.Message imageMessage = new Notification.MessagingStyle.Message("[图片]", 100, peer);
+        imageMessage.getExtras().putLong(NotificationMessages.SERVER_ID, 9001);
+        Notification current = new Notification.Builder(module, "synthetic-picture-placeholder")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setStyle(new Notification.MessagingStyle(new Person.Builder().setName("Synthetic self").build())
+                        .setConversationTitle("Synthetic chat").addMessage(imageMessage)).build();
+        current.extras.putLong(ImagePreviewLoader.TOKEN, 92);
+        Notification preview = roundTrip(ImagePreviewLoader.buildPreviewNotification(module, module.getApplicationInfo(),
+                current, Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888), 92, 9001));
+        Notification withoutPicture = roundTrip(preview);
+        withoutPicture.extras.remove(Notification.EXTRA_PICTURE);
+        withoutPicture.extras.remove(Notification.EXTRA_PICTURE_ICON);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        instrumentation.runOnMainSync(() -> {
+            try {
+                RemoteViews pending = Notification.Builder.recoverBuilder(module, current).createBigContentView();
+                RemoteViews pendingView = WeChatNotificationAppearance.withImagePreview(pending, module.getResources(),
+                        module.getApplicationInfo(), current);
+                boolean pendingReinflate = ImagePreviewPresentation.hasReapplyDisallowed(pendingView);
+                View pendingRoot = pendingView.apply(module, new FrameLayout(module));
+                check(hasText(pendingRoot, "[图片]"), "pending image lost its text fallback");
+                RemoteViews nativePreview = Notification.Builder.recoverBuilder(module, preview).createBigContentView();
+                RemoteViews expanded = WeChatNotificationAppearance.withImagePreview(nativePreview, module.getResources(),
+                        module.getApplicationInfo(), preview);
+                View root = expanded.apply(module, new FrameLayout(module));
+                int rootId = module.getResources().getIdentifier("status_bar_latest_event_content", "id", "android");
+                boolean supported = ImagePreviewPresentation.supportsMessageData(module.getResources(), nativePreview.getLayoutId(), rootId)
+                        && pendingReinflate && ImagePreviewPresentation.hasReapplyDisallowed(expanded);
+                check(supported ? root.findViewById(R.id.wechat_preview_image) != null && !hasText(root, "[图片]")
+                        : root.findViewById(R.id.wechat_preview_image) == null && hasText(root, "[图片]"),
+                        "picture and its placeholder were displayed together, or both were lost");
+                RemoteViews nativeFallback = Notification.Builder.recoverBuilder(module, withoutPicture).createBigContentView();
+                RemoteViews fallbackView = WeChatNotificationAppearance.withImagePreview(nativeFallback, module.getResources(),
+                        module.getApplicationInfo(), withoutPicture);
+                View fallbackRoot = fallbackView.apply(module, new FrameLayout(module));
+                check(fallbackRoot.findViewById(R.id.wechat_preview_image) == null && hasText(fallbackRoot, "[图片]"),
+                        "picture removal did not restore the source placeholder");
+                check("[图片]".contentEquals(((android.os.Bundle) preview.extras.getParcelableArray(
+                        Notification.EXTRA_MESSAGES)[0]).getCharSequence("text")), "rendering mutated the stored transcript");
+            } catch (Throwable error) { failure.set(error); }
+        });
+        if (failure.get() != null) throw new AssertionError("Picture/placeholder transition failed", failure.get());
+    }
+
+    static void imageMessageIdentitySurvivesLaterText(Instrumentation instrumentation) {
+        Context module = instrumentation.getTargetContext();
+        Person peer = new Person.Builder().setName("Synthetic peer").build();
+        Notification.MessagingStyle.Message image = new Notification.MessagingStyle.Message("[图片]", 100, peer);
+        image.getExtras().putLong(NotificationMessages.SERVER_ID, 9001);
+        Notification.MessagingStyle.Message text = new Notification.MessagingStyle.Message("Synthetic later text", 101, peer);
+        text.getExtras().putLong(NotificationMessages.SERVER_ID, 9002);
+        Notification current = new Notification.Builder(module, "synthetic-picture-followed-by-text")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setStyle(new Notification.MessagingStyle(new Person.Builder().setName("Synthetic self").build())
+                        .addMessage(image).addMessage(text)).build();
+        current.extras.putLong(NotificationMessages.SERVER_ID, 9002);
+        Notification preview = roundTrip(ImagePreviewLoader.buildPreviewNotification(module, module.getApplicationInfo(),
+                current, Bitmap.createBitmap(20, 20, Bitmap.Config.ARGB_8888), 93, 9001));
+        android.os.Bundle display = ImagePreviewPresentation.withoutPlaceholder(preview.extras,
+                preview.extras.getLong(ImagePreviewLoader.IMAGE_MESSAGE_ID));
+        check(display != null && preview.extras.getLong(ImagePreviewLoader.IMAGE_MESSAGE_ID) == 9001,
+                "later text changed the displayed image identity");
+        android.os.Parcelable[] messages = display.getParcelableArray(Notification.EXTRA_MESSAGES);
+        check("".contentEquals(((android.os.Bundle) messages[0]).getCharSequence("text"))
+                && "Synthetic later text".contentEquals(((android.os.Bundle) messages[1]).getCharSequence("text")),
+                "presentation suppressed the wrong message");
+        check("[图片]".contentEquals(((android.os.Bundle) preview.extras.getParcelableArray(
+                Notification.EXTRA_MESSAGES)[0]).getCharSequence("text")), "presentation changed the source message");
+    }
+
+    private static boolean hasText(View root, String expected) {
+        if (root instanceof TextView && expected.contentEquals(((TextView) root).getText())) return true;
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) if (hasText(group.getChildAt(i), expected)) return true;
+        }
+        return false;
+    }
+
+	static void verifiedImageIdentitySurvivesPreviewRoundTrip(Instrumentation instrumentation) {
+		Context module = instrumentation.getTargetContext();
+		Notification current = new Notification.Builder(module, "synthetic-image-identity")
+				.setSmallIcon(android.R.drawable.ic_dialog_info).setContentText("[图片]").build();
+		current.extras.putBoolean(WeChatRecallEvents.VERIFIED_KEY, true);
+		current.extras.putString(NotificationMessages.KEY, "synthetic-chat");
+		current.extras.putLong(NotificationMessages.SERVER_ID, 9001);
+		ImageNotificationIdentity captured = ImagePreviewLoader.notificationIdentity(current);
+		check(captured != null, "verified source identity was not captured");
+		Notification preview = roundTrip(ImagePreviewLoader.buildPreviewNotification(module, module.getApplicationInfo(),
+				current, Bitmap.createBitmap(20, 20, Bitmap.Config.ARGB_8888), 91));
+		check(captured.equals(ImagePreviewLoader.notificationIdentity(preview)), "preview lost verified source identity");
+		current.extras.putString(NotificationMessages.KEY, "synthetic-other-chat");
+		current.extras.putLong(NotificationMessages.SERVER_ID, 9002);
+		check("synthetic-chat".equals(captured.talker) && captured.serverId == 9001,
+				"notification mutation changed the captured image identity");
+		preview.extras.remove(WeChatRecallEvents.VERIFIED_KEY);
+		check(ImagePreviewLoader.notificationIdentity(preview) == null, "unverified extras supplied an image identity");
+	}
+
     static void fitStartAndActions(Instrumentation instrumentation) {
         Context module = instrumentation.getTargetContext();
         verify(instrumentation, module, module);
@@ -240,6 +342,7 @@ final class ImagePreviewLayoutInstrumentation {
         check(preview.bigContentView == null, "discard kept image layout");
         check(!preview.extras.containsKey(Notification.EXTRA_PICTURE), "discard kept picture");
         check(!preview.extras.containsKey(Notification.EXTRA_PICTURE_ICON), "discard kept offloaded picture icon");
+        check(!preview.extras.containsKey(ImagePreviewLoader.IMAGE_MESSAGE_ID), "discard kept displayed image identity");
     }
 
     static void modulePackageLookupUnavailable(Context context) {

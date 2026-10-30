@@ -6,6 +6,34 @@ import java.util.Collections;
 import static org.junit.Assert.*;
 
 public class ImageNotificationIdentityTest {
+	@Test public void verifiedIdentityRequiresBothProvenanceAndMessageKey() {
+		assertNull(ImageNotificationIdentity.verified(false, "a", 9001));
+		assertNull(ImageNotificationIdentity.verified(true, null, 9001));
+		assertNull(ImageNotificationIdentity.verified(true, "", 9001));
+		assertNull(ImageNotificationIdentity.verified(true, "  ", 9001));
+		assertNull(ImageNotificationIdentity.verified(true, "a", 0));
+		assertNull(ImageNotificationIdentity.verified(true, "a", -1));
+		assertNotNull(ImageNotificationIdentity.verified(true, "a", 9001));
+	}
+	@Test public void repeatedImageNeedsANewRequestWhenVerifiedMessageChanges() {
+		ImageNotificationIdentity first = ImageNotificationIdentity.verified(true, "a", 9001);
+		assertEquals(first, ImageNotificationIdentity.verified(true, "a", 9001));
+		assertNotEquals(first, ImageNotificationIdentity.verified(true, "a", 9002));
+		assertNotEquals(first, ImageNotificationIdentity.verified(true, "b", 9001));
+		assertNotEquals(first, null);
+	}
+	@Test public void unverifiedIdentityCannotResolveAmbiguousImages() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("a", 1, 9001, 20000, Arrays.asList("/first"), 300);
+		index.put("a", 2, 9002, 20000, Arrays.asList("/second"), 301);
+		assertNull(index.select("a", ImageNotificationIdentity.verified(false, "a", 9002), 20000, 302, 303));
+		assertEquals("a:2", index.select("a", ImageNotificationIdentity.verified(true, "a", 9002), 20000, 302, 303).key);
+	}
+	@Test public void verifiedIdentityCannotCrossConversationEvenWhenServerIdMatches() {
+		ImageEventIndex index = new ImageEventIndex();
+		index.put("b", 1, 9001, 20000, Arrays.asList("/other-chat"), 300);
+		assertNull(index.select("b", ImageNotificationIdentity.verified(true, "a", 9001), 20000, 302, 303));
+	}
 	@Test public void appendedTextAndDuplicateRetainLiveLineage() {
 		assertTrue(ImageNotificationIdentity.continues(7, 7, "a", "a", "a:1", "a:1",
 				Arrays.asList("image"), Arrays.asList("image", "text"), 1));

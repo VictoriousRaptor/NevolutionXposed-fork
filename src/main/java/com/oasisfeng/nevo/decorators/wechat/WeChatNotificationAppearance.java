@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
+import android.os.Bundle;
 import android.view.View;
 import android.widget.RemoteViews;
 
@@ -84,10 +85,18 @@ final class WeChatNotificationAppearance {
             throw new NoSuchMethodException("Unsupported RemoteViews.removeFromParent signature");
         remove.setAccessible(true);
         remove.invoke(result, R.id.wechat_preview_image);
+        boolean trackedImage = ImagePreviewLoader.isTracked(notification)
+                && ImagePreviewPresentation.hasIncomingPlaceholder(notification.extras);
+        if (trackedImage && !ImagePreviewPresentation.disallowReapply(result)) return result;
         if (!ImagePreviewLoader.isPreview(notification)) return result;
         Bitmap bitmap = notification.extras.getParcelable(Notification.EXTRA_PICTURE);
         Icon pictureIcon = notification.extras.getParcelable(Notification.EXTRA_PICTURE_ICON);
         if (bitmap == null && pictureIcon == null) return result;
+        int messagingRoot = resources.getIdentifier("status_bar_latest_event_content", "id", "android");
+        if (!ImagePreviewPresentation.supportsMessageData(resources, original.getLayoutId(), messagingRoot)) return result;
+        Bundle display = ImagePreviewPresentation.withoutPlaceholder(notification.extras,
+                notification.extras.getLong(ImagePreviewLoader.IMAGE_MESSAGE_ID));
+        if (display == null) return result;
         RemoteViews image = ImagePreviewRemoteViews.create(moduleInfo, R.layout.wechat_group_image_preview);
         // NotificationManager may offload the bitmap and retain only a URI-backed picture icon.
         if (bitmap != null) image.setImageViewBitmap(R.id.wechat_preview_image, bitmap);
@@ -104,7 +113,8 @@ final class WeChatNotificationAppearance {
                 image.setViewPadding(R.id.wechat_preview_image, rtl ? 0 : inset, 0, rtl ? inset : 0, 0);
             }
         }
-        // Keep the system's conversation title, sender rows, avatars and actions; append only the picture.
+        // Apply text replacement and picture addition together; never alter the source notification while a worker resolves.
+        result.setBundle(messagingRoot, "setData", display);
         result.addView(column, image);
         return result;
     }
