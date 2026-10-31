@@ -542,7 +542,9 @@ public class WeChatDecorator extends NevoDecoratorService {
 					imagePreviews.keepPreview(getAppContext(), nm, tag, id, n, conversation.key, messages);
 				}
 			}
-			messaging.setGroupConversation(is_group_chat).setConversationTitle(title);
+			// Compact titles already include the peer; groups and self-only transcripts still need an explicit title.
+			final boolean needsConversationTitle = is_group_chat || messages.stream().noneMatch(message -> message.getPerson() != null);
+			messaging.setGroupConversation(is_group_chat).setConversationTitle(needsConversationTitle ? title : null);
 			MessagingBuilder.flatIntoExtras(messaging, extras);
 			WeChatNotificationAppearance.mark(n);
 			NotificationMarkdown.apply(n, mMarkdownEnabled);

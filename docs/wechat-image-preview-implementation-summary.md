@@ -1,6 +1,6 @@
 # 微信图片通知预览实现总结与性能分析
 
-2026-10-31 图片与占位互斥：只在 render-only `EXTRA_MESSAGES` 副本中清空服务器 ID 精确命中的 incoming `[图片]`/`图片` 行，源 transcript 保持原样；目标不唯一、身份不符或图片字段缺失时保持文本回退。对预览开关开启且含占位的待图 RemoteViews 先核验并设置 `FLAG_REAPPLY_DISALLOWED`，让已缓存该标志的 SystemUI 旧树在下一次补图时 inflate 新树，避免消息行 transient 淡出与图片并存。AOSP `canReapplyRemoteView()` 只检查旧树，因此不能只在 READY 更新设 flag；旧版无 flag 缓存或待图 inflate 被更新取消时，首次转换仍未保证。反射接口或消息模板不可用时不清除占位、不添加图片。图片发布后，后续文字更新对同一 token 安排 4 次、每 150ms 的主线程重检，覆盖图片先发布、原微信 notify 后提交的短窗口；不跨通知锁调用 manager。主机身份测试和 framework 合成用例不证明 SystemUI/OEM 真实视觉或跨线程提交顺序。
+2026-10-31 图片与占位互斥：只在 render-only `EXTRA_MESSAGES` 副本中清空对应的 incoming `[图片]`/`图片` 行：有正数服务器 ID 时要求该 ID 唯一命中，没有有效 ID 时要求 incoming 图片占位唯一。源 transcript 保持原样；目标不唯一、身份不符或图片字段缺失时保持文本回退。对预览开关开启且含占位的待图 RemoteViews 先核验并设置 `FLAG_REAPPLY_DISALLOWED`，让已缓存该标志的 SystemUI 旧树在下一次补图时 inflate 新树，避免消息行 transient 淡出与图片并存。AOSP `canReapplyRemoteView()` 只检查旧树，因此不能只在 READY 更新设 flag；旧版无 flag 缓存或待图 inflate 被更新取消时，首次转换仍未保证。反射接口或消息模板不可用时不清除占位、不添加图片。图片发布后，后续文字更新刷新同一图片请求唯一的一组主线程重检：取消旧排队回调并使过时回调失效，为最新通知重新保留最多 4 次、每 150ms 的完整窗口，覆盖图片先发布、原微信 notify 后提交的短窗口；不跨通知锁调用 manager。主机调度回归覆盖队列合并、旧回调失效、窗口重置、执行中刷新、请求结束停止和请求隔离。主机身份/调度测试和 framework 合成用例不证明 SystemUI/OEM 真实视觉或跨线程提交顺序。
 
 2026-10-30 重复图片修复：复用通知身份 hook 已核验的会话和服务器消息 ID，在归一化前固定身份，图片选择与后续连续性检查优先精确匹配该消息。相同图片路径、正文和时间均不能合并不同消息或复用旧请求；精确目标未出现/路径未就绪时继续等待该目标，不选另一条图片。缺少核验身份时保持原有窗口和歧义拒选，索引 TTL、等待预算、下载及渲染保持原限制。没有新增 hook、版本映射或设置；本轮仅离线验证和构建，真实重复收图及 SystemUI 显示待设备验收。详见[适配手册](wechat-version-adaptation-playbook.md)。
 

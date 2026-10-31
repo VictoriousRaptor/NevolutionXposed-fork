@@ -66,11 +66,6 @@ final class WeChatNotificationAppearance {
         return TEMPLATE_MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE));
     }
 
-    static boolean isGroupMessaging(Notification notification) {
-        return TEMPLATE_MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE))
-                && notification.extras.getBoolean("android.isGroupConversation");
-    }
-
     @SuppressLint({"BlockedPrivateApi", "DiscouragedApi"}) // Optional Xposed renderer uses private framework APIs and view IDs.
     static RemoteViews withImagePreview(RemoteViews original, Resources resources,
                                              ApplicationInfo moduleInfo, Notification notification)

@@ -36,6 +36,8 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /** Decodes private WeChat files in WeChat and transports a bounded bitmap, not a private file URI. */
 final class ImagePreviewLoader {
@@ -175,23 +177,47 @@ final class ImagePreviewLoader {
 		n.extras.putLong(TOKEN, request.token);
 		n.extras.putLong(NOTIFICATION_TOKEN, request.notificationToken);
 		log("continuity", "request=" + request.token + " pending=" + pending.containsKey(key));
-		scheduleReattach(context, manager, tag, id, request, PREVIEW_REATTACH_RETRIES);
+		scheduleReattach(context, manager, tag, id, request);
 	}
 
 	/** Recheck after the source notification has left its notify hook; its final system commit follows Local.apply(). */
 	private void scheduleReattach(Context context, NotificationManager manager, String tag, int id,
-			Request request, int retriesRemaining) {
-		if (retriesRemaining <= 0) return;
-		main.postDelayed(() -> {
+			Request request) {
+		request.reattachRetries.restart(task -> main.postDelayed(task, PREVIEW_REATTACH_RETRY_MS), main::removeCallbacks, () -> {
 			String key = id + ":" + tag;
 			Preview preview = previews.get(key);
 			if (preview != null && preview.request == request) reattach(context, manager, tag, id, preview);
 			boolean pendingRequest = pending.get(key) == request;
 			boolean cachedPreview = preview != null && preview.request == request
 					&& SystemClock.elapsedRealtime() - preview.publishedAt < PREVIEW_KEEP_MS;
-			if (pendingRequest || cachedPreview)
-				scheduleReattach(context, manager, tag, id, request, retriesRemaining - 1);
-		}, PREVIEW_REATTACH_RETRY_MS);
+			return pendingRequest || cachedPreview;
+		});
+	}
+
+	/** One retry chain per request; each source update replaces the queued callback and resets its window. */
+	static final class ReattachRetries {
+		private Runnable scheduled;
+
+		synchronized void restart(Consumer<Runnable> post, Consumer<Runnable> remove, BooleanSupplier attempt) {
+			if (scheduled != null) remove.accept(scheduled);
+			scheduled = new Runnable() {
+				private int remaining = PREVIEW_REATTACH_RETRIES;
+
+				@Override public void run() {
+					synchronized (ReattachRetries.this) {
+						if (scheduled != this) return;
+					}
+					// Notification service calls must stay outside the scheduler monitor.
+					boolean active = attempt.getAsBoolean();
+					synchronized (ReattachRetries.this) {
+						if (scheduled != this) return;
+						if (active && --remaining > 0) post.accept(this);
+						else scheduled = null;
+					}
+				}
+			};
+			post.accept(scheduled);
+		}
 	}
 
 	private static int imageCount(List<NotificationCompat.MessagingStyle.Message> messages) {
@@ -741,6 +767,7 @@ final class ImagePreviewLoader {
 
 	private static final class Request {
 		final CandidateCache.Owner cacheOwner = new CandidateCache.Owner();
+		final ReattachRetries reattachRetries = new ReattachRetries();
 		final ImageNotificationIdentity identity;
 		final List<String> messages;
 		volatile String eventKey;

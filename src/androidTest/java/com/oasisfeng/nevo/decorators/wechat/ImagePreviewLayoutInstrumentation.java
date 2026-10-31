@@ -224,7 +224,8 @@ final class ImagePreviewLayoutInstrumentation {
                 .setStyle(style).build();
         Notification preview = roundTrip(ImagePreviewLoader.buildPreviewNotification(module, module.getApplicationInfo(), current,
                 Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888), 80));
-        check(WeChatNotificationAppearance.isGroupMessaging(preview), "group preview lost messaging template");
+        check(WeChatNotificationAppearance.isMessaging(preview), "group preview lost messaging template");
+        check(preview.extras.getBoolean("android.isGroupConversation"), "group preview lost group marker");
         AtomicReference<Throwable> failure = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> {
             try {

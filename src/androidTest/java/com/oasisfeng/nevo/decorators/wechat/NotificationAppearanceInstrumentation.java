@@ -135,6 +135,7 @@ final class NotificationAppearanceInstrumentation {
             RemoteViews firstSystemView = Notification.Builder.recoverBuilder(context, first).createContentView();
             check(firstSystemView != null && firstSystemView.getLayoutId() != nativeCard.getLayoutId(),
                     "first private message still selected WeChat's native card");
+            checkPrivateTitle(context, first, "A");
 
             Notification second = privateText(context, "B", 200, avatar);
             second.contentView = nativeCard;
@@ -148,7 +149,61 @@ final class NotificationAppearanceInstrumentation {
             RemoteViews secondSystemView = Notification.Builder.recoverBuilder(context, second).createContentView();
             check(secondSystemView != null && secondSystemView.getLayoutId() == firstSystemView.getLayoutId(),
                     "private message layout changed on its next update");
+            checkPrivateTitle(context, second, "B");
+
+            Notification rebuilt = Notification.Builder.recoverBuilder(context, second).build();
+            check(local.apply(manager, null, id, rebuilt) == Decorating.Processed, "stored private message was not rebuilt");
+            checkPrivateTitle(context, rebuilt, "B");
+            Bitmap image = Bitmap.createBitmap(16, 32, Bitmap.Config.ARGB_8888);
+            Notification preview = ImagePreviewLoader.buildPreviewNotification(context, context.getApplicationInfo(), rebuilt, image, 79);
+            checkPrivateTitle(context, preview, "B");
+
+            Notification group = new Notification.Builder(context, "identity-test")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Synthetic group")
+                    .setContentText("Synthetic peer: Group message").setTicker("Synthetic peer: Group message")
+                    .setLargeIcon(avatar).setWhen(300).build();
+            group.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle");
+            group.extras.putBoolean("android.isGroupConversation", true);
+            check(local.apply(manager, null, id + 1, group) == Decorating.Processed, "group message was not rebuilt");
+            Notification groupRebuilt = Notification.Builder.recoverBuilder(context, group).build();
+            androidx.core.app.NotificationCompat.MessagingStyle groupStyle =
+                    androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(groupRebuilt);
+            check(groupStyle != null && groupStyle.isGroupConversation()
+                    && "Synthetic group".contentEquals(groupStyle.getConversationTitle()), "group title was removed");
+            check("Synthetic peer".contentEquals(groupStyle.getMessages().get(0).getPerson().getName()),
+                    "group sender identity changed");
+
+            Notification replyOnly = privateText(context, "Incoming", 400, avatar);
+            replyOnly.extras.putLong(NotificationMessages.SERVER_ID, 3);
+            check(local.apply(manager, null, id + 2, replyOnly) == Decorating.Processed, "reply fixture was not rebuilt");
+            NotificationMessages.recordReply(replyOnly, "Synthetic reply", 410, "synthetic-title-reply");
+            NotificationMessages.markRecall(replyOnly, 3);
+            check(local.apply(manager, null, id + 2, replyOnly) == Decorating.Processed, "self-only private message was not rebuilt");
+            Notification replyRebuilt = Notification.Builder.recoverBuilder(context, replyOnly).build();
+            androidx.core.app.NotificationCompat.MessagingStyle replyStyle =
+                    androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(replyRebuilt);
+            check(replyStyle != null && !replyStyle.isGroupConversation()
+                    && "Alice".contentEquals(replyStyle.getConversationTitle()), "self-only conversation lost its contact title");
+            check(replyRebuilt.extras.getCharSequence(Notification.EXTRA_TITLE).toString().contains("Alice"),
+                    "self-only compact title lost the contact");
+            check(replyStyle.getMessages().size() == 1 && replyStyle.getMessages().get(0).getPerson() == null
+                    && "Synthetic reply".contentEquals(replyStyle.getMessages().get(0).getText()),
+                    "self-only message gained a fake peer or restored the recalled message");
         } finally { local.onDestroy(); }
+    }
+
+    private static void checkPrivateTitle(Context context, Notification notification, String text) {
+        Notification rebuilt = Notification.Builder.recoverBuilder(context, notification).build();
+        check("Alice".contentEquals(rebuilt.extras.getCharSequence(Notification.EXTRA_TITLE)),
+                "private compact title repeated the contact name");
+        check(text.contentEquals(rebuilt.extras.getCharSequence(Notification.EXTRA_TEXT)),
+                "private compact body changed");
+        androidx.core.app.NotificationCompat.MessagingStyle style =
+                androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(rebuilt);
+        check(style != null && !style.isGroupConversation(), "private message became a group");
+        for (androidx.core.app.NotificationCompat.MessagingStyle.Message message : style.getMessages())
+            check(message.getPerson() != null && "Alice".contentEquals(message.getPerson().getName()),
+                    "private sender identity was removed to hide its name");
     }
 
     private static Notification privateText(Context context, String text, long when, Icon avatar) {

@@ -1,6 +1,6 @@
 # NevolutionXposed 3.4.0
 
-日期：2026-10-24，2026-10-27 更新。Android `versionCode`：17（上一版本 3.3.1 为 16）。设置 schema：11。
+日期：2026-10-24，2026-10-31 更新。Android `versionCode`：17（上一版本 3.3.1 为 16）。设置 schema：11。
 
 2026-10-27 合并验证（下述审查精简前）：图片布局修复与私聊头像/展开应用名改动一起运行 `testDebugUnitTest assembleDebugAndroidTest assembleRelease --offline`，强制使用现有 release 签名。212 项主机测试全部通过，失败、错误、跳过均为 0；framework 测试 APK 编译成功，包含新增的包查询失败场景及既有外观回归，未安装执行。Release 的 `lintVitalRelease`、签名证书比对及 zipalign 检查通过，实际 APK 为 3.4.0 / 17、minSdk 26、非 debuggable。完整 Lint、真实微信收图、隐藏 API 访问及 SystemUI/OEM 展示未在本轮验收；不推送、不安装。产物与原始验收记录仅存于本地忽略目录。
 
@@ -13,11 +13,11 @@
 ## 变更
 
 - 修复图片解码成功后，微信进程无法查询模块包导致展开布局创建失败的问题。使用框架提供的模块 ApplicationInfo 和完整反射构造签名创建模块布局，保留 minSdk 26、fitStart 及回复动作；构造不可用时保留文字通知。
-- 私聊通知头像使用微信原头像交由系统会话布局呈现。取消应用名修改、设置及分隔符隐藏动作，schema 11 清理本地/远端旧键；撤销额外的群名行和首位发送者标题改写，应用名及内容标题沿用系统模板。作用范围、签名门禁及尚未完成的真机展示验收见[通知外观说明](wechat-notification-appearance.md)。
+- 私聊通知头像使用微信原头像交由系统会话布局呈现。移除旧的展开应用名设置，schema 11 清理本地/远端旧键；折叠视图隐藏应用名及分隔符，展开视图保留系统应用名。撤销额外的群名行和首位发送者标题改写，内容标题沿用系统模板。作用范围、签名门禁及尚未完成的真机展示验收见[通知外观说明](wechat-notification-appearance.md)。
 - 群聊通知主图标在折叠、展开时使用原群头像和系统微信角标；群聊图片补图保留群聊文本的会话标题、发送者和消息排版，追加完整 `fitStart` 图片，并清理视图复用时的旧预览。框架用例已在真机通过，真实微信/OEM 外观待验收。
 - 图片文件等待时间可配置为 100–30000 毫秒，默认 1500；文件重试、画质等待和普通大图观察共用每请求截止点，并受图片事件身份期限限制。下载首参使用图片行 `id`，消息对独立使用 `msglocalid`。
 - Markdown 代码样式恢复按完整签名选择旧返回值布局或 Android 17 消息字段布局；不混用两代调用链，签名或去优化失败时沿用系统清理结果。
-- 私聊通知未展开时使用对方名字作为会话标题：`MessagingStyle` 保留现有会话名，同时继续标记为非群聊。群聊标题规则不变；跳过装饰的媒体或非聊天通知继续沿用原处理路径。实际 Android/OEM 折叠布局待真机确认。
+- 修复横屏短私聊通知重复联系人名：`MessagingStyle` 在有来信 Person 时不再额外设置会话标题，避免系统把相同的会话名与发送者名拼接两次；私聊标志和联系人身份保留。群聊仍保留群名，对方撤回后仅剩自己回复的私聊仍保留联系人标题，避免显示自己的名称。跳过装饰的媒体或非聊天通知继续沿用原处理路径。实际 Android/OEM 横屏及折叠布局待真机确认，详见[通知外观说明](wechat-notification-appearance.md)。
 - 通知栏回复 B 后保留本轮来信 A 和回复 B；下一条符合条件的原始来信 C 到达后，默认显示 C，开启“显示你最后回复的消息”时显示 B+C。发送前仍请求原生已读，失败不记录 B；用户明确移除仍清理对应通知代次，迟到回调不复活已移除通知。详见[通知历史规则](notification-history-policy.md)。
 - SystemUI 移除回调兼容四参数与三参数签名，安装失败可重试；原生已读动作绑定当前会话实例和通知代次，不继承旧通知动作。会话身份缓存最多保留 256 个最近使用的 ID，活跃归档中的会话保留。
 - WXGF 输入限定读取长度并检查 EOF，拒绝空、截断或多余数据；图片路径探针仅在 Debug 且显式开启诊断时运行。移除无当前生产者的旧 Zoom 动作及遗留分支，保留现代图片预览、动作身份和撤回清理。完整兼容边界见[适配手册](wechat-version-adaptation-playbook.md)。
@@ -36,6 +36,13 @@
 - Android/OEM 实际通知表现、微信已读/回复/下载及新旧版本覆盖安装仍需独立真机验收。构建、签名和缓存契约测试不代表这些行为通过。
 
 ## 验证记录
+
+### 2026-10-31 私聊短通知修复 Release 构建
+
+- 使用既有 release 密钥及 `-PrequireReleaseSigning=true` 离线执行 `testDebugUnitTest assembleRelease lintRelease --console=plain --offline --no-daemon`，构建成功。244 项主机测试无失败、错误或跳过；本轮 Gradle 复用同一功能源码在前一轮 Debug 构建中的通过结果。
+- 实际 Release APK 包名为 `com.oasisfeng.nevo.xposed`，版本为 3.4.0 / 17、minSdk 26、非 debuggable；签名证书与现有 release 密钥一致，签名及 zipalign 检查通过。Release Lint 为 0 errors / 4 项既有 `InlinedApi` warnings。
+- 私聊标题回归覆盖首次通知、连续更新、框架与补图重建、群名和成员身份保留，以及来信被撤回后仅剩自己回复时保留联系人标题。新增 framework 检查已在前一轮 `assembleDebugAndroidTest` 中编译，本轮未安装或执行；横屏短通知的真实微信/SystemUI/OEM 显示仍待真机验收。
+- Release APK、构建日志和签名/版本核验记录仅保存在本地忽略目录 `.debug-artifacts/private-compact-title-release-20261031/`。本次未改变 hook、版本映射或功能开关，未安装、提交、推送或发布。
 
 ### 2026-10-27 审查精简
 
