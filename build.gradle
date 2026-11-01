@@ -50,6 +50,14 @@ android {
 		buildConfig = true
 	}
 
+	// Framework tests use package-private module APIs. On Android 16 the separate
+	// androidTest APK has a different class loader, so also offer a self-runner in Debug.
+	sourceSets {
+		debug {
+			java.srcDir 'src/androidTest/java'
+		}
+	}
+
 	signingConfigs {
 		release {
 			if (releaseSigningConfigured) {

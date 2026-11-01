@@ -86,6 +86,18 @@ final class WeChatDescriptorChecks {
         v.method(reply.receiverClass, "onReceive", void.class, Context.class, Intent.class);
         v.staticMethod(reply.helperClass, "b", Bundle.class, Intent.class);
         v.checks++;
+        // Exercise production validation too: descriptor presence alone can miss stricter gates.
+        WeChatImageEvents.resolve(p, v::type); v.checks++;
+        WeChatImageDownloader.resolve(p, v::type); v.checks++;
+        WeChatAppReplyEvents.resolve(app, v.loader); v.checks++;
+        WeChatRecallEvents.resolve(recall, v.loader); v.checks++;
+        if (WeChatEmojiHooks.supports(info.versionName, info.versionCode)) {
+            if (!WeChatEmojiHooks.selectCandidate(WeChatProfileSelector.BuildId.fromPackageInfo(info),
+                    new WeChatProfileSelector(2), null,
+                    v.type("com.tencent.mm.smiley.g"), v.type("com.tencent.mm.booter.notification.m0"), msg))
+                throw new AssertionError("Emoji production profile did not resolve");
+            v.checks++;
+        }
         return v.checks;
     }
 

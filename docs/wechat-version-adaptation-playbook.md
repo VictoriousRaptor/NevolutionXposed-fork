@@ -1,5 +1,31 @@
 # 微信版本适配手册
 
+## 2026-11-02 微信 8.0.79/3183 自动真机验证
+
+适配分支先 rebase 到本地主检出区 `master` 的 `daefa7b`，再执行以下验证；主检出区未提交的其他修改不包含在本轮基线中。设备为 Android API 37，已安装微信 `versionName=8.0.79 && versionCode=3183`，回拉 base APK SHA-256 为 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0`，与 2026-10-29 APKMirror 样本相同。APK 来源、反编译位置及完整原始描述符见 [8.0.79 findings](wechat-8.0.79-findings.md)。
+
+首轮发现普通大图 `large_unavailable reason=no_match`：`pq0.a0` 的数据库字段类型 `lh5.k0` 是接口，`f(String,String[],int): android.database.Cursor` 为抽象实例契约，旧解析器误将其当作必须有方法体的下载入口。现在仅数据库 query 允许 abstract，仍精确校验参数、返回类型、非 static 及唯一数据库字段；反射调用由实际数据库接收对象派发。下载实现的 getter 与完整 `b(...) : int` 继续要求非 abstract 实例方法，其他服务继承、callback interface 和消息对构造校验保留。3183/3200 的合成接口派发测试及抽象下载入口拒绝测试通过；本轮只有 3183 完成设备复测，不能据此补写 3200 真机结果。
+
+版本匹配仍要求版本名和代码同时满足精确画像；同名未知构建继续按各组件完整签名唯一通过才实验性启用。初始化仍在微信主进程的 `Application.onCreate(): void` AFTER；图片预览开关控制事件安装，普通大图还要求大图开关，签名/安装/查询失败继续只关闭或回退相应组件，保留本地缩略图与文字占位。没有新增 hook 目标、回调或跨功能授权。
+
+最终结果：主机 **284/284**；同包 framework instrumentation **84/84、0 skipped、0 failures**；已安装微信描述符及生产解析器检查 **45 项通过**，两类 instrumentation 均以 `INSTRUMENTATION_CODE: -1` 结束。runner 补齐 master 缺失的 3 个名称，并在执行前检查名称/用例数量；图片占位用例在生成预览前复制待图通知，避免 framework Builder 复用对象导致阶段混淆，并在主线程测量布局后检查待图、完成态和移除图片后的回退。生产解析器校验覆盖图片事件/下载、应用内回复、撤回和有精确支持画像时的 Emoji；旧版没有 Emoji 画像时不误报失败。
+
+完整 `lintDebug`、`lintRelease` 均为 0 errors（分别 35、14 warnings）。Debug 同包 framework 用例显式要求 API 28+，低于此版本返回取消及原因；微信描述符模式独立于该限制。所需 API 标注仅作用于测试 helper，Markdown 测试隐藏 API 检查仅在注明 `--no-hidden-api-checks` 的测试类中定向抑制。最后一次入口调整后的 framework 复测证据另存 `.debug-artifacts/framework-final-3183/`。
+
+微信主进程连续两次启动均得到 Emoji `emoji_hook_ready match=exact`、应用内回复 `app_reply_ready match=exact`、撤回 `recall_ready match=exact`、图片事件 `events_ready match=exact` 及普通大图 `large_ready match=exact`；通知合成回复为 `profile_ready match=exact usable=true`，仅证明完整画像可解析，未派发回复或证明延迟安装的三道门禁已在实际发送中生效。大图 ready 只证明当前进程解析就绪，不代表已查询真实数据库、提交下载或展示了真实图片。
+
+Debug、androidTest、Release 均通过现有 release 证书及 zipalign 核验，Release 无 instrumentation 入口。各轮测试均在 `finally` 中恢复测试前模块，回拉 SHA-256 一致，并核验测试包及临时 runner 不存在。原始 APK、日志及回滚材料仅在 `.debug-artifacts/verified-3183/` 等本地忽略目录。用户选择保留人工验收：真实收发、通知回复、应用内回复后的轮次、Emoji 展示、普通大图下载/超时/取消、撤回裁剪及 OEM/SystemUI 外观尚未验收；没有重启设备或 SystemUI，不宣称本次 SystemUI hook 已重新加载。
+
+## 2026-10-29 Android 16 framework 仪器测试修复
+
+Android API 36 的独立 androidTest APK 与模块 APK 使用不同类加载器，测试源码访问模块包私有类/方法时产生 65 项 `IllegalAccessError`。Debug APK 现在同时编入 framework 用例并声明同包 instrumentation，直接执行 `com.oasisfeng.nevo.xposed/com.oasisfeng.nevo.decorators.wechat.MessageIdentityInstrumentation`；Release APK 不含该入口。此改动只影响测试承载方式，不改变微信或 SystemUI hook。当前手机复测为 **68/69 通过、1 项明确跳过、0 失败**，另有已安装微信描述符 **40 项通过**，两次运行最终均为 `INSTRUMENTATION_CODE: -1`。跳过的 `markdownFrameworkCodeCleanup` 在该设备 framework 上缺少所需 `stripNonStyleSpans` 签名；生产 hook 在此布局同样记录 `code_styles_hook_unavailable`，不宣称代码样式恢复通过。签名 Debug 和 Release 均成功构建、证书与既有 release 证书相同；测试结束后恢复原模块 APK，回拉哈希与测试前一致，独立测试包及 runner 均不存在。原始结果仅存于 `.debug-artifacts/wechat-same-name-profile-probing/self-runner-green-*/`。
+
+## 2026-10-29 微信 8.0.79/3200 当前分支初次真机复测
+
+在 Android API 36 手机上安装 `codex/wechat-same-name-profile-probing` 的签名 Debug APK（`912a574`），设备已装微信确认为 8.0.79/3200，base APK SHA-256 为 `f2a725bc04302ad218a563533ae79356e66b64aa711b275bc919a8d432f7e15d`，与本地离线样本一致。主机单元测试 252 项通过，Debug 与 androidTest APK 均用现有 release 证书签名；设备回拉的模块 APK 与构建产物 SHA-256 一致。微信主进程连续两次启动均记录 Emoji `emoji_hook_ready match=exact`、回复 `profile_ready match=exact usable=true`、应用内回复 `app_reply_ready match=exact`、撤回 `recall_ready match=exact`、图片事件 `events_ready match=exact`，头像与折叠头 hook 也 ready。`profile_ready` 仅证明回复画像及描述符就绪，未触发合成回复派发或确认三道门禁实际生效。普通大图下载两次均为 `large_unavailable reason=no_match`，该组件没有启用；源码核对提示 `og5.k0` 为接口，其抽象 `f(String,String[],int): Cursor` 与下载探测的非抽象方法要求冲突，具体失败点仍需运行时定向诊断确认。
+
+设备 framework instrumentation 为 4/69：其余 65 项均因测试 APK 与目标 APK 跨类加载器访问包私有成员产生 `IllegalAccessError`（其中一项由断言包裹），不作为功能回归通过。测试 APK 在 `finally` 中卸载并核验测试包及 runner 均不存在；结束时恢复测试前的模块 APK，回拉 SHA-256 与备份一致，并重新启动微信目标进程。未发送真实消息，未测试通知回复、Emoji 显示、收图/下载、应用内回复、撤回或 OEM 视觉效果；未重启 SystemUI，因此它在本次模块安装后的 hook 未核验。本轮原始证据及 APK 仅在忽略目录 `.debug-artifacts/wechat-same-name-profile-probing/device-3200-branch-20261029-225900/`。以下较早写的“3183/3200 未安装本次模块”是本轮前的历史状态；3183 仍无本轮真机结果。
+
 ## 2026-10-29 微信 8.0.79/3183 与 8.0.79/3200 精确画像
 
 已从 [APKMirror 3183 APKM](https://www.apkmirror.com/apk/wechat/wechat/wechat-8-0-79-release/wechat-8-0-79-3-android-apk-download/) 抽取 base APK；3200 使用与 [APKMirror 3200 APK](https://www.apkmirror.com/apk/wechat/wechat/wechat-8-0-79-release/wechat-8-0-79-2-android-apk-download/) 所列大小、MD5、SHA-256 完全一致的腾讯官方 CDN 文件。`apkanalyzer` 与 `apksigner` 已核对版本和 Tencent 证书。3183 APKM SHA-256 为 `11a4fe01140090ae14874db2cd6a40a34680504bd0394fb547c10126c0ecab0c`，base 为 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0`；3200 APK 为 `f2a725bc04302ad218a563533ae79356e66b64aa711b275bc919a8d432f7e15d`。APK、反编译源码与日志只存于忽略的 `.debug-artifacts/wechat-same-name-profile-probing/apkmirror-8079/`。原始类、字段、方法名和完整类型表见 [8.0.79 findings](wechat-8.0.79-findings.md) 本日小节；JADX 的 `f数字` 别名不是 hook 名称。
@@ -543,13 +569,14 @@ NX_REPLY stage=profile_ready version=<版本>/<versionCode> profile=wechat-<版�
 
 ### 步骤 8：设备回归与记录
 
-模块自身的 framework 仪器测试可以独立执行，无需重启微信或 SystemUI。安装两个已验证同 release 证书的 APK 后，核对 `pm list instrumentation` 的目标为 `com.oasisfeng.nevo.xposed`，再运行：
+模块自身的 framework 仪器测试可以独立执行，无需重启微信或 SystemUI。Android 16/API 36 应使用含同包 runner 的签名 Debug APK：先备份设备原模块，再安装 Debug；核对 `pm list instrumentation` 出现 `com.oasisfeng.nevo.xposed/com.oasisfeng.nevo.decorators.wechat.MessageIdentityInstrumentation (target=com.oasisfeng.nevo.xposed)` 后运行，不安装独立 androidTest APK。测试脚本使用 `try/finally` 恢复原模块并核对回拉哈希，且核验独立测试包及 runner 不存在：
 
 ```powershell
-adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oasisfeng.nevo.xposed.test/com.oasisfeng.nevo.decorators.wechat.MessageIdentityInstrumentation
+adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r com.oasisfeng.nevo.xposed/com.oasisfeng.nevo.decorators.wechat.MessageIdentityInstrumentation
+adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r -e verify_wechat_profiles true com.oasisfeng.nevo.xposed/com.oasisfeng.nevo.decorators.wechat.MessageIdentityInstrumentation
 ```
 
-`--no-hidden-api-checks` 仅关闭本次测试进程的隐藏 API 限制，以覆盖注入环境使用的 `Notification.mSortKey` 等字段；不修改系统全局设置。Android 16 未加该参数时可出现 `NoSuchFieldError`，不能据此把字段改名。runner 只运行模块的 framework 用例，不安装微信混淆 hook、不向真实会话发送消息，也不能代替微信端到端验收。检查完整测试计数、失败状态和最终 `INSTRUMENTATION_CODE: -1`；adb 的退出码 0 本身不表示通过。
+`--no-hidden-api-checks` 仅关闭本次测试进程的隐藏 API 限制，以覆盖注入环境使用的 `Notification.mSortKey` 等字段；不修改系统全局设置。Android 16 未加该参数时可出现 `NoSuchFieldError`，不能据此把字段改名。runner 只运行模块的 framework 用例，不安装微信混淆 hook、不向真实会话发送消息，也不能代替微信端到端验收。缺少运行时 framework 签名的用例须明确计入 skipped，不得算作 passed；检查通过/跳过/失败计数和最终 `INSTRUMENTATION_CODE: -1`，adb 的退出码 0 本身不表示通过。
 
 - 按第 6 节验收矩阵执行，全部证据（日志行、通知 dump、哈希）留在 `.debug-artifacts/`。
 - 在 `docs/wechat-<版本>-findings.md` 记录：设备与版本事实、验证过的映射表、根因、修复与验证结果、未验证项。

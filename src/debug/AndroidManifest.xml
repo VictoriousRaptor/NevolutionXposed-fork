@@ -11,4 +11,7 @@
             </intent-filter>
         </activity>
     </application>
+	<instrumentation
+		android:name="com.oasisfeng.nevo.decorators.wechat.MessageIdentityInstrumentation"
+		android:targetPackage="com.oasisfeng.nevo.xposed" />
 </manifest>

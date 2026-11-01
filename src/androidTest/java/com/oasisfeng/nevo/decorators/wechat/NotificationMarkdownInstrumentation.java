@@ -27,6 +27,8 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /** Framework regression cases, registered in the existing runner. Compilation is not execution. */
+@androidx.annotation.RequiresApi(28)
+@android.annotation.SuppressLint("SoonBlockedPrivateApi") // Framework tests run with --no-hidden-api-checks.
 final class NotificationMarkdownInstrumentation {
     static void headingsKeepSystemSizeAndInlineStyles() {
         String raw = "# Bold\n## Medium ~~123~~";
@@ -248,8 +250,13 @@ final class NotificationMarkdownInstrumentation {
             Notification.MessagingStyle.Message message = new Notification.MessagingStyle.Message(
                     NotificationMarkdown.render(original), 100, (android.app.Person) null);
             message.getExtras().putAll(codeMetadata(raw));
-            NotificationMarkdownHookProfile profile = NotificationMarkdownHookProfile.resolve(
-                    message.getClass(), Notification.MessagingStyle.class, Bundle.class, android.widget.RemoteViews.class);
+            NotificationMarkdownHookProfile profile;
+            try {
+                profile = NotificationMarkdownHookProfile.resolve(
+                        message.getClass(), Notification.MessagingStyle.class, Bundle.class, android.widget.RemoteViews.class);
+            } catch (NoSuchMethodException | NoSuchFieldException unavailable) {
+                throw new MessageIdentityInstrumentation.Skipped("Framework message cleanup signature unavailable");
+            }
             Field textField = message.getClass().getDeclaredField("mText");
             textField.setAccessible(true);
             Method toBundle = message.getClass().getDeclaredMethod("toBundle");

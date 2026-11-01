@@ -349,13 +349,14 @@ final class WeChatImageDownloader {
 			r.coreStorageGet = staticMethod(kernel, profile.coreGet, coreStorage);
 			for (Field field : coreStorage.getDeclaredFields()) {
 				if (field.getType() != databaseWrapper) continue;
-                if (Modifier.isStatic(field.getModifiers())) throw new IllegalStateException("Static database wrapper");
+				if (Modifier.isStatic(field.getModifiers())) throw new IllegalStateException("Static database wrapper");
 				if (r.databaseField != null) throw new IllegalStateException("Ambiguous database wrapper");
 				r.databaseField = field;
 			}
 			if (r.databaseField == null) throw new IllegalStateException("Missing database wrapper");
 			r.databaseField.setAccessible(true);
-			r.databaseQuery = method(databaseWrapper, profile.query, Cursor.class, String.class, String[].class, int.class);
+			// An interface/abstract query contract dispatches to the actual database receiver.
+			r.databaseQuery = instanceMethod(databaseWrapper, profile.query, Cursor.class, String.class, String[].class, int.class);
 			Class<?> serviceManager = resolver.find(profile.manager);
 			r.imageServiceClass = resolver.find(profile.service);
 			Class<?> imageServiceImplementation = resolver.find(profile.implementation);
@@ -371,12 +372,12 @@ final class WeChatImageDownloader {
                     || !downloadInterface.isInterface() || !r.callbackClass.isInterface())
                 throw new IllegalStateException("Invalid image service inheritance");
 			r.serviceGet = staticMethod(serviceManager, "c", serviceBase, Class.class);
-			r.downloadServiceGet = method(imageServiceImplementation, profile.downloadGet, resolver.find(profile.downloadInterface));
+			r.downloadServiceGet = concreteMethod(imageServiceImplementation, profile.downloadGet, resolver.find(profile.downloadInterface));
 			if (Modifier.isAbstract(msgIdTalkerClass.getModifiers()))
                 throw new IllegalStateException("Abstract message pair");
 			r.msgIdTalkerConstructor = msgIdTalkerClass.getDeclaredConstructor(long.class, String.class);
 			r.msgIdTalkerConstructor.setAccessible(true);
-			r.downloadMethod = method(r.downloadServiceClass, "b", int.class, long.class, msgIdTalkerClass,
+			r.downloadMethod = concreteMethod(r.downloadServiceClass, "b", int.class, long.class, msgIdTalkerClass,
 					int.class, Object.class, int.class, r.callbackClass, int.class, boolean.class);
 			Class<?> wxgfClass = resolver.find("com.tencent.mm.plugin.gif.MMWXGFJNI");
 			r.wxgfDecode = staticMethod(wxgfClass, "wxam2PicBuf", byte[].class, byte[].class, int.class, int.class);
@@ -390,9 +391,14 @@ final class WeChatImageDownloader {
             throw new IllegalStateException("Invalid static method: " + name);
         return result;
     }
-	private static Method method(Class<?> owner, String name, Class<?> returns, Class<?>... arguments) {
+	private static Method concreteMethod(Class<?> owner, String name, Class<?> returns, Class<?>... arguments) {
+		Method method = instanceMethod(owner, name, returns, arguments);
+		if (Modifier.isAbstract(method.getModifiers())) throw new IllegalStateException("Abstract method: " + name);
+		return method;
+	}
+	private static Method instanceMethod(Class<?> owner, String name, Class<?> returns, Class<?>... arguments) {
 		Method method = XposedHelpers.findMethodExact(owner, name, arguments);
-		if (Modifier.isStatic(method.getModifiers()) || Modifier.isAbstract(method.getModifiers()) || method.getReturnType() != returns) throw new IllegalStateException("Unexpected return type: " + name);
+		if (Modifier.isStatic(method.getModifiers()) || method.getReturnType() != returns) throw new IllegalStateException("Invalid instance method: " + name);
 		return method;
 	}
 

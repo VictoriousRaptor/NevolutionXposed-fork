@@ -25,6 +25,7 @@ import com.oasisfeng.nevo.xposed.R;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Framework/resource checks of the production layout, without sending WeChat messages. */
+@androidx.annotation.RequiresApi(28)
 final class ImagePreviewLayoutInstrumentation {
     static void pictureAndPlaceholderAreExclusive(Instrumentation instrumentation) {
         Context module = instrumentation.getTargetContext();
@@ -36,6 +37,8 @@ final class ImagePreviewLayoutInstrumentation {
                 .setStyle(new Notification.MessagingStyle(new Person.Builder().setName("Synthetic self").build())
                         .setConversationTitle("Synthetic chat").addMessage(imageMessage)).build();
         current.extras.putLong(ImagePreviewLoader.TOKEN, 92);
+        // recoverBuilder/build may reuse current: keep the pending phase independent of the ready preview.
+        Notification pendingSource = roundTrip(current);
         Notification preview = roundTrip(ImagePreviewLoader.buildPreviewNotification(module, module.getApplicationInfo(),
                 current, Bitmap.createBitmap(40, 80, Bitmap.Config.ARGB_8888), 92, 9001));
         Notification withoutPicture = roundTrip(preview);
@@ -44,16 +47,16 @@ final class ImagePreviewLayoutInstrumentation {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> {
             try {
-                RemoteViews pending = Notification.Builder.recoverBuilder(module, current).createBigContentView();
+                RemoteViews pending = Notification.Builder.recoverBuilder(module, pendingSource).createBigContentView();
                 RemoteViews pendingView = WeChatNotificationAppearance.withImagePreview(pending, module.getResources(),
-                        module.getApplicationInfo(), current);
+                        module.getApplicationInfo(), pendingSource);
                 boolean pendingReinflate = ImagePreviewPresentation.hasReapplyDisallowed(pendingView);
-                View pendingRoot = pendingView.apply(module, new FrameLayout(module));
+                View pendingRoot = applyAndLayout(pendingView, module);
                 check(hasText(pendingRoot, "[图片]"), "pending image lost its text fallback");
                 RemoteViews nativePreview = Notification.Builder.recoverBuilder(module, preview).createBigContentView();
                 RemoteViews expanded = WeChatNotificationAppearance.withImagePreview(nativePreview, module.getResources(),
                         module.getApplicationInfo(), preview);
-                View root = expanded.apply(module, new FrameLayout(module));
+                View root = applyAndLayout(expanded, module);
                 int rootId = module.getResources().getIdentifier("status_bar_latest_event_content", "id", "android");
                 boolean supported = ImagePreviewPresentation.supportsMessageData(module.getResources(), nativePreview.getLayoutId(), rootId)
                         && pendingReinflate && ImagePreviewPresentation.hasReapplyDisallowed(expanded);
@@ -63,7 +66,7 @@ final class ImagePreviewLayoutInstrumentation {
                 RemoteViews nativeFallback = Notification.Builder.recoverBuilder(module, withoutPicture).createBigContentView();
                 RemoteViews fallbackView = WeChatNotificationAppearance.withImagePreview(nativeFallback, module.getResources(),
                         module.getApplicationInfo(), withoutPicture);
-                View fallbackRoot = fallbackView.apply(module, new FrameLayout(module));
+                View fallbackRoot = applyAndLayout(fallbackView, module);
                 check(fallbackRoot.findViewById(R.id.wechat_preview_image) == null && hasText(fallbackRoot, "[图片]"),
                         "picture removal did not restore the source placeholder");
                 check("[图片]".contentEquals(((android.os.Bundle) preview.extras.getParcelableArray(
@@ -106,6 +109,15 @@ final class ImagePreviewLayoutInstrumentation {
             for (int i = 0; i < group.getChildCount(); i++) if (hasText(group.getChildAt(i), expected)) return true;
         }
         return false;
+    }
+
+    private static View applyAndLayout(RemoteViews views, Context context) {
+        View root = views.apply(context, new FrameLayout(context));
+        float density = context.getResources().getDisplayMetrics().density;
+        root.measure(View.MeasureSpec.makeMeasureSpec(Math.round(320 * density), View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(Math.round(1000 * density), View.MeasureSpec.AT_MOST));
+        root.layout(0, 0, root.getMeasuredWidth(), root.getMeasuredHeight());
+        return root;
     }
 
 	static void verifiedImageIdentitySurvivesPreviewRoundTrip(Instrumentation instrumentation) {

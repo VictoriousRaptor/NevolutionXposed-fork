@@ -1,5 +1,33 @@
 # 微信 8.0.79 / 3182、3183、3200 适配记录
 
+## 2026-11-02 3183 自动真机验证与大图探测修正
+
+在先 rebase 到本地主检出区 `master` 的 `daefa7b` 后，使用现有 release 证书签名的 Debug 在 Android API 37、微信 8.0.79/3183 上复测。回拉 base SHA-256 为 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0`，与下节 APKMirror 样本相同，来源和离线完整映射继续有效。
+
+普通大图首轮两次 `no_match` 已定位：原始类 `lh5.k0` 是 interface，其 `f(java.lang.String, java.lang.String[], int): android.database.Cursor` 是抽象实例方法；`pq0.a0` 原始字段 `f: lh5.k0` 保存实际接收对象。证据为 `.debug-artifacts/wechat-same-name-profile-probing/apkmirror-8079/3183-sources/sources/lh5/k0.java` 与同目录 `pq0/a0.java`，APK 来源/哈希见下节。生产解析器现只对数据库 query 允许 abstract，继续要求精确返回/参数类型与非 static；服务 getter 和下载 `v61.j.b(long,MsgIdTalker,int,Object,int,eb0.w,int,boolean): int` 仍要求非 abstract 实例方法。3200 的 `og5.k0` 同类契约由主机夹具覆盖，本轮未装 3200 复测。
+
+| 验证项 | 最终结果及边界 |
+| --- | --- |
+| 主机测试与构建 | 284/284；Debug、androidTest、Release 构建成功，证书与现有 release 相同，zipalign 通过，Release 无测试入口 |
+| 同包 framework instrumentation | 84/84、0 skipped、0 failures；已修正 runner 名称少 3 项及待图/完成态测试共用通知实例的问题 |
+| 安装包描述符与生产解析器 | 45 项通过，包含各独立生产门禁；只解析，不执行真实会话/数据库/下载行为 |
+| Emoji、应用内回复、撤回、图片事件 | 两次新微信主进程均记录各自 `ready match=exact`，证明对应 hook 安装 |
+| 合成通知回复 | 两次 `profile_ready match=exact usable=true`，未触发实际发送或验收门禁绕过 |
+| 普通大图 | 两次 `large_ready profile=8.0.79/3183 match=exact`，证明解析成功，未实际下载 |
+| 清理 | `finally` 恢复测试前模块，回拉哈希相同；测试包与临时 runner 均不存在 |
+
+完整 Debug/Release lint 为 0 errors，分别保留 35/14 warnings。Debug framework 入口显式限定 API 28+，低版本取消并给出原因；描述符模式独立。测试 helper 的 API/隐藏 API 标注已补齐，最终入口复测在 `.debug-artifacts/framework-final-3183/`。
+
+版本名和代码同时匹配、主进程 AFTER 初始化、各功能独立门禁与开关、失败保守回退保持。用户选择先完成自动验证，真实收图、回复、应用内回复、Emoji、撤回和 OEM/SystemUI 外观保留待人工验收；没有重启设备或 SystemUI。原始证据仅保存在 `.debug-artifacts/verified-3183/`，细节见[适配手册](wechat-version-adaptation-playbook.md)本日章节。下方 2026-10-29 的 3200 `no_match` 和 framework 结果仍是当时证据，不能拿本轮 3183 结果替换。
+
+## 2026-10-29 framework 测试入口复测
+
+在 Android API 36 手机使用 Debug 模块 APK 内的同包 instrumentation，避开此前独立 androidTest APK 与模块 APK 跨类加载器的包私有访问问题。结果为 68/69 通过、1 项因当前 framework 缺少 Markdown 清理签名而明确跳过、0 失败；已安装微信 8.0.79/3200 的描述符检查 40 项通过。Debug 和 Release 构建与现有 release 证书一致，Release 不含自测入口。结束时已恢复测试前模块并核对哈希，独立测试包及 runner 不存在。此结果不改变下节普通大图下载 `no_match` 或真实消息功能尚未验收的结论；执行方式与证据范围见[适配手册](wechat-version-adaptation-playbook.md)。
+
+## 2026-10-29 3200 当前分支初次设备验证
+
+设备已安装微信 8.0.79/3200 的 base APK SHA-256 与下节离线样本相同。在签名 Debug 模块 `912a574` 的微信主进程连续两次启动中，Emoji、合成回复画像、应用内回复、撤回和图片事件分别得到 `match=exact` 的 ready 日志；普通大图下载两次均为 `large_unavailable reason=no_match`。源码中 `og5.k0` 是接口，`f(String,String[],int): Cursor` 为抽象方法，而 `WeChatImageDownloader.resolve()` 使用的 `method()` 拒绝抽象方法；这是该失败的明确候选原因，仍待定向运行时确认。ready 只证明对应 hook 安装或画像解析，未执行真实消息、回复、收图、撤回或通知外观验收。设备 framework instrumentation 只有 4/69，通过数受跨 APK 类加载器 `IllegalAccessError` 影响，不代表本次功能回归；测试 APK 已卸载并核验不存在。详细边界和本地证据位置见[适配手册](wechat-version-adaptation-playbook.md)本日小节。
+
 ## 2026-10-29 APKMirror 3183/3200 离线适配
 
 下文 2026-10-28 至 29 日写的“3183 无 APK”“3200 仅 Emoji 命中”是当时的历史状态；本节记录新取得安装包后的实现。两个构建的画像仅在 `versionName == 8.0.79 && versionCode == 对应值` 时精确优先；同名未知代码仍逐功能探测完整签名，零命中或多候选歧义时关闭该组件。画像缓存修订版升至 2，新进程读取旧候选不会直接启用，缓存命中也须重新探测。原生 `PendingIntent` 回复及 framework 通知外观与这些微信画像独立。

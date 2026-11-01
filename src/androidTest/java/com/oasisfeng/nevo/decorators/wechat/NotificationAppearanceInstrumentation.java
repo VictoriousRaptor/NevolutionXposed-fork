@@ -16,6 +16,7 @@ import com.oasisfeng.nevo.sdk.Decorating;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Synthetic framework checks only: never post a notification or contact a device app. */
+@androidx.annotation.RequiresApi(28)
 final class NotificationAppearanceInstrumentation {
     static void collapsedAppNameOnly(Instrumentation instrumentation) {
         Context context = instrumentation.getTargetContext();

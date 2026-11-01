@@ -27,6 +27,10 @@ import java.util.List;
 
 /** Framework-only instrumentation runner: no test-library download or host WeChat is required. */
 public final class MessageIdentityInstrumentation extends Instrumentation {
+    static final class Skipped extends RuntimeException {
+        Skipped(String reason) { super(reason); }
+    }
+
     private boolean verifyWeChat;
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
@@ -47,6 +51,17 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             }
             return;
         }
+        if (Build.VERSION.SDK_INT < 28) {
+            Bundle result = new Bundle();
+            result.putString("shortMsg", "Framework instrumentation requires API 28 or newer");
+            finish(Activity.RESULT_CANCELED, result);
+            return;
+        }
+        runFrameworkTests();
+    }
+
+    @androidx.annotation.RequiresApi(28)
+    private void runFrameworkTests() {
         com.oasisfeng.nevo.sdk.NevoDecoratorService.setAppContext(getTargetContext());
         String[] names = { "carExtensionWithoutConversation", "channelMigrationPreservesSettings",
                 "personAndAttachmentRoundTrip", "staleTickerAndCarHistory", "unknownAndGroupNames",
@@ -71,7 +86,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "markdownCodeStylesAndParcel", "markdownCodeSourceAndReply",
                 "markdownFrameworkCodeCleanup", "markdownRestorationScope", "markdownPartialCodeStyles",
                 "markdownHeadingsAndInlineStyles", "markdownHeadingRebuildAndDisable", "markdownFrameworkHeadingCleanup",
-                "imagePreviewFitStartAndActions", "imagePreviewMessagingAlignment", "imagePreviewOffloadedPictureIcon", "imagePreviewDiscardClearsLayout", "imagePreviewModulePackageLookupUnavailable", "imageWaitPreferenceSync",
+                "imagePreviewFitStartAndActions", "verifiedImageIdentitySurvivesPreviewRoundTrip",
+                "pictureAndPlaceholderAreExclusive", "imageMessageIdentitySurvivesLaterText",
+                "imagePreviewMessagingAlignment", "imagePreviewOffloadedPictureIcon", "imagePreviewDiscardClearsLayout", "imagePreviewModulePackageLookupUnavailable", "imageWaitPreferenceSync",
                 "notificationNativeAvatar", "notificationAppearanceScope", "notificationCollapsedAppName",
                 "privateTextReplacesNativeViewsFromFirstMessage" };
         Runnable[] tests = { () -> NotificationCompatibilityInstrumentation.carExtensionWithoutConversation(getTargetContext()),
@@ -133,7 +150,13 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> NotificationAppearanceInstrumentation.ownershipAndPreviewMetadata(getTargetContext()),
                 () -> NotificationAppearanceInstrumentation.collapsedAppNameOnly(this),
                 () -> NotificationAppearanceInstrumentation.privateTextReplacesNativeViewsFromFirstMessage(getTargetContext()) };
-        int failures = 0;
+        if (names.length != tests.length) {
+            Bundle result = new Bundle();
+            result.putString("shortMsg", "Framework test names and cases differ in length");
+            finish(Activity.RESULT_CANCELED, result);
+            return;
+        }
+        int failures = 0, skipped = 0;
         for (int i = 0; i < tests.length; i++) {
             Bundle status = new Bundle();
             status.putString("class", getClass().getName());
@@ -142,6 +165,11 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             status.putInt("current", i + 1);
             sendStatus(1, status);
             try { tests[i].run(); sendStatus(0, status); }
+            catch (Skipped unsupported) {
+                skipped++;
+                status.putString("skip", unsupported.getMessage());
+                sendStatus(-3, status);
+            }
             catch (Throwable error) {
                 failures++;
                 status.putString("stack", android.util.Log.getStackTraceString(error));
@@ -149,7 +177,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             }
         }
         Bundle result = new Bundle();
-        result.putString("stream", "Identity instrumentation: " + (tests.length - failures) + "/" + tests.length + " passed\n");
+        result.putString("stream", "Identity instrumentation: " + (tests.length - failures - skipped)
+                + "/" + tests.length + " passed, " + skipped + " skipped\n");
         if (failures != 0) result.putString("shortMsg", failures + " identity tests failed");
         finish(failures == 0 ? Activity.RESULT_OK : Activity.RESULT_CANCELED, result);
     }

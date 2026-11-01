@@ -158,8 +158,19 @@ public class WeChatImageProfileProbeTest {
     }
     public static class Kernel { public static Core v() { throw new AssertionError(); } public static Core x() { throw new AssertionError("probe called service"); } }
     public static class Core { public Database database; }
-    public static class Database {
-        public android.database.Cursor f(String sql,String[] args,int flags) { throw new AssertionError("probe queried data"); }
+    // The APK declares the database field as an interface with an abstract query method.
+    public interface Database { android.database.Cursor f(String sql,String[] args,int flags); }
+    @Test public void abstractDatabaseQueryDispatchesToConcreteReceiver() throws Exception {
+        for (long code : new long[]{3183, 3200}) {
+            WeChatImageProfile p = WeChatImageProfile.forVersion("8.0.79", code);
+            WeChatImageDownloader.Resolved resolved = WeChatImageDownloader.resolve(p,
+                    name -> downloadClassFor(p, name));
+            assertTrue(java.lang.reflect.Modifier.isAbstract(resolved.databaseQuery.getModifiers()));
+            int[] calls = {0};
+            Database receiver = (sql, args, flags) -> { calls[0]++; return null; };
+            assertNull(resolved.databaseQuery.invoke(receiver, "SELECT 1", new String[0], 0));
+            assertEquals(1, calls[0]);
+        }
     }
     public static class StaticDatabase {
         public static android.database.Cursor f(String sql,String[] args,int flags) { throw new AssertionError(); }
@@ -176,6 +187,14 @@ public class WeChatImageProfileProbeTest {
     }
     public static class BadDownload implements DownloadService {
         public long b(long id,Pair pair,int type,Object data,int flag,Callback callback,int priority,boolean original) { return 0; }
+    }
+    @Test public void abstractDownloadImplementationIsRejected() {
+        assertThrows(IllegalStateException.class, () -> WeChatImageDownloader.resolve(profile(),
+                name -> name.equals(profile().download) ? AbstractDownload.class : downloadClass(name)));
+    }
+    public abstract static class AbstractDownload implements DownloadService {
+        public abstract int b(long id, Pair pair, int type, Object data, int flag, Callback callback,
+                              int priority, boolean original);
     }
     public static class Pair { public Pair(long id,String talker) { throw new AssertionError(); } }
     public static class Decoder { public static byte[] wxam2PicBuf(byte[] source,int flags,int format) { throw new AssertionError(); } }
