@@ -69,6 +69,30 @@ final class NotificationAppearanceInstrumentation {
             Notification.MessagingStyle empty = style();
             WeChatNotificationAppearance.useNativeAvatar(profile, empty, withoutIcon);
             check(profile.conversationType.getInt(empty) == 0, "missing native avatar did not fall back");
+
+            // Two contacts in one process: warming the first contact must not fix only that contact.
+            WeChatDecorator.Local local = new WeChatDecorator.Local("WeChatDecorator");
+            local.onCreate(context.getSharedPreferences("identity-test", Context.MODE_PRIVATE));
+            try {
+                NotificationManager manager = context.getSystemService(NotificationManager.class);
+                for (int step = 0; step < 4; step++) {
+                    int contact = step / 2;
+                    String peer = contact == 0 ? "Synthetic peer A" : "Synthetic peer B";
+                    boolean first = step % 2 == 0;
+                    Notification incoming = new Notification.Builder(context, "identity-test")
+                            .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(peer)
+                            .setContentText("Synthetic message").setTicker(peer + ": Synthetic message")
+                            .setLargeIcon(first ? (Icon) null : nativeIcon).setWhen(100 + step).build();
+                    check(local.apply(manager, null, 9860 + contact, incoming) == Decorating.Processed,
+                            "per-contact notification was not rebuilt");
+                    Notification.Builder recovered = Notification.Builder.recoverBuilder(context, incoming);
+                    Notification.MessagingStyle rendered = (Notification.MessagingStyle) recovered.getStyle();
+                    WeChatNotificationAppearance.useNativeAvatar(profile, rendered, incoming);
+                    check(profile.conversationType.getInt(rendered) == 1, "per-contact first/update used legacy layout");
+                    check(!rendered.isGroupConversation() && peer.contentEquals(rendered.getMessages().get(0).getSenderPerson().getName()),
+                            "per-contact notification changed group state or sender");
+                }
+            } finally { local.onDestroy(); }
         } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
     }
 

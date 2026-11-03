@@ -51,6 +51,12 @@ final class NotificationAppearanceHookProfile {
                 field(builder, "mContext", context, false), field(builder, "mN", notification, false));
     }
 
+    static Header compactHeadsUp(Class<?> builder, Class<?> context, Class<?> notification, Class<?> views)
+            throws ReflectiveOperationException {
+        return new Header(method(builder, "createCompactHeadsUpContentView", views),
+                field(builder, "mContext", context, false), field(builder, "mN", notification, false));
+    }
+
     static Avatar avatar(Class<?> style, Class<?> baseStyle, Class<?> builder, Class<?> context,
                          Class<?> notification, Class<?> icon, Class<?> views)
             throws ReflectiveOperationException {

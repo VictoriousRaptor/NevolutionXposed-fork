@@ -90,7 +90,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "pictureAndPlaceholderAreExclusive", "imageMessageIdentitySurvivesLaterText",
                 "imagePreviewMessagingAlignment", "imagePreviewOffloadedPictureIcon", "imagePreviewDiscardClearsLayout", "imagePreviewModulePackageLookupUnavailable", "imageWaitPreferenceSync",
                 "notificationNativeAvatar", "notificationAppearanceScope", "notificationCollapsedAppName",
-                "privateTextReplacesNativeViewsFromFirstMessage" };
+                "privateTextReplacesNativeViewsFromFirstMessage", "privateCompactHeadsUpRenderAndReapply" };
         Runnable[] tests = { () -> NotificationCompatibilityInstrumentation.carExtensionWithoutConversation(getTargetContext()),
                 NotificationCompatibilityInstrumentation::channelMigrationPreservesSettings,
                 this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
@@ -149,7 +149,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> NotificationAppearanceInstrumentation.nativeAvatarAndGroupScope(getTargetContext()),
                 () -> NotificationAppearanceInstrumentation.ownershipAndPreviewMetadata(getTargetContext()),
                 () -> NotificationAppearanceInstrumentation.collapsedAppNameOnly(this),
-                () -> NotificationAppearanceInstrumentation.privateTextReplacesNativeViewsFromFirstMessage(getTargetContext()) };
+                () -> NotificationAppearanceInstrumentation.privateTextReplacesNativeViewsFromFirstMessage(getTargetContext()),
+                () -> PrivateCompactHeadsUpInstrumentation.renderAndReapply(this) };
         if (names.length != tests.length) {
             Bundle result = new Bundle();
             result.putString("shortMsg", "Framework test names and cases differ in length");

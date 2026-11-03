@@ -18,7 +18,7 @@ import java.util.function.Predicate;
 /** Framework-only appearance hooks in the existing WeChat/SystemUI scopes. */
 public final class NotificationAppearanceHooks {
     private static final String TAG = "WeChat.Appearance";
-    private static boolean avatarInstalled, collapsedInstalled, headerInstalled;
+    private static boolean avatarInstalled, collapsedInstalled, compactHeadsUpInstalled, headerInstalled;
 
     public static synchronized void install(BooleanSupplier enabled, String process, Predicate<Executable> deoptimize) {
         if (!WeChatDecorator.WECHAT_PACKAGE.equals(process) && !"com.android.systemui".equals(process)) return;
@@ -66,6 +66,37 @@ public final class NotificationAppearanceHooks {
             collapsedInstalled = true;
             Log.i(TAG, "source=collapsed_hook_ready process=" + process);
         } catch (Throwable failure) { fallback("collapsed_hook_unavailable", failure); }
+
+        if (!compactHeadsUpInstalled) try {
+            NotificationAppearanceHookProfile.Header profile = NotificationAppearanceHookProfile.compactHeadsUp(
+                    Notification.Builder.class, Context.class, Notification.class, RemoteViews.class);
+            deoptimizeViewCallers(Notification.Builder.class, deoptimize);
+            XposedBridge.hookMethod(profile.render, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.hasThrowable() || !(param.getResult() instanceof RemoteViews)) return;
+                    try {
+                        if (!enabled.getAsBoolean()) return;
+                        Context context = (Context) profile.context.get(param.thisObject);
+                        Notification notification = (Notification) profile.notification.get(param.thisObject);
+                        if (context == null || notification == null
+                                || !WeChatNotificationAppearance.owned(context.getPackageName(), notification)) return;
+                        RemoteViews original = (RemoteViews) param.getResult();
+                        RemoteViews result = WeChatNotificationAppearance.privateCompactHeadsUp(
+                                original, context.getResources(), notification);
+                        param.setResult(result);
+                        if (BuildConfig.DEBUG) Log.i(TAG, "source=compact_render process=" + process
+                                + " changed=" + (result != original) + " layoutId=" + original.getLayoutId()
+                                + " messaging=" + WeChatNotificationAppearance.isMessaging(notification)
+                                + " stored=" + notification.extras.getBoolean(NotificationMessages.STORED)
+                                + " group=" + notification.extras.getBoolean("android.isGroupConversation")
+                                + " type=" + notification.extras.getInt(ConversationClassification.TYPE)
+                                + " peerTitle=" + (notification.extras.getCharSequence(NotificationMessages.TITLE) != null));
+                    } catch (Throwable failure) { fallback("compact_render", failure); }
+                }
+            });
+            compactHeadsUpInstalled = true;
+            Log.i(TAG, "source=compact_hook_ready process=" + process);
+        } catch (Throwable failure) { fallback("compact_hook_unavailable", failure); }
 
         if (!headerInstalled) try {
             NotificationAppearanceHookProfile.Header profile = NotificationAppearanceHookProfile.header(

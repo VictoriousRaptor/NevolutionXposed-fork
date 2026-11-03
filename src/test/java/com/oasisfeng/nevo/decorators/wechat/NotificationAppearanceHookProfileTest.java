@@ -15,6 +15,24 @@ public class NotificationAppearanceHookProfileTest {
         assertThrows(NoSuchMethodException.class, () -> collapsed(WrongCompactBuilder.class));
     }
 
+    @Test public void compactHeadsUpIsASeparateZeroArgumentEntryPoint() throws Exception {
+        NotificationAppearanceHookProfile.Header profile = compactHeadsUp(CompactHeadsUpBuilder.class);
+        assertEquals("createCompactHeadsUpContentView", profile.render.getName());
+        assertArrayEquals(new Class<?>[0], profile.render.getParameterTypes());
+        assertThrows(NoSuchMethodException.class, () -> compactHeadsUp(CompactBuilder.class));
+    }
+
+    @Test public void compactHeadsUpRejectsWrongReturnStaticAndOverloadedMethods() {
+        assertThrows(NoSuchMethodException.class, () -> compactHeadsUp(WrongHeadsUpReturn.class));
+        assertThrows(NoSuchMethodException.class, () -> compactHeadsUp(StaticHeadsUp.class));
+        assertThrows(NoSuchMethodException.class, () -> compactHeadsUp(OverloadedHeadsUp.class));
+    }
+
+    @Test public void compactHeadsUpRequiresExactInstanceBuilderFields() {
+        assertThrows(NoSuchFieldException.class, () -> compactHeadsUp(WrongHeadsUpContext.class));
+        assertThrows(NoSuchFieldException.class, () -> compactHeadsUp(StaticHeadsUpNotice.class));
+    }
+
     @Test public void rejectsWrongModernSignatureRatherThanTryingALegacyMethod() {
         assertThrows(NoSuchMethodException.class, () -> header(WrongReturnBuilder.class));
         assertThrows(NoSuchMethodException.class, () -> header(StaticBuilder.class));
@@ -62,6 +80,10 @@ public class NotificationAppearanceHookProfileTest {
                 Context.class, Notice.class, Icon.class, Views.class);
     }
 
+    private static NotificationAppearanceHookProfile.Header compactHeadsUp(Class<?> builder) throws Exception {
+        return NotificationAppearanceHookProfile.compactHeadsUp(builder, Context.class, Notice.class, Views.class);
+    }
+
     private static class Context {}
     private static class Notice {}
     private static class Views {}
@@ -85,6 +107,30 @@ public class NotificationAppearanceHookProfileTest {
         private Context mContext;
         private Notice mN;
         private String createContentView() { return null; }
+    }
+    private static class CompactHeadsUpBuilder {
+        private Context mContext;
+        private Notice mN;
+        private Views createCompactHeadsUpContentView() { return null; }
+    }
+    private static class WrongHeadsUpReturn extends CompactHeadsUpBuilder {
+        private String createCompactHeadsUpContentView() { return null; }
+    }
+    private static class StaticHeadsUp extends CompactHeadsUpBuilder {
+        private static Views createCompactHeadsUpContentView() { return null; }
+    }
+    private static class OverloadedHeadsUp extends CompactHeadsUpBuilder {
+        private Views createCompactHeadsUpContentView(boolean increasedHeight) { return null; }
+    }
+    private static class WrongHeadsUpContext {
+        private String mContext;
+        private Notice mN;
+        private Views createCompactHeadsUpContentView() { return null; }
+    }
+    private static class StaticHeadsUpNotice {
+        private Context mContext;
+        private static Notice mN;
+        private Views createCompactHeadsUpContentView() { return null; }
     }
     private static class WrongReturnBuilder {
         private String createExpandedContentView() { return null; }

@@ -7,8 +7,11 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.View;
 import android.widget.RemoteViews;
+
+import androidx.core.app.NotificationCompat;
 
 import com.oasisfeng.nevo.xposed.R;
 
@@ -51,14 +54,70 @@ final class WeChatNotificationAppearance {
         notification.headsUpContentView = null;
     }
 
+    @SuppressLint("DiscouragedApi") // Only the two verified framework compact heads-up templates are supported.
+    static RemoteViews privateCompactHeadsUp(RemoteViews original, Resources resources, Notification notification) {
+        if (!isMessaging(notification) || !notification.extras.getBoolean(NotificationMessages.STORED)
+                || notification.fullScreenIntent != null
+                || notification.extras.getBoolean(NotificationCompat.EXTRA_IS_GROUP_CONVERSATION)
+                || notification.extras.getInt(ConversationClassification.TYPE) == ConversationTypePolicy.BOT)
+            return original;
+        int layout = original.getLayoutId();
+        int messagingLayout = resources.getIdentifier("notification_template_material_messaging_compact_heads_up", "layout", "android");
+        int baseLayout = resources.getIdentifier("notification_template_material_compact_heads_up_base", "layout", "android");
+        if (layout == 0 || (layout != messagingLayout && layout != baseLayout)) return original;
+
+        NotificationCompat.MessagingStyle style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification);
+        if (style == null || style.isGroupConversation() || style.getMessages().isEmpty()) return original;
+        // Match the framework's compact heads-up choice: last incoming, or last reply if no incoming remains.
+        java.util.List<NotificationCompat.MessagingStyle.Message> messages = style.getMessages();
+        NotificationCompat.MessagingStyle.Message message = messages.get(messages.size() - 1);
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            NotificationCompat.MessagingStyle.Message candidate = messages.get(i);
+            if (candidate.getPerson() != null && !TextUtils.isEmpty(candidate.getPerson().getName())) {
+                message = candidate;
+                break;
+            }
+        }
+        CharSequence peer = notification.extras.getCharSequence(NotificationMessages.TITLE);
+        if (TextUtils.isEmpty(peer) && message.getPerson() != null) peer = message.getPerson().getName();
+        if (TextUtils.isEmpty(peer) || TextUtils.isEmpty(message.getText())) return original;
+        int title = resources.getIdentifier("title", "id", "android");
+        int body = resources.getIdentifier("header_text_secondary", "id", "android");
+        int titleFormat = resources.getIdentifier("notification_messaging_title_template", "string", "android");
+        if (title == 0 || body == 0 || titleFormat == 0) return original;
+
+        if (com.oasisfeng.nevo.xposed.BuildConfig.DEBUG) android.util.Log.i("WeChat.Appearance",
+                "source=compact_payload messages=" + messages.size() + " incoming=" + (message.getPerson() != null)
+                        + " bodyStartsWithPeer=" + message.getText().toString().startsWith(peer.toString())
+                        + " conversationTitle=" + !TextUtils.isEmpty(style.getConversationTitle()));
+
+        RemoteViews result = original.clone();
+        android.text.BidiFormatter bidi = android.text.BidiFormatter.getInstance();
+        result.setTextViewText(title, resources.getString(titleFormat, bidi.unicodeWrap(peer), ""));
+        result.setViewVisibility(title, View.VISIBLE);
+        result.setTextViewText(body, message.getText());
+        result.setViewVisibility(body, View.VISIBLE);
+        // Compact templates put these header fields on the same line. Keep just the title and body.
+        for (String name : new String[]{"app_name_text", "header_text", "app_name_divider",
+                "header_text_divider", "header_text_secondary_divider"}) {
+            int id = resources.getIdentifier(name, "id", "android");
+            if (id != 0) result.setViewVisibility(id, View.GONE);
+        }
+        return result;
+    }
+
     static void useNativeAvatar(NotificationAppearanceHookProfile.Avatar profile, Object style, Notification notification)
             throws IllegalAccessException {
         if (!TEMPLATE_MESSAGING.equals(notification.extras.getString(Notification.EXTRA_TEMPLATE))
                 || notification.extras.getInt(ConversationClassification.TYPE) == ConversationTypePolicy.BOT) return;
         Icon icon = notification.getLargeIcon();
-        if (icon == null) return;
+        boolean normalizedPrivate = notification.extras.getBoolean(NotificationMessages.STORED)
+                && notification.extras.containsKey(NotificationCompat.EXTRA_IS_GROUP_CONVERSATION)
+                && !notification.extras.getBoolean(NotificationCompat.EXTRA_IS_GROUP_CONVERSATION);
+        if (icon == null && !normalizedPrivate) return;
         // ConversationLayout supplies the app badge. Use WeChat's icon instead of a last-sender fallback.
-        profile.shortcutIcon.set(style, icon);
+        if (icon != null) profile.shortcutIcon.set(style, icon);
+        // Per-contact avatar loading must not select the legacy per-sender layout for private messages.
         if (profile.conversationType.getInt(style) == 0) profile.conversationType.setInt(style, 1);
     }
 
