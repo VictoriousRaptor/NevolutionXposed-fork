@@ -33,6 +33,9 @@ import com.oasisfeng.nevo.xposed.compat.XposedHelpers;
  * actions  : com.tencent.mm.permission.MM_AUTO_REPLY_MESSAGE / ...MM_AUTO_HEARD_MESSAGE
  * </pre>
  *
+ * <p>Verified against the apkmirror WeChat 8.0.72 APK (versionCode 3100): same receiver
+ * and helper, but the car-mode gates moved to {@code dm1.a} — same f()/h()/c() signatures.
+ *
  * <p>Verified against the China WeChat 8.0.78 APK (versionCode 3180): the receiver and
  * the RemoteInput helper kept their names, but the car-mode gates moved to
  * {@code bs1.a.c()} (config flag), {@code bs1.a.g()} (car UI mode + AOAP device) and
@@ -77,6 +80,10 @@ public final class WeChatReplyProfile {
 			new String[] { "z2.s1" },
 			new String[] { "bs1.a" },
 			new String[] { "c", "g", "b" });
+
+	private static final WeChatReplyProfile RELEASE_8_0_72_3100 = new WeChatReplyProfile(
+			"wechat-8.0.72/3100", new String[] { RECEIVER_CLASS }, new String[] { "z2.s1" },
+			new String[] { "dm1.a" }, new String[] { "f", "h", "c" });
 
 	private static final WeChatReplyProfile RELEASE_8_0_72 = new WeChatReplyProfile(
 			"wechat-8.0.72",
@@ -131,6 +138,7 @@ public final class WeChatReplyProfile {
 		// Other 8.0.77 builds must not reuse a different build's obfuscated layout.
 		if ("8.0.77".equals(versionName)) return LEGACY;
 		if ("8.0.78".equals(versionName) || versionCode == 3180L) return RELEASE_8_0_78;
+		if ("8.0.72".equals(versionName) && versionCode == 3100L) return RELEASE_8_0_72_3100;
 		if ("8.0.72".equals(versionName) || versionCode == 3085L) return RELEASE_8_0_72;
 		return LEGACY;
 	}

@@ -36,6 +36,7 @@ public class WeChatReplyProfileTest {
 		assertEquals("wechat-8.0.78", WeChatReplyProfile.forPackage("8.0.78", 3180L).label);
 		assertEquals("wechat-8.0.77", WeChatReplyProfile.forPackage("8.0.77", 3160L).label);
 		assertEquals("wechat-8.0.72", WeChatReplyProfile.forPackage("8.0.72", 3085L).label);
+		assertEquals("wechat-8.0.72/3100", WeChatReplyProfile.forPackage("8.0.72", 3100L).label);
 		assertEquals("wechat-legacy", WeChatReplyProfile.forPackage("8.0.76", 0L).label);
 	}
 
@@ -88,6 +89,15 @@ public class WeChatReplyProfileTest {
 		assertEquals(Arrays.asList("z2.s1"), candidates(profile, "helperCandidates"));
 		assertEquals(Arrays.asList("lq1.a"), candidates(profile, "gateCandidates"));
 		assertEquals(Arrays.asList("e", "h", "c"), candidates(profile, "gateMethods"));
+	}
+
+	@Test public void separatesWeChat8072Builds() throws Exception {
+		assertEquals("wechat-legacy", WeChatReplyProfile.forPackage("8.0.72.dev", 3100L).label);
+		assertEquals("wechat-legacy", WeChatReplyProfile.forPackage("unknown", 3100L).label);
+		final WeChatReplyProfile profile = WeChatReplyProfile.forPackage("8.0.72", 3100L);
+		assertEquals(Arrays.asList("z2.s1"), candidates(profile, "helperCandidates"));
+		assertEquals(Arrays.asList("dm1.a"), candidates(profile, "gateCandidates"));
+		assertEquals(Arrays.asList("f", "h", "c"), candidates(profile, "gateMethods"));
 	}
 
 	@Test public void pinsWeChat8072Descriptors() throws Exception {
