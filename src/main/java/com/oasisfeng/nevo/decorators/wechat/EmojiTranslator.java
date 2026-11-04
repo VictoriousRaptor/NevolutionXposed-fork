@@ -25,6 +25,15 @@ public class EmojiTranslator {
 	}
 
 	static CharSequence translate(final CharSequence text) {
+		return translate(text, false);
+	}
+
+	/** Media placeholders are transcript text, including when quoted inside an ordinary message. */
+	static CharSequence translateMessageText(final CharSequence text) {
+		return translate(text, true);
+	}
+
+	private static CharSequence translate(final CharSequence text, final boolean preserveMediaMarkers) {
 		int bracket_end = TextUtils.indexOf(text, ']');
 		if (bracket_end == -1) return text;
 		int bracket_start = TextUtils.lastIndexOf(text, '[', bracket_end - 2);	// At least 1 char between brackets
@@ -36,7 +45,7 @@ public class EmojiTranslator {
 			final String marker = text.subSequence(bracket_start + 1, bracket_end).toString();
 			final char first_char = marker.charAt(0);
 			final String emoji = (first_char >= 'A' && first_char <= 'Z' ? ENGLISH_MAP : CHINESE_MAP).get(marker);
-			if (emoji != null) {
+			if (emoji != null && !(preserveMediaMarkers && isMediaMarker(marker))) {
 				if (builder == null) builder = new SpannableStringBuilder(text);
 				builder.replace(bracket_start + offset, bracket_end + 1 + offset, emoji);
 				offset += emoji.length() - marker.length() - 2;
@@ -45,5 +54,12 @@ public class EmojiTranslator {
 			bracket_start = TextUtils.lastIndexOf(text, '[', bracket_end - 2);
 		}
 		return builder != null ? builder : text;
+	}
+
+	private static boolean isMediaMarker(String marker) {
+		return switch (marker) {
+			case "表情", "动画表情", "图片", "视频", "文件", "链接", "音乐", "位置", "红包", "转账", "小程序", "语音" -> true;
+			default -> false;
+		};
 	}
 }

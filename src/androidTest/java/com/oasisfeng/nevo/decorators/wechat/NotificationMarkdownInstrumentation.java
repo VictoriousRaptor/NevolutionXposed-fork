@@ -156,7 +156,7 @@ final class NotificationMarkdownInstrumentation {
         first.getExtras().putLong(NotificationMessages.SERVER_ID, 11);
         style.addMessage(first).addMessage(new Message("相同", 100, peer));
         NotificationMessages.stamp(conversation, notification);
-        MessagingBuilder.flatIntoExtras(style, notification.extras);
+        NotificationMessages.flatIntoExtras(style, notification.extras);
         NotificationMarkdown.apply(notification, true);
         List<Message> messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true);
         check(messages.size() == 2, "visually identical messages were merged");
@@ -343,7 +343,7 @@ final class NotificationMarkdownInstrumentation {
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
         for (Message message : NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true)) style.addMessage(message);
         NotificationMessages.stamp(conversation, notification);
-        MessagingBuilder.flatIntoExtras(style, notification.extras);
+        NotificationMessages.flatIntoExtras(style, notification.extras);
         notification.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle");
         return notification;
     }

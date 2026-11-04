@@ -1,5 +1,20 @@
 # 微信版本适配手册
 
+## 2026-11-03 会话媒体即时历史、点击移除已读与能力缓存
+
+- 文字和媒体占位统一走 `buildConversation()`，不再按 `[文件]` 等正文子串保留原生媒体卡片并提前返回。消息到达即重建历史，最多 25 条；成功规范化后清除原生内容视图。正文保留表情、动画表情、图片、视频、文件、链接、音乐、位置、红包、转账、小程序和语音的方括号标记，以及通知提供的文件名/链接标题。普通正文中的这些字面标记同样保留；其他内置表情、标题和 Markdown 沿用原规则。不新增媒体资源获取或消息身份猜测。
+- 回复能力仍按 CarExtender → 原自由文本 Action → 已验证合成路径选择，无回复目标不阻止历史展示。选中模块回复时只替换有投递目标的自由文本回复动作，其余动作及相对顺序保留；动作变更仍清除序列化标记。编解码移到 `NotificationMessages`，`ReplyTarget` 独立，字段、通知代次、已读边界、撤回及回复轮次不变。
+- SystemUI 沿用现有三/四参数 `onNotificationRemoved` BEFORE hook 和一次安装机制。本次只在微信、非汇总、非零模块代次的 `REASON_CLICK` 上补原生已读，从被移除 SBN 的原始 `android.car.EXTENSIONS/car_conversation/on_read` 获取 PendingIntent，要求创建包和 UID 与 SBN 一致；不要求完整 CarExtender 会话，不查询同 ID 新通知，不用任意 `deleteIntent` 替代。原生动作缺失、取消或运行时异常不阻断独立的轮次清理广播。划除和清空仍由系统发送 `deleteIntent`，模块不补发；回复派发前请求已读不变。未导致移除的点击不在本次覆盖内，不新增 SystemUI 私有点击 hook。请求发送不能证明微信实际未读数或内部已读水位。
+- 微信主进程/SystemUI 的展开 AFTER hook 不变，稳定图片能力在安装时解析并缓存：`RemoteViews.removeFromParent(int): void`、`FLAG_REAPPLY_DISALLOWED: static final int`、实例 `addFlags(int): void` / `hasFlags(int): boolean`，以及 `ConversationLayout` / `MessagingLayout` 的实例 `setData(Bundle): void` 和 `RemotableViewMethod` 注解。各子能力独立保存不可用结果，保留完整签名检查。资源、XML 根/ID、尺寸和 RTL 仍按当前配置检查，不缓存通知或 RemoteViews。纯文字仍清旧图片；待图 flag、READY 呈现副本的占位互斥及失败文字回退不变。图片能力失败不禁用头像、折叠或紧凑横幅入口，不修改安装期去优化扫描。
+- 启用范围沿用微信通知增强、现有聊天/会话资格及各可选功能的开关；外观继续要求微信 Context、模块归属和非汇总。没有新增微信混淆 hook、版本映射或设置。回复、图片/普通大图、应用内回复、撤回和 Emoji 的版本名/版本码 AND/OR 选择、完整签名及未知版本回退继续按各自画像独立执行，不因统一媒体展示扩大任何一项适配。
+- 回归分别覆盖即时文字/媒体穿插、群成员、占位原文、回复来源与无回复目标、非回复动作、Parcel/Builder、身份去重、读/撤回边界、迟到图片及渲染子能力拒绝。新增合成点击用例不调用微信；`removal_read_requested` 只表示发送正常返回，`removal_read_skipped` 区分缺动作/创建者不符，`removal_read_failed` 和 `removal_broadcast_failed` 仅记录原因或异常类型，不记录正文、身份或 Intent 内容。
+- 本轮 296 项主机测试全部通过，Debug/androidTest 构建、现有 release 证书一致及 zipalign 核验通过。原工作区 Lint 在测试源码文件遍历阶段取消；148 个源码/构建输入哈希一致的隔离副本完成 `lintDebug`，0 errors、39 warnings。公共 framework runner 注册 100 项，新增 15 项合成检查仅编译，未安装或执行；未验证运行时 hook、微信实际未读数和 OEM 视觉。原始材料只在 `.debug-artifacts/architecture-media-review-20261103/`。
+
+### 2026-11-03 后续同包 framework 实机复验
+
+- 首轮 `imageRemovalCapabilityAndCache` 在 API 37 上因 `android.R.layout.simple_list_item_2` 引用的 `TwoLineListItem` 不允许由 `RemoteViews` 膨胀而在夹具创建阶段失败。`ImageRenderCapabilitiesInstrumentation` 改用 Debug 包自有的两行 `LinearLayout` / `TextView` 资源，不改变生产能力解析或 hook。
+- 使用修正后的当前工作区重建并执行 **100/100 framework 用例、0 跳过**，微信 8.0.79/3183 描述符 **45 项通过**；运行参数为 `--no-hidden-api-checks`。测试 APK 未独立安装；恢复测试前 Release 后核验测试包及同包 runner 均不存在，模块 APK SHA-256 与测试前备份一致。未验证真实 hook 安装、微信消息行为或 OEM 通知视觉。
+
 ## 2026-11-03 紧凑横幅测试契约对齐
 
 - 仅调整测试 helper，不改变现有生产 hook、签名、进程、功能开关、微信版本匹配或未知模板回退。真实 Builder 的已支持模板要求改写，未知模板要求返回原 RemoteViews 并可 apply；重建、补图、本人回复、连续来信和合法正文沿用该判断。
@@ -408,7 +423,7 @@ ART 内联处理：安装 hook 前通过 libxposed API 102 的 `deoptimize(Execu
 - 成功回复历史的保存独立于活动通知重发：通过上述校验后先按当前展示开关保存规范化快照，再检查活动 token 并决定是否发布。普通取消、listener cancel 或活动查询无匹配项均保留成功回复与去重 UUID；用户确认移除后归档为空则仍拒绝迟到回调。无活动通知的 framework 回归使用无操作重发入口，覆盖连续成功回复、C 先于回调到达、重复回调及两种开关下后续 C/D；构建不代表该用例或真实微信已验证。
 - 回复结果边界：`native_pending_intent_callback resultCode=0` 仅表示模块收到该广播回调值，并非微信业务成功码或网络送达回执；`PendingIntent.send()` 传入初值 0，已核对的 8.0.79 接收器不主动设置结果码，提前返回也可能保留 0。合成路径的 `synthetic_dispatch_complete` / `synthetic_dispatched` 仅表示直接调用 `onReceive(Context, Intent): void` 正常返回，内部提前返回同样可能被视为派发完成。微信出现对应新消息可证明已进入本地消息处理，不能反推回调数值、调用路径或对端送达；精确数值以日志为准，实际发送状态与已读数另验。[Android 回调定义](https://developer.android.com/reference/android/app/PendingIntent.OnFinished)
 - `WeChatDecorator.Local.onDestroy()` 关闭 `MessagingBuilder` 的接收器并停止应用内回复追踪、清理来源索引和轮次重置接收器。验证时覆盖生命周期与原生/合成回复的混合场景；本次仅有构建和自动化证据。
-- **媒体通知内联回复动作合并与去重**：用户在媒体通知输入期间到达同 ID 新通知并发送成功后，控制器回调对 latest 缓存清除 `pre-applied`/`applied` 标记并调用 `attachReplyAction` 重新发布。旧实现整体复制原 actions 数组再追加模块回复，导致累积多个重复回复动作。现改为在合并时过滤旧的可投递自由文本回复动作（`actionIntent != null` 且 `RemoteInput` 中包含 `allowFreeFormInput == true`），再加入当前 CarExtender 产生的新模块回复动作；非回复动作（大图缩放、标记已读、仅选择项/仅数据输入、无 Intent 动作及原有 null 元素）保持原对象、原顺序与相对位置；无 CarExtender/native reply 或非聊天 ticker 仍不修改原动作。诊断日志保持仅记录 `notificationId`、`resultKey` 与 `existingActions` 元数据。
+- **统一会话回复动作合并与去重（2026-11-03 更新）**：文字与媒体由 `buildConversation` 统一选择回复能力，使用 `replaceReplyAction` 过滤旧可投递自由文本回复（`actionIntent != null` 且存在 `allowFreeFormInput == true`），再加入一个当前模块回复动作。其余动作、仅选择项/仅数据输入、无 Intent 动作及 null 元素保持原对象和相对顺序。回复来源按 CarExtender、原自由文本 Action、已验证合成路径依次选择；没有模块回复时不改 actions，已规范化且无 Car 原生回复的快照保留已有代理，避免再次套代理。序列化标记继续由 `setActions` 清除。旧 `attachReplyAction` 入口及 `action_media_reply_*` 阶段已移除；匿名原生/合成回复诊断保留，不记录正文或联系人。
 - **已重建通知动作修改与序列化标记失效**：`LocalDecorator.setActions(Notification, Action...)` 修改动作时显式清除 `nevo.actionsSerialized` 附加实例字段（置为 null）。避免已由 `recoverBuilder()` 重建的通知后续修改动作后，因残留序列化标记导致 MainHook 跳过必要的 actions 序列化/RemoteViews 重建链路。动作去重仅在既有聊天 ticker、CarExtender 会话和原生回复 PendingIntent 资格满足时生效；版本相关旁路沿用原画像选择和完整运行时签名校验：8.0.72/3085、8.0.78/3180 的通知回复候选仍以版本名或版本号任一匹配（`||`）选择，8.0.77/3141、3160 仍须两者同时匹配（`&&`）。其他版本保留原候选、签名校验和保守回退，不因本次修复宣称新增支持；图片、应用内回复及撤回门禁分别保持不变。
 - **输入期间的结果键竞态（仅记录）**：同 ID 新通知改变原生结果键、代理已更新为新键，而 SystemUI 仍按旧键立即发送时，接收器可能以 `native_drop reason=missing_input` 退出。尚无已适配微信版本触发该条件的实机证据；本次发布依用户要求只记录风险，不修改键映射或发送规则。条件、AOSP 依据和 UI 验证边界见[输入生命周期与竞态记录](notification-reply-input-lifecycle.md)。
 
@@ -630,7 +645,7 @@ adb -s <设备序列号> shell am instrument --no-hidden-api-checks -w -r -e ver
 | 群聊回复 | 同上（群聊） | 消息进入正确群会话 |
 | 通知栏回复后的新来信提醒 | A → 通知栏连续回复 B1/B2 → C → D，分别检查“显示你最后回复的消息”关闭/开启，另检查补图及原本静默的通知 | 回复刷新保持静默；默认关闭时显示 C、C+D，开启时显示 B1+B2+C、B1+B2+C+D；两者均清除已回应输入历史，不新增 `FLAG_ONLY_ALERT_ONCE`；图片和原有静默策略保留。源码标记检查与声音/震动/浮动真机验收分别记录 |
 | 多语言/emoji | 中文、英文、emoji 各一条 | 不截断、不乱码、不重复发送 |
-| 媒体/文件通知 | 收到图片/视频/文件消息 | 保留微信原布局；符合聊天和投递条件时提供回复入口 |
+| 媒体/文件通知 | 文字后穿插图片/视频/文件消息 | 每一步立即使用会话模板显示完整历史及媒体原文；有投递能力时提供单个回复入口并保留其他操作 |
 | 视频/语音通话 | 拨打或接听 | 通知类型正确，不被当成普通消息 |
 | 图片事件 | 收到图片消息 | 缩略图正常；版本不匹配时应自动关闭而非崩溃 |
 | 通知正文 | 任意消息 | 显示真实文本，不出现 `[消息]` 占位 |

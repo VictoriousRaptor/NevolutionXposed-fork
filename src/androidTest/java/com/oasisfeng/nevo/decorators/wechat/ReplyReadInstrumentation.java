@@ -20,12 +20,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class ReplyReadInstrumentation {
     static void nativeReplyDoesNotReuseReadTarget(Context context) {
         try (Fixture fixture = new Fixture(context, 0, false)) {
-            fixture.builder.attachReplyAction(740, fixture.notification());
+            fixture.build(fixture.notification());
             Notification current = fixture.notification();
             Bundle car = current.extras.getBundle("android.car.EXTENSIONS").getBundle("car_conversation");
             car.remove("on_read");
             fixture.currentRead = null;
-            fixture.builder.attachReplyAction(740, current);
+            fixture.build(current);
             RemoteInput input = current.actions[0].getRemoteInputs()[0];
             Intent fill = new Intent();
             Bundle results = new Bundle();
@@ -43,7 +43,7 @@ final class ReplyReadInstrumentation {
             try (Fixture fixture = new Fixture(context, result, false)) {
                 if (result == -1) fixture.reply.cancel();
                 Notification n = fixture.notification();
-                fixture.builder.attachReplyAction(740, n);
+                fixture.build(n);
                 RemoteInput input = n.actions[0].getRemoteInputs()[0];
                 Intent fill = new Intent();
                 Bundle results = new Bundle();
@@ -58,7 +58,7 @@ final class ReplyReadInstrumentation {
     static void syntheticReplyReadBeforeFailure(Context context) {
         for (int result : new int[]{0, 7, -1}) {
             try (Fixture fixture = new Fixture(context, result, true)) {
-                fixture.builder.attachReplyAction(740, fixture.notification());
+                fixture.build(fixture.notification());
                 Intent proxy = new Intent().setData(Uri.fromParts("id", "740", null))
                         .putExtra(WeChatReplyProfile.USERNAME_EXTRA, "synthetic-peer");
                 RemoteInput input = new RemoteInput.Builder("synthetic_reply_result_key").build();
@@ -105,11 +105,11 @@ final class ReplyReadInstrumentation {
             currentRead = read;
             builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {
                 @Override public void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies) {}
-                @Override public MessagingBuilder.ReplyTarget replyTarget(int id) {
-                    return new MessagingBuilder.ReplyTarget(1, null, java.util.Collections.emptyList(), currentRead);
+                @Override public ReplyTarget replyTarget(int id) {
+                    return new ReplyTarget(1, null, java.util.Collections.emptyList(), currentRead);
                 }
-                @Override public void onReplyRead(int id, MessagingBuilder.ReplyTarget target) { reads.incrementAndGet(); }
-                @Override public void onReplySent(int id, MessagingBuilder.ReplyTarget target, CharSequence text, long time, String replyId) {
+                @Override public void onReplyRead(int id, ReplyTarget target) { reads.incrementAndGet(); }
+                @Override public void onReplySent(int id, ReplyTarget target, CharSequence text, long time, String replyId) {
                     sent.incrementAndGet(); completed.countDown();
                 }
                 @Override public long beginNotificationReply(int id) { return 1; }
@@ -130,6 +130,13 @@ final class ReplyReadInstrumentation {
             return new Notification.Builder(context, "identity-test").setSmallIcon(android.R.drawable.ic_dialog_info)
                     .setContentTitle("Alice").setContentText("[动画表情]").setTicker("Alice: [动画表情]")
                     .extend(new Notification.CarExtender().setUnreadConversation(car)).build();
+        }
+
+        void build(Notification notification) {
+            ConversationManager.Conversation conversation = new ConversationManager.Conversation(740);
+            conversation.title = "Alice";
+            conversation.key = "synthetic-peer";
+            builder.buildConversation(conversation, 740, notification, java.util.Collections.emptyList());
         }
 
         void verify(boolean success) throws InterruptedException {

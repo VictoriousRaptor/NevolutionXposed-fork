@@ -186,22 +186,22 @@ final class Plan123Instrumentation {
         try {
             for (String ticker : new String[]{null, "", "好友请求", ":hello"}) {
                 Notification n = car(context, nativeReply); n.tickerText = ticker;
-                check(builder.buildFromExtender(conversation(false), 802, n, Collections.emptyList()) != null,
+                check(builder.buildConversation(conversation(false), 802, n, Collections.emptyList()) != null,
                         "non-chat content stopped rebuilding");
                 check(n.actions == null || n.actions.length == 0, "non-chat gained car reply");
-                check(!builder.attachReplyAction(802, n), "non-chat gained media reply");
+                check(!buildReply(builder, 802, n), "non-chat gained media reply");
                 Notification.Action original = new Notification.Action.Builder(null, "native", nativeReply)
                         .addRemoteInput(new RemoteInput.Builder("native-key").build()).build();
                 n.actions = new Notification.Action[]{original};
-                builder.buildFromExtender(conversation(false), 802, n, Collections.emptyList());
+                builder.buildConversation(conversation(false), 802, n, Collections.emptyList());
                 check(n.actions.length == 1 && n.actions[0] == original, "non-chat native action was proxied or deleted");
             }
             Notification media = car(context, nativeReply); media.tickerText = "Group: Bob: [文件]";
-            check(builder.attachReplyAction(802, media), "chat media lost reply");
+            check(buildReply(builder, 802, media), "chat media lost reply");
             Notification noNative = raw(context, "hello", 100, 0);
             noNative.tickerText = "Alice: hello";
             noNative.contentIntent = nativeReply;
-            check(builder.buildFromExtender(conversation(false), 803, noNative, Collections.emptyList()) != null,
+            check(builder.buildConversation(conversation(false), 803, noNative, Collections.emptyList()) != null,
                     "chat without native objects lost message rebuilding");
             check(noNative.actions == null || noNative.actions.length == 0,
                     "ordinary test process exposed an unverified synthetic reply");
@@ -219,13 +219,13 @@ final class Plan123Instrumentation {
             Notification repeatedMedia = car(context, nativeReply);
             repeatedMedia.tickerText = "Alice: [文件]";
             for (int i = 0; i < 3; i++) {
-                check(builder.attachReplyAction(805, repeatedMedia), "attachReplyAction failed on iteration " + i);
+                check(buildReply(builder, 805, repeatedMedia), "attachReplyAction failed on iteration " + i);
                 check(countFreeFormReplyActions(repeatedMedia) == 1, "reply actions count != 1 on iteration " + i);
                 check(repeatedMedia.actions.length == 1, "repeated attach retained extra actions");
             }
 
             com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator.markActionsSerialized(repeatedMedia);
-            check(builder.attachReplyAction(805, repeatedMedia), "serialized media reply not refreshed");
+            check(buildReply(builder, 805, repeatedMedia), "serialized media reply not refreshed");
             check(!com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator.hasSerializedActions(repeatedMedia),
                     "media action update retained serialized flag");
             Notification rebuilt = Notification.Builder.recoverBuilder(context, repeatedMedia).build();
@@ -279,7 +279,7 @@ final class Plan123Instrumentation {
                     markReadAction
             };
 
-            check(builder.attachReplyAction(805, complexMedia), "attachReplyAction failed on complexMedia");
+            check(buildReply(builder, 805, complexMedia), "attachReplyAction failed on complexMedia");
             check(countFreeFormReplyActions(complexMedia) == 1, "complexMedia did not have exactly 1 reply action");
 
             // Verify non-reply objects and their order are preserved.
@@ -299,7 +299,7 @@ final class Plan123Instrumentation {
             nonCarNotification.tickerText = "Bob: [文件]";
             Notification.Action[] rawActions = new Notification.Action[]{zoomAction};
             nonCarNotification.actions = rawActions;
-            check(!builder.attachReplyAction(805, nonCarNotification), "nonCarNotification gained reply");
+            check(!buildReply(builder, 805, nonCarNotification), "nonCarNotification gained reply");
             check(nonCarNotification.actions == rawActions && nonCarNotification.actions.length == 1, "nonCar actions altered");
 
             Notification.CarExtender.UnreadConversation noReplyCar = new Notification.CarExtender.Builder("Alice")
@@ -312,7 +312,7 @@ final class Plan123Instrumentation {
                     "missing-native-reply fixture lost its car conversation");
             Notification.Action[] noReplyActions = new Notification.Action[]{zoomAction};
             noNativeReply.actions = noReplyActions;
-            check(!builder.attachReplyAction(805, noNativeReply), "car without native reply gained an action");
+            check(!buildReply(builder, 805, noNativeReply), "car without native reply gained an action");
             check(noNativeReply.actions == noReplyActions && noNativeReply.actions[0] == zoomAction,
                     "missing-native-reply guard altered actions");
 
@@ -320,7 +320,7 @@ final class Plan123Instrumentation {
             nonChatNotification.tickerText = "好友请求";
             Notification.Action[] nonChatActions = new Notification.Action[]{zoomAction};
             nonChatNotification.actions = nonChatActions;
-            check(!builder.attachReplyAction(805, nonChatNotification), "nonChat gained media reply");
+            check(!buildReply(builder, 805, nonChatNotification), "nonChat gained media reply");
             check(nonChatNotification.actions == nonChatActions && nonChatNotification.actions.length == 1, "nonChat actions altered");
         } finally {
             builder.close();
@@ -349,14 +349,16 @@ final class Plan123Instrumentation {
             Notification.Action nonReplyAction = new Notification.Action.Builder(null, "NonReply", otherActionIntent).build();
             n.actions = new Notification.Action[]{nonReplyAction};
 
-            String originalTemplate = n.extras.getString(Notification.EXTRA_TEMPLATE);
             android.app.NotificationManager manager = context.getSystemService(android.app.NotificationManager.class);
 
-            // First apply: hits media branch
+            // Media goes through the same normalization as text on its first post.
             com.oasisfeng.nevo.sdk.Decorating result = local.apply(manager, null, 912, n);
-            check(result == com.oasisfeng.nevo.sdk.Decorating.Unprocessed, "animated sticker did not return Unprocessed");
-            check(n.contentView == nativeCard && n.bigContentView == nativeCard && n.headsUpContentView == nativeCard,
-                    "native media reply lost WeChat's own layout");
+            check(result == com.oasisfeng.nevo.sdk.Decorating.Processed, "animated sticker was not normalized");
+            check(n.contentView == null && n.bigContentView == null && n.headsUpContentView == null,
+                    "native media views hid the conversation history");
+            check(n.extras.getBoolean(NotificationMessages.STORED)
+                    && "android.app.Notification$MessagingStyle".equals(n.extras.getString(Notification.EXTRA_TEMPLATE)),
+                    "animated sticker lost the conversation template");
             check("[动画表情]".contentEquals(n.extras.getCharSequence(Notification.EXTRA_TEXT)), "text changed on first apply");
             check(countFreeFormReplyActions(n) == 1, "free form reply action count != 1 on first apply");
             check(n.actions != null && n.actions.length == 2, "actions length != 2 on first apply");
@@ -373,7 +375,7 @@ final class Plan123Instrumentation {
             // Mark actions serialized and apply again
             com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator.markActionsSerialized(n);
             com.oasisfeng.nevo.sdk.Decorating secondResult = local.apply(manager, null, 912, n);
-            check(secondResult == com.oasisfeng.nevo.sdk.Decorating.Unprocessed, "second apply did not return Unprocessed");
+            check(secondResult == com.oasisfeng.nevo.sdk.Decorating.Processed, "second apply did not keep the conversation");
             check(countFreeFormReplyActions(n) == 1, "reply action count != 1 on second apply");
             check(n.actions != null && n.actions.length == 2, "actions length != 2 on second apply");
             check(n.actions[0] == nonReplyAction, "non-reply action identity or order lost on second apply");
@@ -383,16 +385,15 @@ final class Plan123Instrumentation {
             check(secondRemoteInput != null && "native-key".equals(secondRemoteInput.getResultKey()), "second apply lost native result key");
             check(!com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator.hasSerializedActions(n), "serialized flag remained after second apply");
             check("[动画表情]".contentEquals(n.extras.getCharSequence(Notification.EXTRA_TEXT)), "text changed on second apply");
-            String secondTemplate = n.extras.getString(Notification.EXTRA_TEMPLATE);
-            check((originalTemplate == null && secondTemplate == null) || (originalTemplate != null && originalTemplate.equals(secondTemplate)),
-                    "template changed on second apply");
+            check("android.app.Notification$MessagingStyle".equals(n.extras.getString(Notification.EXTRA_TEMPLATE)),
+                    "second apply lost the conversation template");
 
             // Change ticker to "Alice: [2条][动画表情]" and text to "[2条][动画表情]", mark serialized and apply
             n.tickerText = "Alice: [2条][动画表情]";
             n.extras.putCharSequence(Notification.EXTRA_TEXT, "[2条][动画表情]");
             com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator.markActionsSerialized(n);
             com.oasisfeng.nevo.sdk.Decorating thirdResult = local.apply(manager, null, 912, n);
-            check(thirdResult == com.oasisfeng.nevo.sdk.Decorating.Unprocessed, "third apply did not return Unprocessed");
+            check(thirdResult == com.oasisfeng.nevo.sdk.Decorating.Processed, "third apply lost the conversation");
             check(!com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator.hasSerializedActions(n), "serialized flag remained after third apply");
             check(n.actions != null && n.actions.length == 2, "actions length != 2 on third apply");
             check(n.actions[0] == nonReplyAction, "non-reply action identity or order lost on third apply");
@@ -401,7 +402,8 @@ final class Plan123Instrumentation {
             RemoteInput thirdRemoteInput = findFirstFreeFormRemoteInput(n);
             check(thirdRemoteInput != null && "native-key".equals(thirdRemoteInput.getResultKey()), "third apply lost native result key");
             check(countFreeFormReplyActions(n) == 1, "reply action count != 1 on third apply");
-            check("[2条][动画表情]".contentEquals(n.extras.getCharSequence(Notification.EXTRA_TEXT)), "text changed on third apply");
+            check(n.number == 2 && "[动画表情]".contentEquals(n.extras.getCharSequence(Notification.EXTRA_TEXT)),
+                    "unread count prefix leaked into the normalized message");
         } finally {
             local.onDestroy();
             nativeReply.cancel();
@@ -448,7 +450,7 @@ final class Plan123Instrumentation {
             @Override public void recastNotification(int recastId, WeChatDecorator.ModifyNotification... modifies) {
                 if (recastId == id && latestNotification[0] != null) {
                     for (WeChatDecorator.ModifyNotification m : modifies) m.modify(latestNotification[0]);
-                    builderHolder[0].attachReplyAction(id, latestNotification[0]);
+                    buildReply(builderHolder[0], id, latestNotification[0]);
                     recastLatch.countDown();
                 }
             }
@@ -461,7 +463,7 @@ final class Plan123Instrumentation {
             Notification notif1 = car(context, firstNative);
             notif1.tickerText = "Alice: first";
             notif1.extras.putCharSequence(Notification.EXTRA_TEXT, "first");
-            check(builder.attachReplyAction(id, notif1), "notif1 failed to attach reply");
+            check(buildReply(builder, id, notif1), "notif1 failed to attach reply");
 
             Notification.Action oldReplyAction = notif1.actions[0];
             PendingIntent oldProxy = oldReplyAction.actionIntent;
@@ -473,7 +475,7 @@ final class Plan123Instrumentation {
             notif2.tickerText = "Alice: [动画表情] second";
             notif2.extras.putCharSequence(Notification.EXTRA_TEXT, "[动画表情] second");
             latestNotification[0] = notif2;
-            check(builder.attachReplyAction(id, notif2), "notif2 failed to attach reply");
+            check(buildReply(builder, id, notif2), "notif2 failed to attach reply");
 
             RemoteInput notif2Input = findFirstFreeFormRemoteInput(notif2);
             check(notif2Input != null && "native-key".equals(notif2Input.getResultKey()), "notif2 lost native result key");
@@ -481,7 +483,7 @@ final class Plan123Instrumentation {
             check(countFreeFormReplyActions(notif2) == 1, "notif2 free form reply action count != 1");
 
             // Repeated attach notif2: reply count remains 1 and proxy identity preserved
-            check(builder.attachReplyAction(id, notif2), "repeated attach notif2 failed");
+            check(buildReply(builder, id, notif2), "repeated attach notif2 failed");
             check(countFreeFormReplyActions(notif2) == 1, "repeated attach notif2 reply count != 1");
             check(oldProxy.equals(notif2.actions[0].actionIntent), "proxy identity lost after repeated attach");
 
@@ -545,7 +547,7 @@ final class Plan123Instrumentation {
             @Override public void recastNotification(int recastId, WeChatDecorator.ModifyNotification... modifies) {
                 if (recastId == id && latestNotification[0] != null) {
                     for (WeChatDecorator.ModifyNotification m : modifies) m.modify(latestNotification[0]);
-                    builderHolder[0].attachReplyAction(id, latestNotification[0]);
+                    buildReply(builderHolder[0], id, latestNotification[0]);
                     recastLatch.countDown();
                 }
             }
@@ -558,13 +560,13 @@ final class Plan123Instrumentation {
             Notification notif1 = car(context, nativeReply);
             notif1.tickerText = "Alice: first";
             notif1.extras.putCharSequence(Notification.EXTRA_TEXT, "first");
-            check(builder.attachReplyAction(id, notif1), "notif1 failed to attach reply");
+            check(buildReply(builder, id, notif1), "notif1 failed to attach reply");
 
             // Notification 2 arrives for the same notification ID before reply is sent, replacing latest.
             Notification notif2 = car(context, nativeReply);
             notif2.tickerText = "Alice: [文件] second";
             notif2.extras.putCharSequence(Notification.EXTRA_TEXT, "[文件] second");
-            check(builder.attachReplyAction(id, notif2), "notif2 failed to attach reply");
+            check(buildReply(builder, id, notif2), "notif2 failed to attach reply");
             latestNotification[0] = notif2;
 
             // Trigger reply dispatch via builder's real mReplyReceiver simulating reply to notif1.
@@ -684,6 +686,11 @@ final class Plan123Instrumentation {
     private static int flags() {
         return PendingIntent.FLAG_UPDATE_CURRENT | (android.os.Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
     }
+    private static boolean buildReply(MessagingBuilder builder, int id, Notification notification) {
+        Notification.Action[] before = notification.actions;
+        builder.buildConversation(conversation(false), id, notification, Collections.emptyList());
+        return notification.actions != before;
+    }
     private static Notification car(Context context, PendingIntent reply) {
         Notification.CarExtender.UnreadConversation unread = new Notification.CarExtender.Builder("Alice")
                 .addMessage("hello").setLatestTimestamp(100).setReplyAction(reply, new RemoteInput.Builder("native-key").build()).build();
@@ -705,7 +712,7 @@ final class Plan123Instrumentation {
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
         List<Message> messages = NotificationMessages.rebuild(c, n, old == null ? Collections.emptyList() : Collections.singletonList(old), true);
         for (Message message : messages) style.addMessage(message);
-        NotificationMessages.stamp(c, n); MessagingBuilder.flatIntoExtras(style, n.extras);
+        NotificationMessages.stamp(c, n); NotificationMessages.flatIntoExtras(style, n.extras);
         n.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle"); return n;
     }
     private static void texts(Conversation c, Notification n, String... expected) {

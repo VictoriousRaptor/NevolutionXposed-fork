@@ -90,7 +90,12 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "pictureAndPlaceholderAreExclusive", "imageMessageIdentitySurvivesLaterText",
                 "imagePreviewMessagingAlignment", "imagePreviewOffloadedPictureIcon", "imagePreviewDiscardClearsLayout", "imagePreviewModulePackageLookupUnavailable", "imageWaitPreferenceSync",
                 "notificationNativeAvatar", "notificationAppearanceScope", "notificationCollapsedAppName",
-                "privateTextReplacesNativeViewsFromFirstMessage", "privateCompactHeadsUpRenderAndReapply" };
+                "privateTextReplacesNativeViewsFromFirstMessage", "privateCompactHeadsUpRenderAndReapply",
+                "mediaHistoryUpdatesImmediately", "groupMediaKeepsSenders", "mediaMarkersKeepOriginalText",
+                "mediaReplyActionsArePreserved", "mediaHistorySurvivesRebuild", "mediaAfterReplyUsesExistingRound",
+                "clickUsesRemovedNativeRead", "removalReadGuards", "cancelledRemovalReadReturnsNormally",
+                "removalFailuresStillResetHistory", "removalResetFailureDoesNotSuppressRead",
+                "imageRemovalCapabilityAndCache", "imageReapplyCapability", "conversationDataCapability", "messagingDataCapability" };
         Runnable[] tests = { () -> NotificationCompatibilityInstrumentation.carExtensionWithoutConversation(getTargetContext()),
                 NotificationCompatibilityInstrumentation::channelMigrationPreservesSettings,
                 this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
@@ -150,7 +155,22 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> NotificationAppearanceInstrumentation.ownershipAndPreviewMetadata(getTargetContext()),
                 () -> NotificationAppearanceInstrumentation.collapsedAppNameOnly(this),
                 () -> NotificationAppearanceInstrumentation.privateTextReplacesNativeViewsFromFirstMessage(getTargetContext()),
-                () -> PrivateCompactHeadsUpInstrumentation.renderAndReapply(this) };
+                () -> PrivateCompactHeadsUpInstrumentation.renderAndReapply(this),
+                () -> MediaConversationInstrumentation.mediaHistoryUpdatesImmediately(getTargetContext()),
+                () -> MediaConversationInstrumentation.groupMediaKeepsSenders(getTargetContext()),
+                () -> MediaConversationInstrumentation.mediaMarkersKeepOriginalText(getTargetContext()),
+                () -> MediaConversationInstrumentation.mediaReplyActionsArePreserved(getTargetContext()),
+                () -> MediaConversationInstrumentation.mediaHistorySurvivesRebuild(getTargetContext()),
+                () -> MediaConversationInstrumentation.mediaAfterReplyUsesExistingRound(getTargetContext()),
+                () -> com.oasisfeng.nevo.xposed.NotificationRemovalReadInstrumentation.clickUsesRemovedNativeRead(getTargetContext()),
+                () -> com.oasisfeng.nevo.xposed.NotificationRemovalReadInstrumentation.removalReadGuards(getTargetContext()),
+                () -> com.oasisfeng.nevo.xposed.NotificationRemovalReadInstrumentation.cancelledRemovalReadReturnsNormally(getTargetContext()),
+                () -> com.oasisfeng.nevo.xposed.NotificationRemovalReadInstrumentation.removalFailuresStillResetHistory(getTargetContext()),
+                () -> com.oasisfeng.nevo.xposed.NotificationRemovalReadInstrumentation.removalResetFailureDoesNotSuppressRead(getTargetContext()),
+                () -> ImageRenderCapabilitiesInstrumentation.remoteViewsRemovalAndCache(this),
+                () -> ImageRenderCapabilitiesInstrumentation.remoteViewsReapplyFlag(getTargetContext()),
+                ImageRenderCapabilitiesInstrumentation::conversationMessageData,
+                ImageRenderCapabilitiesInstrumentation::messagingMessageData };
         if (names.length != tests.length) {
             Bundle result = new Bundle();
             result.putString("shortMsg", "Framework test names and cases differ in length");
@@ -190,7 +210,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 .setIcon(IconCompat.createWithBitmap(Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888))).build();
         Message original = new Message("photo", 123, peer).setData("image/jpeg", android.net.Uri.parse("content://test/photo"));
         original.getExtras().putString("custom", "kept");
-        Bundle bundle = parcel(MessagingBuilder.toBundle(original));
+        Bundle bundle = parcel(NotificationMessages.toBundle(original));
         bundle.remove("sender");
         Message restored = NotificationMessages.read(bundle, conversation(false), false, false);
         check(restored != null && restored.getPerson() != null, "person-only message became self");
@@ -282,7 +302,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
     private void rawPersonOnlyNotification() {
         Notification n = notification("hello", 100);
         Message m = new Message("hello", 100, new Person.Builder().setName("Alice").setKey("key").build());
-        Bundle b = MessagingBuilder.toBundle(m); b.remove("sender");
+        Bundle b = NotificationMessages.toBundle(m); b.remove("sender");
         n.extras.putParcelableArray(Notification.EXTRA_MESSAGES, new Parcelable[]{b});
         Conversation c = conversation(false);
         List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList(), true);
@@ -398,8 +418,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         latest.extras.putCharSequence(androidx.core.app.NotificationCompat.EXTRA_SELF_DISPLAY_NAME, "我");
         Person peer = NotificationMessages.peer(c, null);
         latest.extras.putParcelableArray(Notification.EXTRA_MESSAGES, new Bundle[]{
-                MessagingBuilder.toBundle(new Message("[动画表情]", 200, peer)),
-                MessagingBuilder.toBundle(new Message("C", 300, peer)) });
+                NotificationMessages.toBundle(new Message("[动画表情]", 200, peer)),
+                NotificationMessages.toBundle(new Message("C", 300, peer)) });
         List<Message> messages = NotificationMessages.rebuild(c, latest, Arrays.asList(a, sticker, latest), true);
         check(messages.size() == 3 && "A".contentEquals(messages.get(0).getText())
                 && "[动画表情]".contentEquals(messages.get(1).getText())
@@ -438,7 +458,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
         for (Message m : NotificationMessages.rebuild(c, n, archive, showLastReply)) style.addMessage(m);
         NotificationMessages.stamp(c, n);
-        MessagingBuilder.flatIntoExtras(style, n.extras);
+        NotificationMessages.flatIntoExtras(style, n.extras);
         n.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle");
         return n;
     }
@@ -674,8 +694,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         }
         void texts(String... expected) { checkTexts(conversation, getArchivedNotification(id), expected); }
         Notification latest() { return getArchivedNotification(id); }
-        MessagingBuilder.ReplyTarget read() {
-            MessagingBuilder.ReplyTarget target = controller.replyTarget(id);
+        ReplyTarget read() {
+            ReplyTarget target = controller.replyTarget(id);
             controller.onReplyRead(id, target);
             return target;
         }
@@ -696,9 +716,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         for (boolean show : new boolean[]{false, true}) for (boolean parallel : new boolean[]{false, true}) {
             try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
                 fixture.incoming("A", 100);
-                MessagingBuilder.ReplyTarget first = fixture.read();
+                ReplyTarget first = fixture.read();
                 fixture.controller.onReplySent(fixture.id, first, "B1", 110, "controller-B1");
-                MessagingBuilder.ReplyTarget second = parallel ? first : fixture.read();
+                ReplyTarget second = parallel ? first : fixture.read();
                 fixture.controller.onReplySent(fixture.id, second, "B2", 120, "controller-B2");
                 fixture.texts("A", "B1", "B2");
                 fixture.incoming("C", 200);
@@ -718,7 +738,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 fixture.incoming("A", 100);
                 if (priorReply) fixture.controller.onReplySent(fixture.id, fixture.read(),
                         "B1", 110, "early-controller-B1");
-                MessagingBuilder.ReplyTarget target = fixture.read();
+                ReplyTarget target = fixture.read();
                 fixture.incoming("C", undated ? 0 : 200);
                 fixture.controller.onReplySent(fixture.id, target, "B", 150, "late-controller-B");
                 java.util.List<String> expected = new java.util.ArrayList<>();
@@ -748,7 +768,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 fixture.incoming("A", 100);
                 fixture.controller.onReplySent(fixture.id, fixture.read(), "B1", 110, "app-boundary-B1");
                 if (appBeforePeer) check(NotificationMessages.markAppReply(fixture.latest(), 7, 140), "app send not marked");
-                MessagingBuilder.ReplyTarget target = fixture.read();
+                ReplyTarget target = fixture.read();
                 fixture.incoming("C", 0);
                 if (!appBeforePeer) check(NotificationMessages.markAppReply(fixture.latest(), 7, 240), "later app send not marked");
                 fixture.controller.onReplySent(fixture.id, target, "B2", 150, "app-boundary-B2");
@@ -762,7 +782,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
     private void replyControllerRemovedTarget() {
         try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(true)) {
             fixture.incoming("A", 100);
-            MessagingBuilder.ReplyTarget target = fixture.read();
+            ReplyTarget target = fixture.read();
             fixture.removed(target.token());
             fixture.controller.onReplySent(fixture.id, target, "B", 150, "removed-controller-B");
             check(fixture.latest() == null, "late reply revived a removed notification");
@@ -775,7 +795,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         for (boolean show : new boolean[]{false, true}) for (boolean peerBeforeCallback : new boolean[]{false, true}) {
             try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
                 fixture.incoming("A", 100);
-                MessagingBuilder.ReplyTarget target = fixture.read();
+                ReplyTarget target = fixture.read();
                 if (peerBeforeCallback) fixture.incoming("C", 200);
                 fixture.controller.onReplySent(fixture.id, target, "B1", 110, "inactive-B1");
                 check(fixture.latest() != null, "successful reply lost without an active notification");
@@ -807,7 +827,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         }
         try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(true)) {
             fixture.incoming("A", 100);
-            MessagingBuilder.ReplyTarget target = fixture.controller.replyTarget(fixture.id);
+            ReplyTarget target = fixture.controller.replyTarget(fixture.id);
             fixture.incoming("C", 0);
             fixture.controller.onReplyRead(fixture.id, target);
             fixture.texts("C");
@@ -820,7 +840,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         for (boolean show : new boolean[]{false, true}) {
             try (ReplyHistoryFixture fixture = new ReplyHistoryFixture(show)) {
                 fixture.incoming("A", 100);
-                MessagingBuilder.ReplyTarget target = fixture.read();
+                ReplyTarget target = fixture.read();
                 fixture.texts("A");
                 fixture.latest().extras = parcel(fixture.latest().extras);
                 fixture.controller.onReplySent(fixture.id, target, "B", 110, "retained-B");
@@ -926,14 +946,14 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         old.extras.putBoolean("android.isGroupConversation", true);
         old.extras.putCharSequence("android.conversationTitle", "Alice");
         Message placeholder = new Message("hello", 100, new Person.Builder().setName("未知发送者").build());
-        old.extras.putParcelableArray(Notification.EXTRA_MESSAGES, new Bundle[]{MessagingBuilder.toBundle(placeholder)});
+        old.extras.putParcelableArray(Notification.EXTRA_MESSAGES, new Bundle[]{NotificationMessages.toBundle(placeholder)});
         ConversationManager manager = new ConversationManager();
         Conversation c = classified(manager, old);
         check(!c.isGroupChat(), "module-generated legacy group flag treated as native proof");
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
         for (Message message : NotificationMessages.rebuild(c, old, Collections.emptyList(), true)) style.addMessage(message);
         style.setGroupConversation(c.isGroupChat()).setConversationTitle(null);
-        MessagingBuilder.flatIntoExtras(style, old.extras);
+        NotificationMessages.flatIntoExtras(style, old.extras);
         check("Alice".contentEquals(style.getMessages().get(0).getPerson().getName()), "old unknown placeholder not repaired");
         check(!old.extras.getBoolean("android.isGroupConversation") && !old.extras.containsKey("android.conversationTitle"), "stale group layout survived");
     }
@@ -973,7 +993,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
 
             Notification fromCar = carNotification(carConversation);
             Conversation carPeer = conversation(false); carPeer.key = "alice";
-            check(builder.buildFromExtender(carPeer, 1, fromCar, Collections.emptyList()) != null,
+            check(builder.buildConversation(carPeer, 1, fromCar, Collections.emptyList()) != null,
                     "car reply action was not built");
             checkReplyLabel(fromCar, expected);
 
@@ -982,7 +1002,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             fromActions.actions = new Notification.Action[]{ new Notification.Action.Builder(null, "Reply", reply)
                     .addRemoteInput(original).build() };
             Conversation actionPeer = conversation(false); actionPeer.key = "alice";
-            check(builder.buildFromExtender(actionPeer, 2, fromActions, Collections.emptyList()) != null,
+            check(builder.buildConversation(actionPeer, 2, fromActions, Collections.emptyList()) != null,
                     "actions reply was not built");
             checkReplyLabel(fromActions, expected);
 
@@ -991,12 +1011,13 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                             .addMessage("hello").setLatestTimestamp(100).setReplyAction(reply, null).build();
             Notification fromFallback = carNotification(fallbackConversation);
             Conversation fallbackPeer = conversation(false); fallbackPeer.key = "alice";
-            check(builder.buildFromExtender(fallbackPeer, 3, fromFallback, Collections.emptyList()) != null,
+            check(builder.buildConversation(fallbackPeer, 3, fromFallback, Collections.emptyList()) != null,
                     "fallback reply action was not built");
             checkReplyLabel(fromFallback, expected);
 
             Notification media = carNotification(carConversation);
-            check(builder.attachReplyAction(4, media), "media reply action was not attached");
+            check(builder.buildConversation(carPeer, 4, media, Collections.emptyList()) != null,
+                    "media reply action was not built");
             checkReplyLabel(media, expected);
         } finally {
             builder.close();

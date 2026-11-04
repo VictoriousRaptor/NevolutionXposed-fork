@@ -67,6 +67,60 @@ public class NotificationAppearanceHookProfileTest {
         assertFalse(WeChatNotificationAppearance.owns(null, "com.tencent.mm"));
     }
 
+    @Test public void imageInterfacesResolveAndCanRemoveAChildAndSetTheReapplyFlag() throws Exception {
+        NotificationAppearanceHookProfile.Image profile = image(ImageViews.class);
+        ImageViews views = new ImageViews();
+        profile.removeFromParent.invoke(views, 42);
+        assertEquals(42, views.removed);
+        assertFalse((Boolean) profile.reapply.hasFlags.invoke(views, profile.reapply.disallowedFlag));
+        profile.reapply.addFlags.invoke(views, profile.reapply.disallowedFlag);
+        assertTrue((Boolean) profile.reapply.hasFlags.invoke(views, profile.reapply.disallowedFlag));
+    }
+
+    @Test public void unavailableImageCapabilitiesDoNotDisableIndependentInterfaces() {
+        NotificationAppearanceHookProfile.Image flagsOnly = image(FlagsOnlyViews.class);
+        assertNull(flagsOnly.removeFromParent);
+        assertNotNull(flagsOnly.reapply);
+        NotificationAppearanceHookProfile.Image removalOnly = image(RemovalOnlyViews.class);
+        assertNotNull(removalOnly.removeFromParent);
+        assertNull(removalOnly.reapply);
+        assertNull(removalOnly.conversationData);
+        assertNull(removalOnly.messagingData);
+    }
+
+    @Test public void imageRemovalRejectsStaticOrWrongReturnSignatures() {
+        assertNull(image(StaticRemovalViews.class).removeFromParent);
+        assertNull(image(WrongRemovalViews.class).removeFromParent);
+    }
+
+    @Test public void imageReapplyFlagMustBeAStaticFinalInt() {
+        assertNull(image(MutableFlagViews.class).reapply);
+        assertNull(image(InstanceFlagViews.class).reapply);
+        assertNull(image(WrongFlagTypeViews.class).reapply);
+    }
+
+    @Test public void imageReapplyRequiresBothExactInstanceMethods() {
+        assertNull(image(StaticAddFlagsViews.class).reapply);
+        assertNull(image(WrongAddFlagsViews.class).reapply);
+        assertNull(image(StaticHasFlagsViews.class).reapply);
+        assertNull(image(WrongHasFlagsViews.class).reapply);
+    }
+
+    @Test public void imageMessageRootsRequireTheExactRemotableSetter() {
+        for (Class<?> root : new Class<?>[]{WrongDataReturn.class, StaticData.class, UnannotatedData.class}) {
+            NotificationAppearanceHookProfile.Image profile = NotificationAppearanceHookProfile.image(
+                    ImageViews.class, Bundle.class, root, root);
+            assertNotNull(profile.removeFromParent);
+            assertNotNull(profile.reapply);
+            assertNull(profile.conversationData);
+            assertNull(profile.messagingData);
+        }
+    }
+
+    private static NotificationAppearanceHookProfile.Image image(Class<?> views) {
+        return NotificationAppearanceHookProfile.image(views, Bundle.class, null, null);
+    }
+
     private static NotificationAppearanceHookProfile.Header header(Class<?> builder) throws Exception {
         return NotificationAppearanceHookProfile.header(builder, Context.class, Notice.class, Views.class);
     }
@@ -88,6 +142,60 @@ public class NotificationAppearanceHookProfileTest {
     private static class Notice {}
     private static class Views {}
     private static class Icon {}
+    private static class Bundle {}
+    private static class ImageViews {
+        private static final int FLAG_REAPPLY_DISALLOWED = 2;
+        private int flags, removed;
+        private void removeFromParent(int id) { removed = id; }
+        private void addFlags(int value) { flags |= value; }
+        private boolean hasFlags(int value) { return (flags & value) == value; }
+    }
+    private static class FlagsOnlyViews {
+        private static final int FLAG_REAPPLY_DISALLOWED = 2;
+        private void addFlags(int value) {}
+        private boolean hasFlags(int value) { return false; }
+    }
+    private static class RemovalOnlyViews { private void removeFromParent(int id) {} }
+    private static class StaticRemovalViews { private static void removeFromParent(int id) {} }
+    private static class WrongRemovalViews { private boolean removeFromParent(int id) { return false; } }
+    private static class MutableFlagViews {
+        private static int FLAG_REAPPLY_DISALLOWED = 2;
+        private void addFlags(int value) {}
+        private boolean hasFlags(int value) { return false; }
+    }
+    private static class InstanceFlagViews {
+        private final int FLAG_REAPPLY_DISALLOWED = 2;
+        private void addFlags(int value) {}
+        private boolean hasFlags(int value) { return false; }
+    }
+    private static class WrongFlagTypeViews {
+        private static final long FLAG_REAPPLY_DISALLOWED = 2;
+        private void addFlags(int value) {}
+        private boolean hasFlags(int value) { return false; }
+    }
+    private static class StaticAddFlagsViews {
+        private static final int FLAG_REAPPLY_DISALLOWED = 2;
+        private static void addFlags(int value) {}
+        private boolean hasFlags(int value) { return false; }
+    }
+    private static class WrongAddFlagsViews {
+        private static final int FLAG_REAPPLY_DISALLOWED = 2;
+        private boolean addFlags(int value) { return false; }
+        private boolean hasFlags(int value) { return false; }
+    }
+    private static class StaticHasFlagsViews {
+        private static final int FLAG_REAPPLY_DISALLOWED = 2;
+        private void addFlags(int value) {}
+        private static boolean hasFlags(int value) { return false; }
+    }
+    private static class WrongHasFlagsViews {
+        private static final int FLAG_REAPPLY_DISALLOWED = 2;
+        private void addFlags(int value) {}
+        private int hasFlags(int value) { return 0; }
+    }
+    private static class WrongDataReturn { public boolean setData(Bundle data) { return false; } }
+    private static class StaticData { public static void setData(Bundle data) {} }
+    private static class UnannotatedData { public void setData(Bundle data) {} }
     private static class LegacyBuilder {
         private Context mContext;
         private Notice mN;

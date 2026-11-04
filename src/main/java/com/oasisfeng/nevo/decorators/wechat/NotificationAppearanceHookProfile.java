@@ -1,5 +1,6 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
+import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -30,6 +31,58 @@ final class NotificationAppearanceHookProfile {
             this.conversationType = conversationType;
             this.shortcutIcon = shortcutIcon;
         }
+    }
+
+    /** Stable image-rendering interfaces; a missing sub-capability does not disable the others. */
+    static final class Image {
+        final Method removeFromParent, conversationData, messagingData;
+        final Reapply reapply;
+
+        Image(Method removeFromParent, Reapply reapply, Method conversationData, Method messagingData) {
+            this.removeFromParent = removeFromParent;
+            this.reapply = reapply;
+            this.conversationData = conversationData;
+            this.messagingData = messagingData;
+        }
+    }
+
+    static final class Reapply {
+        final Method addFlags, hasFlags;
+        final int disallowedFlag;
+
+        Reapply(Method addFlags, Method hasFlags, int disallowedFlag) {
+            this.addFlags = addFlags;
+            this.hasFlags = hasFlags;
+            this.disallowedFlag = disallowedFlag;
+        }
+    }
+
+    static Image image(Class<?> views, Class<?> bundle, Class<?> conversation, Class<?> messaging) {
+        Method remove = null;
+        Reapply reapply = null;
+        try { remove = method(views, "removeFromParent", void.class, int.class); }
+        catch (ReflectiveOperationException | RuntimeException unavailable) { /* Keep the system view. */ }
+        try {
+            Field flag = views.getDeclaredField("FLAG_REAPPLY_DISALLOWED");
+            int modifiers = flag.getModifiers();
+            if (flag.getType() != int.class || !Modifier.isStatic(modifiers) || !Modifier.isFinal(modifiers))
+                throw new NoSuchFieldException("Unsupported RemoteViews reapply flag");
+            flag.setAccessible(true);
+            reapply = new Reapply(method(views, "addFlags", void.class, int.class),
+                    method(views, "hasFlags", boolean.class, int.class), flag.getInt(null));
+        } catch (ReflectiveOperationException | RuntimeException unavailable) { /* Keep the placeholder. */ }
+        return new Image(remove, reapply, messageData(conversation, bundle), messageData(messaging, bundle));
+    }
+
+    private static Method messageData(Class<?> layout, Class<?> bundle) {
+        if (layout == null) return null;
+        try {
+            Method setter = layout.getMethod("setData", bundle);
+            if (setter.getReturnType() != void.class || Modifier.isStatic(setter.getModifiers())) return null;
+            for (Annotation annotation : setter.getDeclaredAnnotations())
+                if ("android.view.RemotableViewMethod".equals(annotation.annotationType().getName())) return setter;
+        } catch (ReflectiveOperationException | RuntimeException unavailable) { /* This root cannot render message data. */ }
+        return null;
     }
 
     static Header header(Class<?> builder, Class<?> context, Class<?> notification, Class<?> views)

@@ -1,5 +1,13 @@
 # WeChat notification reply compatibility
 
+## 2026-11-03 Unified conversation history and click-removal read requests
+
+Text and media placeholders now take the same conversation-building path. Reply selection keeps the CarExtender → original free-form Action → verified synthetic priority, but no reply target is required to render history. Replacing a reply preserves non-reply actions and their order. Body translation preserves media markers and notification-provided file/link text. Message serialization belongs to `NotificationMessages`; the independent `ReplyTarget` preserves the existing generation, conversation instance, pending reply IDs and native read target without changing wire fields or dispatch timing.
+
+The existing SystemUI removal callback requests native read only for a WeChat non-summary notification with a nonzero module token and `REASON_CLICK`. It reads the removed notification's raw `car_conversation.on_read`, validates the PendingIntent creator package and UID, and never substitutes an arbitrary delete action or looks up the latest notification by ID. Missing/cancelled/failed read actions do not prevent the independent round-reset broadcast. Swipe and Clear All still rely on Android sending `deleteIntent`; replies still request read before dispatch. This does not add a private click hook or cover clicks that do not remove the notification. A sent action is not proof of WeChat's actual unread count or read watermark.
+
+Synthetic framework tests cover these contracts without contacting WeChat. This round passed 296 host tests and compiled the Debug and androidTest APKs, both verified against the existing release certificate and checked with zipalign. `lintDebug` passed with 0 errors and 39 warnings in an isolated copy with 148 identical source/build input hashes; the original workspace test-source analysis was cancelled while traversing files. The 100-case framework runner was compiled only. Actual unread counts, notification appearance and reply input retention require separate device validation; prior runtime evidence does not validate the changed paths.
+
 ## 2026-10-28 同版本名新代码实验性回复排查
 
 精确已知组合优先；未知代码仅枚举同 `versionName` 的已核对通知回复画像，完整签名唯一命中才标 `experimental`。8.0.77 的 3141/3160 候选若都通过则记录 `ambiguous` 并不选实验性画像；8.0.72/8.0.78 的名称**或**代码历史回退及其他 legacy 回退仍在，原生 `PendingIntent` 回复不受合成门禁失败影响。须同时验证接收器 `onReceive(Context, Intent): void`、静态 RemoteInput helper `b(Intent): Bundle`、画像指定的三道无参数静态 `boolean` 门禁；门禁批量 hook 任一失败会撤销已有句柄，合成入口保持关闭。`NX_REPLY stage=profile_ready` 只表示解析通过；还需检查 `car_mode_bypass_ready` 与真实消息投递，不能把前者视为后者。

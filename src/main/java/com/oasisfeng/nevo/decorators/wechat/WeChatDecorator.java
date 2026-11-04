@@ -149,16 +149,16 @@ public class WeChatDecorator extends NevoDecoratorService {
 			@Override public long beginNotificationReply(int id) { return Local.this.beginNotificationReply(id); }
 			@Override public void abortNotificationReply(long reservation) { Local.this.abortNotificationReply(reservation); }
 			@Override public boolean showLastReply() { return Local.this.showLastReply(); }
-			@Override public MessagingBuilder.ReplyTarget replyTarget(int id) {
+			@Override public ReplyTarget replyTarget(int id) {
 				synchronized (Local.this) {
 					Notification latest = getArchivedNotification(id);
-					return latest == null ? null : new MessagingBuilder.ReplyTarget(
+					return latest == null ? null : new ReplyTarget(
 							latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN),
 							mConversationManager.getConversation(id), NotificationMessages.pendingReplyIds(latest), latest.deleteIntent);
 				}
 			}
-			@Override public void onReplyRead(int id, MessagingBuilder.ReplyTarget target) { Local.this.onReplyRead(id, target); }
-			@Override public void onReplySent(int id, MessagingBuilder.ReplyTarget target, CharSequence text, long time, String replyId) {
+			@Override public void onReplyRead(int id, ReplyTarget target) { Local.this.onReplyRead(id, target); }
+			@Override public void onReplySent(int id, ReplyTarget target, CharSequence text, long time, String replyId) {
 				Local.this.onReplySent(id, target, text, time, replyId);
 			}
 		};
@@ -260,7 +260,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			return true;
 		}
 
-		private synchronized void onReplyRead(int id, MessagingBuilder.ReplyTarget target) {
+		private synchronized void onReplyRead(int id, ReplyTarget target) {
 			Notification latest = getArchivedNotification(id);
 			if (latest == null || target == null || target.token() == 0
 					|| target.conversation() != mConversationManager.getConversation(id)) return;
@@ -274,7 +274,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			else replaceCachedNotification(id, latest, read);
 		}
 
-		private synchronized void onReplySent(int id, MessagingBuilder.ReplyTarget target, CharSequence text, long time, String replyId) {
+		private synchronized void onReplySent(int id, ReplyTarget target, CharSequence text, long time, String replyId) {
 			Notification latest = getArchivedNotification(id);
 			if (latest == null || target == null || target.token() == 0
 					|| target.conversation() != mConversationManager.getConversation(id)) return;
@@ -455,27 +455,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 				sLastCallType = null;
 				sLastCallTime = 0;
 			}
-			// Keep WeChat's rich layout when its native notification only needs our reply action.
-			// Without a native reply to append, use the same conversation avatar/badge layout as text.
-			if (content != null) {
-				if (content.contains("[表情]") || content.contains("[动画表情]") ||
-					content.contains("[视频]") || content.contains("[文件]") || content.contains("[链接]") ||
-					content.contains("[音乐]") || content.contains("[位置]") || content.contains("[红包]") ||
-					content.contains("[转账]") || content.contains("[小程序]")) {
-					if (ensureMessagingBuilder() && mMessagingBuilder.attachReplyAction(id, n)) {
-						if (BuildConfig.DEBUG) Log.d(TAG, "Keeping native media layout with appended reply");
-						return Decorating.Unprocessed;
-					}
-				}
-				// 转换微信内置表情标记为 Emoji（如 [得意] -> 😎）
-				if (content.startsWith("[") && content.endsWith("]")) {
-					CharSequence translated = EmojiTranslator.translate(content);
-					if (!translated.equals(content)) {
-						extras.putCharSequence(Notification.EXTRA_TEXT, translated);
-						if (BuildConfig.DEBUG) Log.d(TAG, "Translated emoji marker");
-					}
-				}
-			}
 			// 撤回...
 			boolean is_recall = extras.getBoolean(NotificationMessages.RECALL_PROMPT);
 			if (content != null && content.contains("撤回")) {
@@ -521,12 +500,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 				return Decorating.Unprocessed;
 			}
 			if (!ensureMessagingBuilder()) return Decorating.Unprocessed;
-			if (BuildConfig.DEBUG) Log.d(TAG, "Calling buildFromExtender...");
 			final List<Notification> archive = getArchivedNotifications(id);
-			MessagingStyle messaging = mMessagingBuilder.buildFromExtender(conversation, id, n, archive);
-			if (BuildConfig.DEBUG) Log.d(TAG, "buildFromExtender returned: " + (messaging != null ? "non-null" : "null")); // build message from android auto
-			if (messaging == null)	// EXTRA_TEXT will be written in buildFromArchive()
-				messaging = mMessagingBuilder.buildFromArchive(conversation, n, archive);
+			final MessagingStyle messaging = mMessagingBuilder.buildConversation(conversation, id, n, archive);
 			if (messaging == null) return Decorating.Unprocessed;
 			final List<MessagingStyle.Message> messages = messaging.getMessages();
 			if (messages.isEmpty()) {
@@ -552,7 +527,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			// Compact titles already include the peer; groups and self-only transcripts still need an explicit title.
 			final boolean needsConversationTitle = is_group_chat || messages.stream().noneMatch(message -> message.getPerson() != null);
 			messaging.setGroupConversation(is_group_chat).setConversationTitle(needsConversationTitle ? title : null);
-			MessagingBuilder.flatIntoExtras(messaging, extras);
+			NotificationMessages.flatIntoExtras(messaging, extras);
 			WeChatNotificationAppearance.mark(n);
 			NotificationMarkdown.apply(n, mMarkdownEnabled);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);

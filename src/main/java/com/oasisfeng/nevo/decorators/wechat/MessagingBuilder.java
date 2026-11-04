@@ -1,6 +1,5 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
-import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.Notification.Action;
 import android.app.Notification.CarExtender;
@@ -33,7 +32,6 @@ import java.util.Map;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat.MessagingStyle;
 import androidx.core.app.NotificationCompat.MessagingStyle.Message;
 import androidx.core.app.Person;
@@ -46,10 +44,6 @@ import static android.app.PendingIntent.FLAG_UPDATE_CURRENT;
 import static android.os.Build.VERSION.SDK_INT;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.S;
-import static androidx.core.app.NotificationCompat.EXTRA_CONVERSATION_TITLE;
-import static androidx.core.app.NotificationCompat.EXTRA_IS_GROUP_CONVERSATION;
-import static androidx.core.app.NotificationCompat.EXTRA_MESSAGES;
-import static androidx.core.app.NotificationCompat.EXTRA_SELF_DISPLAY_NAME;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
 import com.oasisfeng.nevo.xposed.R;
@@ -77,54 +71,28 @@ class MessagingBuilder {
 		Log.d(TAG, "NX_REPLY stage=" + stage + (detail == null || detail.isEmpty() ? "" : " " + detail));
 	}
 
-	private static final String KEY_TEXT = "text";
-	private static final String KEY_TIMESTAMP = "time";
-	private static final String KEY_SENDER = "sender";
-	@RequiresApi(P) private static final String KEY_SENDER_PERSON = "sender_person";
-	private static final String KEY_DATA_MIME_TYPE = "type";
-	private static final String KEY_DATA_URI= "uri";
-	private static final String KEY_EXTRAS_BUNDLE = "extras";
-
 	private static final String KEY_USERNAME = WeChatReplyProfile.USERNAME_EXTRA;
 	private static final String MENTION_SEPARATOR = " ";			// Separator between @nick and text. It's not a regular white space, but U+2005.
 
-	/**
-	 * 从已存档消息重建会话
-	 * 
-	 * @param conversation 会话的内存存根
-	 * @param n 当前消息
-	 * @param archive 消息存档
-	 * @return 会话的图形化
-	 */
-	@Nullable MessagingStyle buildFromArchive(final Conversation conversation, final Notification n, final List<Notification> archive) {
+	/** Reply availability never decides whether the conversation transcript can be rebuilt. */
+	@Nullable MessagingStyle buildConversation(final Conversation conversation, final int id,
+			final Notification n, final List<Notification> archive) {
+		configureReplyAction(conversation, id, n);
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
-		appendKnownMessages(messaging, conversation, n, archive);
+		for (Message message : NotificationMessages.rebuild(conversation, n, archive, mController.showLastReply()))
+			messaging.addMessage(message);
 		return messaging.getMessages().isEmpty() && !n.extras.getBoolean(NotificationMessages.RECALL_PROMPT)
 				? null : messaging;
 	}
-	/**
-	 * 从车载扩展信息重建会话
-	 */
-	@Nullable MessagingStyle buildFromExtender(final Conversation conversation, final int id, final Notification n, final List<Notification> archive) {
-		if (!WeChatMessage.isChat(n.tickerText)) return buildFromArchive(conversation, n, archive);
-		final Notification.CarExtender extender = new Notification.CarExtender(n);
-		final CarExtender.UnreadConversation convs = extender.getUnreadConversation();
-		if (convs == null) {
-			final MessagingStyle fromActions = buildFromActions(conversation, id, n, archive);
-			if (fromActions != null) return fromActions;
-			return buildWithSyntheticReply(conversation, id, n, archive);
-		}
-		final long latest_timestamp = convs.getLatestTimestamp();
-		if (n.when <= 0 && latest_timestamp > 0) n.when = latest_timestamp;
 
-		final PendingIntent on_reply = convs.getReplyPendingIntent();
-		if (on_reply == null) {
-			MessagingStyle fromActions = buildFromActions(conversation, id, n, archive);
-			return fromActions != null ? fromActions : buildWithSyntheticReply(conversation, id, n, archive);
-		}
-		if (conversation.key == null) {
+	private void configureReplyAction(final Conversation conversation, final int id, final Notification n) {
+		if (!WeChatMessage.isChat(n.tickerText)) return;
+		final CarExtender.UnreadConversation car = new CarExtender(n).getUnreadConversation();
+		if (car != null && n.when <= 0 && car.getLatestTimestamp() > 0) n.when = car.getLatestTimestamp();
+		final PendingIntent nativeReply = car == null ? null : car.getReplyPendingIntent();
+		if (nativeReply != null && conversation.key == null) {
 			try {
-				on_reply.send(mContext, 0, null, (p, intent, r, d, b) -> {
+				nativeReply.send(mContext, 0, null, (p, intent, r, d, b) -> {
 					final String key = intent.getStringExtra(KEY_USERNAME);
 					if (key != null) {
 						conversation.onTalkerResolved.accept(key);
@@ -135,22 +103,18 @@ class MessagingBuilder {
 			}
 		}
 
-		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
-		appendKnownMessages(messaging, conversation, n, archive);
-
-		final List<Action> actions = new ArrayList<>();
-		// Forward standard notification RemoteInput results through WeChat's original action.
-		final RemoteInput remoteInput = convs.getRemoteInput();
-		actions.add(buildNativeReplyAction(id, on_reply, remoteInput));
-		if (remoteInput == null)
-			logReply("action_native_fallback", "notificationId=" + id + " resultKey=" + DEFAULT_AUTO_REPLY_RESULT_KEY);
-		setActions(n, actions.toArray(new Action[actions.size()]));
-		return messaging;
-	}
-
-	private void appendKnownMessages(final MessagingStyle messaging, final Conversation conversation,
-			final Notification n, final List<Notification> archive) {
-		for (Message message : NotificationMessages.rebuild(conversation, n, archive, mController.showLastReply())) messaging.addMessage(message);
+		final Action reply;
+		if (nativeReply != null) {
+			reply = buildNativeReplyAction(id, nativeReply, car.getRemoteInput());
+			if (car.getRemoteInput() == null)
+				logReply("action_native_fallback", "notificationId=" + id + " resultKey=" + DEFAULT_AUTO_REPLY_RESULT_KEY);
+		} else {
+			// A normalized snapshot already carries our proxy or its verified synthetic action.
+			if (n.extras.getBoolean(NotificationMessages.STORED)) return;
+			final Action fromActions = replyFromActions(id, n.actions);
+			reply = fromActions != null ? fromActions : buildSyntheticReplyAction(conversation, id, n);
+		}
+		if (reply != null) replaceReplyAction(n, reply);
 	}
 
 	/** @return appropriate PendingIntent flags, including FLAG_MUTABLE on Android 12+ for RemoteInput. */
@@ -158,9 +122,7 @@ class MessagingBuilder {
 		return SDK_INT >= S ? (FLAG_UPDATE_CURRENT | FLAG_MUTABLE) : FLAG_UPDATE_CURRENT;
 	}
 
-	@Nullable private MessagingStyle buildFromActions(final Conversation conversation, final int id, final Notification n, final List<Notification> archive) {
-		if (!WeChatMessage.isChat(n.tickerText)) return null;
-		final Action[] actions = n.actions;
+	@Nullable private Action replyFromActions(final int id, final Action[] actions) {
 		if (actions == null) return null;
 
 		RemoteInput replyRemoteInput = null;
@@ -188,18 +150,7 @@ class MessagingBuilder {
 
 		if (BuildConfig.DEBUG) Log.d(TAG, "Found reply action via notification actions fallback");
 
-		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
-
-		// 用通知里已有的消息、归档通知或当前文本重建消息列表，并补上输入历史里的用户回复
-		appendKnownMessages(messaging, conversation, n, archive);
-
-		final List<Action> newActions = new ArrayList<>();
-
-		// Forward standard notification RemoteInput results through WeChat's original action.
-		newActions.add(buildNativeReplyAction(id, onReply, replyRemoteInput));
-
-		setActions(n, newActions.toArray(new Action[0]));
-		return messaging;
+		return buildNativeReplyAction(id, onReply, replyRemoteInput);
 	}
 
 	/** Keep the native target even when CarExtender omits its RemoteInput descriptor. */
@@ -224,26 +175,8 @@ class MessagingBuilder {
 		return PendingIntent.getBroadcast(mContext, 0, proxy.setPackage(mContext.getPackageName()), pendingIntentFlags());
 	}
 
-	/**
-	 * Appends only the inline reply action from WeChat's car conversation, leaving the rest of the
-	 * notification untouched. Used for message types whose original layout is kept on purpose
-	 * (stickers, video, files, links, …) but which should still be replyable from the notification.
-	 */
-	boolean attachReplyAction(final int id, final Notification n) {
-		if (!WeChatMessage.isChat(n.tickerText)) return false;
-		final Notification.CarExtender.UnreadConversation convs = new Notification.CarExtender(n).getUnreadConversation();
-		if (convs == null) {
-			logReply("action_media_reply_skipped", "notificationId=" + id + " reason=no_car_conversation");
-			return false;
-		}
-		final PendingIntent onReply = convs.getReplyPendingIntent();
-		if (onReply == null) {
-			logReply("action_media_reply_skipped", "notificationId=" + id + " reason=no_reply_intent");
-			return false;
-		}
-		final RemoteInput remoteInput = convs.getRemoteInput();
-		final Action replyAction = buildNativeReplyAction(id, onReply, remoteInput);
-
+	/** Replace deliverable text replies while retaining every other native operation in order. */
+	private static void replaceReplyAction(final Notification n, final Action replyAction) {
 		final Action[] existing = n.actions;
 		final List<Action> merged = new ArrayList<>();
 		if (existing != null) for (final Action action : existing) {
@@ -261,10 +194,6 @@ class MessagingBuilder {
 		}
 		merged.add(replyAction);
 		setActions(n, merged.toArray(new Action[0]));
-		logReply("action_media_reply_attached", "notificationId=" + id + " resultKey="
-				+ (remoteInput == null ? DEFAULT_AUTO_REPLY_RESULT_KEY : remoteInput.getResultKey())
-				+ " existingActions=" + (existing == null ? 0 : existing.length));
-		return true;
 	}
 
 	private final Set<String> mPendingReplies = new java.util.HashSet<>();
@@ -353,53 +282,6 @@ class MessagingBuilder {
 	@NonNull private static Intent addTargetPackageAndWakeUp(final PendingIntent action) {
 		return new Intent().addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES).setPackage(action.getCreatorPackage());
 	}
-
-	static void flatIntoExtras(final MessagingStyle messaging, final Bundle extras) {
-		extras.putBoolean(NotificationMessages.STORED, true);
-		final Person user = messaging.getUser();
-		if (user != null) {
-			extras.putCharSequence(EXTRA_SELF_DISPLAY_NAME, user.getName());
-			if (SDK_INT >= P) extras.putParcelable(Notification.EXTRA_MESSAGING_PERSON, toAndroidPerson(user));	// Not included in NotificationCompat
-		}
-		if (messaging.getConversationTitle() != null) extras.putCharSequence(EXTRA_CONVERSATION_TITLE, messaging.getConversationTitle());
-		else extras.remove(EXTRA_CONVERSATION_TITLE);
-		final List<Message> messages = messaging.getMessages();
-		// Log.d(TAG, "messages " + messages.size());
-		extras.putParcelableArray(EXTRA_MESSAGES, getBundleArrayForMessages(messages));
-		//if (! mHistoricMessages.isEmpty()) extras.putParcelableArray(Notification.EXTRA_HISTORIC_MESSAGES, MessagingBuilder.getBundleArrayForMessages(mHistoricMessages));
-		extras.putBoolean(EXTRA_IS_GROUP_CONVERSATION, messaging.isGroupConversation());
-	}
-
-	static Bundle[] getBundleArrayForMessages(final List<Message> messages) {
-		final int N = messages.size();
-		final Bundle[] bundles = new Bundle[N];
-		for (int i = 0; i < N; i ++) bundles[i] = toBundle(messages.get(i));
-		return bundles;
-	}
-
-	static Bundle toBundle(final Message message) {
-		final Bundle bundle = new Bundle();
-		bundle.putCharSequence(KEY_TEXT, message.getText());
-		// Log.d(TAG, "message.text " + message.getText());
-		bundle.putLong(KEY_TIMESTAMP, message.getTimestamp());		// Must be included even for 0
-		final Person sender = message.getPerson();
-		if (sender != null) {
-			bundle.putBundle("person", sender.toBundle());
-			bundle.putCharSequence(KEY_SENDER, sender.getName());	// Legacy listeners need this
-			if (SDK_INT >= P) bundle.putParcelable(KEY_SENDER_PERSON, toAndroidPerson(sender));
-		}
-		if (message.getDataMimeType() != null) bundle.putString(KEY_DATA_MIME_TYPE, message.getDataMimeType());
-		if (message.getDataUri() != null) bundle.putParcelable(KEY_DATA_URI, message.getDataUri());
-		if (! message.getExtras().isEmpty()) bundle.putBundle(KEY_EXTRAS_BUNDLE, message.getExtras());
-		//if (message.isRemoteInputHistory()) bundle.putBoolean(KEY_REMOTE_INPUT_HISTORY, message.isRemoteInputHistory());
-		return bundle;
-	}
-
-	@RequiresApi(P) @SuppressLint("RestrictedApi") private static android.app.Person toAndroidPerson(final Person user) {
-		return user.toAndroidPerson();
-	}
-
-	record ReplyTarget(long token, Conversation conversation, List<String> pendingReplies, PendingIntent readAction) {}
 
 	interface Controller {
 		void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies);
@@ -581,23 +463,11 @@ class MessagingBuilder {
 		}
 	}
 
-	@Nullable private MessagingStyle buildWithSyntheticReply(final Conversation conversation, final int id, final Notification n, final List<Notification> archive) {
-		if (!WeChatMessage.isChat(n.tickerText)) return buildFromArchive(conversation, n, archive);
-		final PendingIntent contentIntent = n.contentIntent;
-		if (contentIntent == null) {
-			if (BuildConfig.DEBUG) Log.d(TAG, "No contentIntent for synthetic reply");
-			return null;
-		}
-		if (BuildConfig.DEBUG) Log.d(TAG, "Building synthetic reply action for notification " + id);
-		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
-
-		// 用通知里已有的消息、归档通知或当前文本重建消息列表，并补上输入历史里的用户回复
-		appendKnownMessages(messaging, conversation, n, archive);
-
-		if (!WeChatMessage.canUseSyntheticReply(n.tickerText, contentIntent != null && !TextUtils.isEmpty(conversation.key),
+	@Nullable private Action buildSyntheticReplyAction(final Conversation conversation, final int id, final Notification n) {
+		if (!WeChatMessage.canUseSyntheticReply(n.tickerText, n.contentIntent != null && !TextUtils.isEmpty(conversation.key),
 				isSyntheticReplyAvailable())) {
 			logReply("action_synthetic_skipped", "notificationId=" + id + " reason=unverified_dispatch_target");
-			return messaging;
+			return null;
 		}
 
 		// Reply is only exposed when the target receiver was verified in this process.
@@ -614,11 +484,8 @@ class MessagingBuilder {
 				.setAllowGeneratedReplies(true);
 		if (SDK_INT >= P) replyActionBuilder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
 
-		final List<Action> actions = new ArrayList<>();
-		actions.add(replyActionBuilder.build());
-		setActions(n, actions.toArray(new Action[0]));
 		logReply("action_synthetic", "notificationId=" + id);
-		return messaging;
+		return replyActionBuilder.build();
 	}
 
 	private static boolean isSyntheticReplyAvailable() {

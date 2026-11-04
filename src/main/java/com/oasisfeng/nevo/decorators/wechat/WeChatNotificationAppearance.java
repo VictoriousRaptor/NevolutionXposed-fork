@@ -134,10 +134,8 @@ final class WeChatNotificationAppearance {
         if (column == 0) return original;
         RemoteViews result = original.clone();
         // SystemUI may reapply onto the previous view tree: remove our old image before adding one.
-        java.lang.reflect.Method remove = RemoteViews.class.getDeclaredMethod("removeFromParent", int.class);
-        if (remove.getReturnType() != void.class || java.lang.reflect.Modifier.isStatic(remove.getModifiers()))
-            throw new NoSuchMethodException("Unsupported RemoteViews.removeFromParent signature");
-        remove.setAccessible(true);
+        java.lang.reflect.Method remove = ImagePreviewPresentation.imageCapabilities().removeFromParent;
+        if (remove == null) throw new NoSuchMethodException("Unsupported RemoteViews.removeFromParent signature");
         remove.invoke(result, R.id.wechat_preview_image);
         boolean trackedImage = ImagePreviewLoader.isTracked(notification)
                 && ImagePreviewPresentation.hasIncomingPlaceholder(notification.extras);

@@ -1,5 +1,6 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.content.Context;
 import android.os.Build;
@@ -8,7 +9,9 @@ import android.os.Parcelable;
 import android.text.TextUtils;
 import android.util.Log;
 
+import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationCompat.MessagingStyle;
 import androidx.core.app.NotificationCompat.MessagingStyle.Message;
 import androidx.core.app.Person;
 import androidx.core.graphics.drawable.IconCompat;
@@ -22,6 +25,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
+
+import static android.os.Build.VERSION.SDK_INT;
+import static android.os.Build.VERSION_CODES.P;
+import static androidx.core.app.NotificationCompat.EXTRA_CONVERSATION_TITLE;
+import static androidx.core.app.NotificationCompat.EXTRA_IS_GROUP_CONVERSATION;
+import static androidx.core.app.NotificationCompat.EXTRA_MESSAGES;
+import static androidx.core.app.NotificationCompat.EXTRA_SELF_DISPLAY_NAME;
 
 /** Common Android adapter for all notification/reply paths. */
 final class NotificationMessages {
@@ -37,6 +47,55 @@ final class NotificationMessages {
     static final String RECALLED_IDS = "nevo.wechat.recalledServerIds";
     static final String RECALL_PROMPT = "nevo.wechat.recallPrompt";
     private static final Pattern UNREAD_COUNT_PREFIX = Pattern.compile("^\\[\\d+(?:条|則)?\\]");
+
+    private static final String KEY_TEXT = "text";
+    private static final String KEY_TIMESTAMP = "time";
+    private static final String KEY_SENDER = "sender";
+    @RequiresApi(P) private static final String KEY_SENDER_PERSON = "sender_person";
+    private static final String KEY_DATA_MIME_TYPE = "type";
+    private static final String KEY_DATA_URI= "uri";
+    private static final String KEY_EXTRAS_BUNDLE = "extras";
+
+    static void flatIntoExtras(final MessagingStyle messaging, final Bundle extras) {
+        extras.putBoolean(NotificationMessages.STORED, true);
+        final Person user = messaging.getUser();
+        if (user != null) {
+            extras.putCharSequence(EXTRA_SELF_DISPLAY_NAME, user.getName());
+            if (SDK_INT >= P) extras.putParcelable(Notification.EXTRA_MESSAGING_PERSON, toAndroidPerson(user));    // Not included in NotificationCompat
+        }
+        if (messaging.getConversationTitle() != null) extras.putCharSequence(EXTRA_CONVERSATION_TITLE, messaging.getConversationTitle());
+        else extras.remove(EXTRA_CONVERSATION_TITLE);
+        final List<Message> messages = messaging.getMessages();
+        extras.putParcelableArray(EXTRA_MESSAGES, getBundleArrayForMessages(messages));
+        extras.putBoolean(EXTRA_IS_GROUP_CONVERSATION, messaging.isGroupConversation());
+    }
+
+    static Bundle[] getBundleArrayForMessages(final List<Message> messages) {
+        final int N = messages.size();
+        final Bundle[] bundles = new Bundle[N];
+        for (int i = 0; i < N; i ++) bundles[i] = toBundle(messages.get(i));
+        return bundles;
+    }
+
+    static Bundle toBundle(final Message message) {
+        final Bundle bundle = new Bundle();
+        bundle.putCharSequence(KEY_TEXT, message.getText());
+        bundle.putLong(KEY_TIMESTAMP, message.getTimestamp());        // Must be included even for 0
+        final Person sender = message.getPerson();
+        if (sender != null) {
+            bundle.putBundle("person", sender.toBundle());
+            bundle.putCharSequence(KEY_SENDER, sender.getName());    // Legacy listeners need this
+            if (SDK_INT >= P) bundle.putParcelable(KEY_SENDER_PERSON, toAndroidPerson(sender));
+        }
+        if (message.getDataMimeType() != null) bundle.putString(KEY_DATA_MIME_TYPE, message.getDataMimeType());
+        if (message.getDataUri() != null) bundle.putParcelable(KEY_DATA_URI, message.getDataUri());
+        if (! message.getExtras().isEmpty()) bundle.putBundle(KEY_EXTRAS_BUNDLE, message.getExtras());
+        return bundle;
+    }
+
+    @RequiresApi(P) @SuppressLint("RestrictedApi") private static android.app.Person toAndroidPerson(final Person user) {
+        return user.toAndroidPerson();
+    }
 
     private static String peerId(Conversation conversation) {
         if (conversation.notificationPeerId == null) conversation.notificationPeerId = "nevo:peer:" + UUID.randomUUID();
@@ -71,7 +130,7 @@ final class NotificationMessages {
             }
         }
         // Ticker and car history can lag behind EXTRA_TEXT. Neither determines direction.
-        Message message = new Message(translateEmoji ? EmojiTranslator.translate(text) : text,
+        Message message = new Message(translateEmoji ? EmojiTranslator.translateMessageText(text) : text,
                 notification.when, peer(conversation, sender));
         // This ID comes from NotificationItem itself, never a timestamp/text search in history.
         long serverId = notification.extras.getLong(SERVER_ID);
@@ -300,7 +359,7 @@ final class NotificationMessages {
         writeRound(notification.extras, round);
         if (!notification.extras.getBoolean(STORED)) return;
         List<Message> messages = rebuild(conversation, notification, java.util.Collections.emptyList(), showLastReply);
-        notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, MessagingBuilder.getBundleArrayForMessages(messages));
+        notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, NotificationMessages.getBundleArrayForMessages(messages));
     }
 
     /** Mark the incoming generation read, keeping it visible until the next peer event. */
@@ -317,14 +376,14 @@ final class NotificationMessages {
                     && message.getExtras().getLong(MESSAGE_NOTIFICATION_TOKEN) <= token)
                 message.getExtras().putLong(MESSAGE_NOTIFICATION_TOKEN, generation);
         }
-        notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, MessagingBuilder.getBundleArrayForMessages(messages));
+        notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, NotificationMessages.getBundleArrayForMessages(messages));
         notification.extras.putBoolean(STORED, true);
         if (newerPeer) clearReadHistory(conversation, notification, token, showLastReply);
         else {
             round.replyReadToken = Math.max(token, round.replyReadToken);
             writeRound(notification.extras, round);
             messages = rebuild(conversation, notification, java.util.Collections.emptyList(), showLastReply);
-            notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, MessagingBuilder.getBundleArrayForMessages(messages));
+            notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, NotificationMessages.getBundleArrayForMessages(messages));
         }
     }
 
@@ -335,7 +394,7 @@ final class NotificationMessages {
 
     /** Preserve the current peer/reply group; retire old peers only if a later peer already arrived. */
     static boolean recordReadReply(Conversation conversation, Notification notification, List<Notification> archive,
-                                   MessagingBuilder.ReplyTarget target,
+                                   ReplyTarget target,
                                    CharSequence text, long time, String replyId) {
         long readToken = target.token();
         List<Message> messages = rebuild(conversation, notification, archive, true);
@@ -362,7 +421,7 @@ final class NotificationMessages {
                 message.getExtras().putLong(MESSAGE_NOTIFICATION_TOKEN, generation);
             }
         }
-        notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, MessagingBuilder.getBundleArrayForMessages(messages));
+        notification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, NotificationMessages.getBundleArrayForMessages(messages));
         notification.extras.putBoolean(STORED, true);
         if (newerPeerToken != 0) clearReadHistory(conversation, notification, readToken, true);
         notification.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, generation);

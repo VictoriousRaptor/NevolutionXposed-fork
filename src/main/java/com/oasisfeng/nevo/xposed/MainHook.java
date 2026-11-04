@@ -1,6 +1,5 @@
 package com.oasisfeng.nevo.xposed;
 
-import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -24,7 +23,6 @@ import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService.SystemUIDecorator;
 import com.oasisfeng.nevo.decorators.wechat.WeChatDecorator;
-import com.oasisfeng.nevo.decorators.wechat.WeChatNotificationRemoval;
 import com.oasisfeng.nevo.decorators.wechat.WeChatReplyProfile;
 import com.oasisfeng.nevo.decorators.wechat.WeChatEmojiHooks;
 import com.oasisfeng.nevo.decorators.wechat.WeChatProfileCache;
@@ -249,29 +247,9 @@ public class MainHook extends XposedModule {
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log("ContextImpl hook failed"); }
 	}
 
-	// This runs in the SystemUI host process, whose manifest grants INTERACT_ACROSS_USERS_FULL.
-	// The module manifest is not the runtime permission source for this call.
-	@SuppressLint("MissingPermission")
 	private static void notifyWeChatRoundRemoved(final StatusBarNotification sbn, final int reason) {
-		if (sbn == null || !WeChatDecorator.WECHAT_PACKAGE.equals(sbn.getPackageName())
-				|| !WeChatNotificationRemoval.shouldResetRound(reason)) return;
-		final Notification notification = sbn.getNotification();
-		if (notification == null) return;
-		final long token = notification.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
-		if (token == 0) return;
-		final Context context = NevoDecoratorService.getAppContext();
-		if (context == null) return;
-		final Intent reset = new Intent(WeChatNotificationRemoval.ACTION_RESET_ROUND)
-				.setPackage(WeChatDecorator.WECHAT_PACKAGE)
-				.putExtra(WeChatNotificationRemoval.EXTRA_NOTIFICATION_ID, sbn.getId())
-				.putExtra(WeChatNotificationRemoval.EXTRA_ROUND_TOKEN, token);
-		try {
-			context.sendBroadcastAsUser(reset, sbn.getUser());
-			if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=removal_broadcast id=" + sbn.getId()
-					+ " reason=" + reason + " tokenPresent=true");
-		} catch (final RuntimeException failure) {
-			Log.w(TAG, "Unable to broadcast WeChat notification removal, reason=" + reason, failure);
-		}
+		if (sbn == null || !WeChatDecorator.WECHAT_PACKAGE.equals(sbn.getPackageName())) return;
+		NotificationRemovalRead.handleRemoved(NevoDecoratorService.getAppContext(), sbn, reason);
 	}
 
 	private static void imageNotificationTrace(String stage, int id, Notification notification) {

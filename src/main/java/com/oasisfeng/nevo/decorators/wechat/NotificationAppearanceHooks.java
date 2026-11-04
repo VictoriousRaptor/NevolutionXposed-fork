@@ -101,6 +101,7 @@ public final class NotificationAppearanceHooks {
         if (!headerInstalled) try {
             NotificationAppearanceHookProfile.Header profile = NotificationAppearanceHookProfile.header(
                     Notification.Builder.class, Context.class, Notification.class, RemoteViews.class);
+            ImagePreviewPresentation.imageCapabilities();
             deoptimizeViewCallers(Notification.Builder.class, deoptimize);
             XposedBridge.hookMethod(profile.render, new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {

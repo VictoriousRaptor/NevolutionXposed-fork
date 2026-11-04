@@ -12,15 +12,25 @@ import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
 import java.io.IOException;
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Render-only message data. The original transcript and its placeholder remain available for fallback. */
 @SuppressLint("BlockedPrivateApi") // Optional RemoteViews flag is signature-checked; unavailable runtimes keep the placeholder.
 final class ImagePreviewPresentation {
+    private static final class Capabilities {
+        static final NotificationAppearanceHookProfile.Image IMAGE = NotificationAppearanceHookProfile.image(
+                RemoteViews.class, Bundle.class, messageLayout("com.android.internal.widget.ConversationLayout"),
+                messageLayout("com.android.internal.widget.MessagingLayout"));
+    }
+
+    static NotificationAppearanceHookProfile.Image imageCapabilities() { return Capabilities.IMAGE; }
+
+    private static Class<?> messageLayout(String name) {
+        try { return Class.forName(name, false, RemoteViews.class.getClassLoader()); }
+        catch (ClassNotFoundException | RuntimeException unavailable) { return null; }
+    }
+
     static Bundle withoutPlaceholder(Bundle source, long imageServerId) {
         Parcelable[] messages = source.getParcelableArray(Notification.EXTRA_MESSAGES);
         List<ImagePlaceholderPolicy.Message> candidates = readMessages(source);
@@ -51,12 +61,10 @@ final class ImagePreviewPresentation {
 
     /** Mark the old expanded hierarchy so SystemUI inflates the image update instead of reapplying it. */
     static boolean disallowReapply(RemoteViews views) {
+        NotificationAppearanceHookProfile.Reapply capability = imageCapabilities().reapply;
+        if (capability == null) return false;
         try {
-            int value = reapplyDisallowedFlag();
-            java.lang.reflect.Method add = RemoteViews.class.getDeclaredMethod("addFlags", int.class);
-            if (add.getReturnType() != void.class || Modifier.isStatic(add.getModifiers())) return false;
-            add.setAccessible(true);
-            add.invoke(views, value);
+            capability.addFlags.invoke(views, capability.disallowedFlag);
             return hasReapplyDisallowed(views);
         } catch (ReflectiveOperationException | RuntimeException unavailable) {
             return false;
@@ -64,23 +72,13 @@ final class ImagePreviewPresentation {
     }
 
     static boolean hasReapplyDisallowed(RemoteViews views) {
+        NotificationAppearanceHookProfile.Reapply capability = imageCapabilities().reapply;
+        if (capability == null) return false;
         try {
-            int value = reapplyDisallowedFlag();
-            java.lang.reflect.Method has = RemoteViews.class.getDeclaredMethod("hasFlags", int.class);
-            if (has.getReturnType() != boolean.class || Modifier.isStatic(has.getModifiers())) return false;
-            has.setAccessible(true);
-            return (Boolean) has.invoke(views, value);
+            return (Boolean) capability.hasFlags.invoke(views, capability.disallowedFlag);
         } catch (ReflectiveOperationException | RuntimeException unavailable) {
             return false;
         }
-    }
-
-    private static int reapplyDisallowedFlag() throws ReflectiveOperationException {
-        java.lang.reflect.Field flag = RemoteViews.class.getDeclaredField("FLAG_REAPPLY_DISALLOWED");
-        if (flag.getType() != int.class || !Modifier.isStatic(flag.getModifiers()) || !Modifier.isFinal(flag.getModifiers()))
-            throw new NoSuchFieldException("Unsupported RemoteViews reapply flag");
-        flag.setAccessible(true);
-        return flag.getInt(null);
     }
 
     private static List<ImagePlaceholderPolicy.Message> readMessages(Bundle source) {
@@ -116,14 +114,12 @@ final class ImagePreviewPresentation {
                     || "com.android.internal.widget.MessagingLayout".equals(name))
                     || parser.getAttributeResourceValue("http://schemas.android.com/apk/res/android", "id", 0) != rootId)
                 return false;
-            Method setter = Class.forName(name).getMethod("setData", Bundle.class);
-            if (setter.getReturnType() != void.class || Modifier.isStatic(setter.getModifiers())) return false;
-            for (Annotation annotation : setter.getDeclaredAnnotations())
-                if ("android.view.RemotableViewMethod".equals(annotation.annotationType().getName())) return true;
-        } catch (Resources.NotFoundException | ReflectiveOperationException | XmlPullParserException | IOException unavailable) {
+            NotificationAppearanceHookProfile.Image capabilities = imageCapabilities();
+            return "com.android.internal.widget.ConversationLayout".equals(name)
+                    ? capabilities.conversationData != null : capabilities.messagingData != null;
+        } catch (Resources.NotFoundException | XmlPullParserException | IOException unavailable) {
             return false;
         }
-        return false;
     }
 
     private ImagePreviewPresentation() {}
