@@ -1,5 +1,16 @@
 # 微信 8.0.79 / 3182、3183、3200 适配记录
 
+## 2026-11-06 首条私聊头像冷缓存
+
+同日后续：3182/3183 沿用下列头像接口与门禁，首条缺头像通知改为最多等待 500 ms，超时再发送并继续静默补图。不增加微信混淆 hook；新增 Android NotificationManager 取消单条/全部的 BEFORE hook 与 notify 发布末端等待边界，完整签名和并发、撤回处理见适配手册本日章节。设备描述符检查已加入 `g.a(String): Bitmap`；源码证据与运行时/真实消息验证分别记录。
+
+用户报告 8.0.79/3182、3183 均存在每个联系人首条无头像、后续有头像。离线源码中 `com.tencent.mm.modelavatar.g.a(String): Bitmap` 为 public static，调用 `g.b(String, boolean, int, com.tencent.mm.modelavatar.e): Bitmap`，继而调用 `com.tencent.mm.modelavatar.r.e(String, boolean, int, com.tencent.mm.modelavatar.e): Bitmap`。`r.e` 先从头像缓存读取；未命中则登记任务、调度加载并返回 null。原模块只在新通知时读取大图标，没有首条通知的头像完成刷新。这是本次补图修复的源码依据，尚未通过现场跟踪证明用户两种构建的每次失败均走此分支。
+
+- 3182：沿用 ADB 取得的 base，SHA-256 `4382254fbb256f37b7b430e6f3d984c512c603e46d39f9c323cd8a6fa75d8364`；源码 `.debug-artifacts/wechat-8.0.79/sources/sources/com/tencent/mm/modelavatar/{g,r}.java`，通知调用点为同目录 `com/tencent/mm/booter/notification/m0.java`。
+- 3183：沿用下文 APKMirror APKM 抽取的 `3183-base.apk`，本次重新核对 SHA-256 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0`。`g` 用 JADX `--rename-flags none --single-class` 重新反编译到 `.debug-artifacts/avatar-first-20261106/avatar-g-3183.java`；`r.e` 参考 `.debug-artifacts/wechat-same-name-profile-probing/apkmirror-8079/3183-sources/sources/com/tencent/mm/modelavatar/r.java`。采用实际类名/方法名，不依赖反编译器生成的字段别名。
+
+只启用名称与代码同时匹配的这两个构建，并在运行时检查 `g.a(String): Bitmap` 完整静态签名。此为反射调用而非新增 hook；头像补取与回复、图片、撤回画像独立。有限重试、通知生命周期核对、异常回退与验证边界见适配手册本日章节。尚未在微信进程执行该新增调用或验收首条头像。
+
 ## 2026-11-02 3183 自动真机验证与大图探测修正
 
 在先 rebase 到本地主检出区 `master` 的 `daefa7b` 后，使用现有 release 证书签名的 Debug 在 Android API 37、微信 8.0.79/3183 上复测。回拉 base SHA-256 为 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0`，与下节 APKMirror 样本相同，来源和离线完整映射继续有效。

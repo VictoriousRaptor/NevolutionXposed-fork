@@ -95,7 +95,8 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "mediaReplyActionsArePreserved", "mediaHistorySurvivesRebuild", "mediaAfterReplyUsesExistingRound",
                 "clickUsesRemovedNativeRead", "removalReadGuards", "cancelledRemovalReadReturnsNormally",
                 "removalFailuresStillResetHistory", "removalResetFailureDoesNotSuppressRead",
-                "imageRemovalCapabilityAndCache", "imageReapplyCapability", "conversationDataCapability", "messagingDataCapability" };
+                "imageRemovalCapabilityAndCache", "imageReapplyCapability", "conversationDataCapability", "messagingDataCapability",
+                "initialAvatarCancellationAndReplacement", "initialAvatarRecallAndAlert" };
         Runnable[] tests = { () -> NotificationCompatibilityInstrumentation.carExtensionWithoutConversation(getTargetContext()),
                 NotificationCompatibilityInstrumentation::channelMigrationPreservesSettings,
                 this::personAndAttachmentRoundTrip, this::staleTickerAndCarHistory, this::unknownAndGroupNames,
@@ -170,7 +171,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> ImageRenderCapabilitiesInstrumentation.remoteViewsRemovalAndCache(this),
                 () -> ImageRenderCapabilitiesInstrumentation.remoteViewsReapplyFlag(getTargetContext()),
                 ImageRenderCapabilitiesInstrumentation::conversationMessageData,
-                ImageRenderCapabilitiesInstrumentation::messagingMessageData };
+                ImageRenderCapabilitiesInstrumentation::messagingMessageData,
+                () -> InitialAvatarInstrumentation.cancellationAndReplacement(this),
+                () -> InitialAvatarInstrumentation.recallAndAlert(getTargetContext()) };
         if (names.length != tests.length) {
             Bundle result = new Bundle();
             result.putString("shortMsg", "Framework test names and cases differ in length");

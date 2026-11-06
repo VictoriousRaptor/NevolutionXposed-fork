@@ -22,6 +22,10 @@ final class WeChatDescriptorChecks {
         Context wechat = context.createPackageContext("com.tencent.mm",
                 Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY);
         WeChatDescriptorChecks v = new WeChatDescriptorChecks(wechat.getClassLoader());
+        if (WeChatAvatar.supported(info.versionName, info.versionCode)) {
+            WeChatAvatar.resolve(v.type("com.tencent.mm.modelavatar.g"), android.graphics.Bitmap.class);
+            v.checks++;
+        }
         Class<?> msg = v.type(p.message), state = v.type(p.state), simple = v.type(p.simple);
         v.method(state, p.stateGet, Object.class, String.class);
         v.field(simple, "d", int.class);

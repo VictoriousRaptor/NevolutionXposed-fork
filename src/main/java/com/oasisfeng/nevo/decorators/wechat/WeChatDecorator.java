@@ -107,6 +107,12 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private final ImagePreviewLoader imagePreviews = new ImagePreviewLoader(imageEvents);
 		private final WeChatAppReplyEvents appReplyEvents = new WeChatAppReplyEvents();
 		private final WeChatRecallEvents recallEvents = new WeChatRecallEvents();
+		private final WeChatAvatar avatars = new WeChatAvatar();
+		private android.os.Handler avatarHandler;
+		private static final String AWAIT_AVATAR = "nevo.wechat.awaitAvatar";
+		private final InitialAvatarGate<android.util.Pair<String, Integer>, Notification, android.graphics.Bitmap> initialAvatars =
+				new InitialAvatarGate<>(SystemClock::uptimeMillis, this::scheduleAvatar);
+		private boolean postingInitialAvatar;
 		private static final String PREF_IMAGE_PREVIEW = "WeChatDecorator.image_preview";
 		private static final String PREF_IMAGE_PREVIEW_LARGE = "WeChatDecorator.image_preview_large";
 		/** Opt-in: without the setting, notifications keep WeChat's original [图片] text. */
@@ -128,6 +134,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		 * @param loadPackageParam
 		 */
 		@Override public void hook(PackageHookContext loadPackageParam) {
+			avatars.initialize(getAppContext(), loadPackageParam.classLoader);
 			appReplyEvents.install(getAppContext(), loadPackageParam.classLoader, this::onAppSent,
 					PROFILE_SELECTOR, mProfileCache);
 			recallEvents.install(getAppContext(), loadPackageParam.classLoader, this::onRecalled,
@@ -216,6 +223,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 				if (BuildConfig.DEBUG) Log.d("WeChat.Identity", "source=notification_reply_sent");
 				return;
 			}
+			for (int id : mConversationManager.idsForTalker(talker)) cancelInitialAvatarForId(id);
 			int marked = 0;
 			for (int id : mConversationManager.idsForTalker(talker)) {
 				Notification latest = getArchivedNotification(id);
@@ -248,6 +256,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 			if (token == 0 || !clearArchivedNotificationsThrough(id, notification ->
 					WeChatNotificationRemoval.tokenMatches(
 							notification.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), token))) return false;
+			// The pending request also checks its exact token; newer rounds remain eligible.
 			if (previous != null) imagePreviews.discardRead(id, previous, token);
 			for (Notification notification : getArchivedNotifications(id)) {
 				Conversation conversation = mConversationManager.snapshot(mConversationManager.getConversation(id), notification);
@@ -305,6 +314,138 @@ public class WeChatDecorator extends NevoDecoratorService {
 				manager.notify(active.getTag(), id, notification);
 				break;
 			}
+		}
+
+		/** Re-read the live card on each attempt so replies, previews and removals cannot be rolled back. */
+		private android.service.notification.StatusBarNotification avatarTarget(NotificationManager manager,
+				String tag, int id, long token, Conversation expected) {
+			if (!mAppReplyTrackingActive || isDisabled() || !avatars.available()
+					|| mConversationManager.getConversation(id) != expected) return null;
+			for (android.service.notification.StatusBarNotification active : manager.getActiveNotifications()) {
+				Notification current = active.getNotification();
+				if (active.getId() == id && java.util.Objects.equals(tag, active.getTag())
+						&& WeChatNotificationRemoval.tokenMatches(token,
+							current.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN))
+						&& current.extras.getBoolean(NotificationMessages.STORED)
+						&& java.util.Objects.equals(expected.notificationPeerId, current.extras.getString(NotificationMessages.PEER_ID))
+						&& !current.extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION)
+						&& !current.extras.getBoolean(NotificationMessages.RECALL_PROMPT)
+						&& current.getLargeIcon() == null) return active;
+			}
+			return null;
+		}
+
+		private void requestAvatar(NotificationManager manager, String tag, int id, Notification notification,
+				Conversation expected) {
+			if (!avatars.available()) return;
+			long token = notification.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
+			DeferredAvatar.start(this::scheduleAvatar, () -> avatarTarget(manager, tag, id, token, expected) != null,
+					() -> avatars.load(expected.knownKey()), bitmap -> {
+				android.service.notification.StatusBarNotification active = avatarTarget(manager, tag, id, token, expected);
+				if (active == null) return;
+				Notification updated = Notification.Builder.recoverBuilder(getAppContext(), active.getNotification().clone())
+						.setLargeIcon(bitmap).setOnlyAlertOnce(true).build();
+				manager.notify(tag, id, updated);
+				if (BuildConfig.DEBUG) Log.d("WeChat.Avatar", "source=refresh_posted");
+			});
+		}
+
+		private void scheduleAvatar(Runnable task, long delay) {
+			if (avatarHandler == null) avatarHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+			avatarHandler.postDelayed(() -> {
+				synchronized (Local.this) {
+					try { task.run(); }
+					catch (RuntimeException failure) {
+						Log.w("WeChat.Avatar", "source=refresh_failed type=" + failure.getClass().getSimpleName());
+					}
+				}
+			}, delay);
+		}
+
+		@Override public synchronized boolean beforePost(NotificationManager manager, String tag, int id, Notification n,
+				boolean cancellationObserved) {
+			boolean fresh = n.extras.getBoolean(AWAIT_AVATAR);
+			n.extras.remove(AWAIT_AVATAR);
+			if (postingInitialAvatar) return false;
+			android.util.Pair<String, Integer> key = android.util.Pair.create(tag, id);
+			boolean replacing = initialAvatars.contains(key);
+			Notification latestPost = getArchivedNotification(id);
+			if ((fresh || replacing) && latestPost != null && !WeChatNotificationRemoval.tokenMatches(
+					n.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN),
+					latestPost.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN))) return true;
+			if (!fresh && !replacing || isDisabled() || !avatars.available() || n.getLargeIcon() != null
+					|| !n.extras.getBoolean(NotificationMessages.STORED)
+					|| n.extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION)
+					|| n.extras.getBoolean(NotificationMessages.RECALL_PROMPT)) {
+				cancelInitialAvatar(key);
+				return false;
+			}
+			Conversation expected = mConversationManager.getConversation(id);
+			if (!replacing) for (android.service.notification.StatusBarNotification active : manager.getActiveNotifications()) {
+				if (active.getId() == id && java.util.Objects.equals(tag, active.getTag())) {
+					requestAvatar(manager, tag, id, n, expected);
+					return false;
+				}
+			}
+			if (!cancellationObserved) {
+				cancelInitialAvatar(key);
+				requestAvatar(manager, tag, id, n, expected);
+				return false;
+			}
+			long token = n.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
+			boolean deferred = initialAvatars.offer(key, n.clone(), () -> {
+				Notification latest = getArchivedNotification(id);
+				return mAppReplyTrackingActive && !isDisabled() && mConversationManager.getConversation(id) == expected
+						&& latest != null && WeChatNotificationRemoval.tokenMatches(token,
+							latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN))
+						&& !latest.extras.getBoolean(NotificationMessages.RECALL_PROMPT);
+			}, () -> avatars.load(expected.knownKey()), (pending, bitmap) -> {
+				// Recall/read metadata may have changed while waiting; use the validated current archive.
+				Notification outgoing = prepareInitialAvatar(getAppContext(), getArchivedNotification(id), bitmap);
+				postingInitialAvatar = true;
+				try { manager.notify(tag, id, outgoing); }
+				finally { postingInitialAvatar = false; }
+				if (outgoing.getLargeIcon() == null) requestAvatar(manager, tag, id, outgoing, expected);
+				Log.i("WeChat.Avatar", "source=initial_dispatched avatar=" + (outgoing.getLargeIcon() != null));
+			});
+			if (!deferred) requestAvatar(manager, tag, id, n, expected);
+			return deferred;
+		}
+
+		static Notification prepareInitialAvatar(Context context, Notification latest, android.graphics.Bitmap bitmap) {
+			Notification outgoing = latest.clone();
+			RecallHistory recalls = new RecallHistory();
+			recalls.addAll(outgoing.extras.getLongArray(NotificationMessages.RECALLED_IDS));
+			if (recalls.contains(outgoing.extras.getLong(NotificationMessages.SERVER_ID)))
+				outgoing.extras.putBoolean(NotificationMessages.RECALL_PROMPT, true);
+			if (bitmap != null) try {
+				outgoing = Notification.Builder.recoverBuilder(context, outgoing).setLargeIcon(bitmap).build();
+			} catch (RuntimeException failure) {
+				Log.w("WeChat.Avatar", "source=initial_build_failed type=" + failure.getClass().getSimpleName());
+			}
+			return outgoing;
+		}
+
+		private void cancelInitialAvatar(android.util.Pair<String, Integer> key) {
+			initialAvatars.cancel(key);
+		}
+
+		private void cancelInitialAvatarForId(int id) {
+			for (android.util.Pair<String, Integer> key : initialAvatars.keys())
+				if (key.second == id) cancelInitialAvatar(key);
+		}
+
+		@Override public synchronized void onCancel(String tag, int id) {
+			android.util.Pair<String, Integer> key = android.util.Pair.create(tag, id);
+			Notification pending = initialAvatars.get(key);
+			cancelInitialAvatar(key);
+			if (pending != null) clearReadNotifications(id,
+					pending.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), false);
+		}
+
+		@Override public synchronized void onCancelAll() {
+			for (android.util.Pair<String, Integer> key : initialAvatars.keys())
+				onCancel(key.first, key.second);
 		}
 
 		private synchronized void onRecalled(String talker, long serverId) {
@@ -527,12 +668,16 @@ public class WeChatDecorator extends NevoDecoratorService {
 			// Compact titles already include the peer; groups and self-only transcripts still need an explicit title.
 			final boolean needsConversationTitle = is_group_chat || messages.stream().noneMatch(message -> message.getPerson() != null);
 			messaging.setGroupConversation(is_group_chat).setConversationTitle(needsConversationTitle ? title : null);
+			final boolean firstAvatarRequest = !extras.getBoolean(NotificationMessages.STORED)
+					&& !is_group_chat && conversation.getType() != Conversation.TYPE_BOT_MESSAGE
+					&& !is_recall && conversation.icon == null && n.getLargeIcon() == null;
 			NotificationMessages.flatIntoExtras(messaging, extras);
 			WeChatNotificationAppearance.mark(n);
 			NotificationMarkdown.apply(n, mMarkdownEnabled);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
 			// A native text card also takes precedence over MessagingStyle on the first post.
 			WeChatNotificationAppearance.clearNativeContentViews(n);
+			if (firstAvatarRequest) extras.putBoolean(AWAIT_AVATAR, true);
 
 			if (extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) != null)
 				n.flags |= Notification.FLAG_ONLY_ALERT_ONCE;		// No more alert for direct-replied notification.
@@ -643,6 +788,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 		}
 
 		@Override public synchronized void onDestroy() {
+			initialAvatars.clear();
+			if (avatarHandler != null) avatarHandler.removeCallbacksAndMessages(null);
 			if (mMessagingBuilder != null) {
 				mMessagingBuilder.close();
 				mMessagingBuilder = null;
