@@ -29,7 +29,7 @@ final class MediaConversationInstrumentation {
         PendingIntent reply = target(context, 1160);
         try {
             for (boolean nativeReply : new boolean[]{false, true}) {
-                try (Fixture fixture = new Fixture(context, nativeReply ? 1161 : 1162, false)) {
+                try (Fixture fixture = new Fixture(context, nativeReply ? 1161 : 1162)) {
                     List<String> expected = new ArrayList<>();
                     expected.add("A");
                     fixture.accept(raw(context, "A", 100, null, nativeReply ? reply : null));
@@ -56,7 +56,7 @@ final class MediaConversationInstrumentation {
     }
 
     static void groupMediaKeepsSenders(Context context) {
-        try (Fixture fixture = new Fixture(context, 1163, false)) {
+        try (Fixture fixture = new Fixture(context, 1163)) {
             fixture.accept(raw(context, "A", 100, "Synthetic member A", null));
             fixture.accept(raw(context, "[文件]报告.pdf", 200, "Synthetic member B", null));
             fixture.expect(Arrays.asList("A", "[文件]报告.pdf"));
@@ -72,7 +72,7 @@ final class MediaConversationInstrumentation {
     }
 
     static void mediaMarkersKeepOriginalText(Context context) {
-        try (Fixture fixture = new Fixture(context, 1164, false)) {
+        try (Fixture fixture = new Fixture(context, 1164)) {
             String literal = "请把[文件]发过来，[表情]、[链接]、[红包]保持原文 [微笑]";
             fixture.accept(raw(context, literal, 100, null, null));
             String translatedEmoji = EmojiTranslator.translate("[微笑]").toString();
@@ -89,7 +89,7 @@ final class MediaConversationInstrumentation {
         PendingIntent reply = target(context, 1165), other = target(context, 1166);
         try {
             for (boolean car : new boolean[]{true, false}) {
-                try (Fixture fixture = new Fixture(context, car ? 1167 : 1168, false)) {
+                try (Fixture fixture = new Fixture(context, car ? 1167 : 1168)) {
                     Notification notification = raw(context, "[文件]报告.pdf", 100, null, car ? reply : null);
                     Notification.Action open = new Notification.Action.Builder(null, "Open", other).build();
                     Notification.Action choices = new Notification.Action.Builder(null, "Choices", other)
@@ -118,7 +118,7 @@ final class MediaConversationInstrumentation {
                             "normalized media gained a nested or duplicate reply");
                 }
             }
-            try (Fixture fixture = new Fixture(context, 1169, false)) {
+            try (Fixture fixture = new Fixture(context, 1169)) {
                 Notification notification = raw(context, "[文件]报告.pdf", 100, null, null);
                 Notification.Action[] actions = {new Notification.Action.Builder(null, "Open", other).build()};
                 notification.actions = actions;
@@ -130,7 +130,7 @@ final class MediaConversationInstrumentation {
     }
 
     static void mediaHistorySurvivesRebuild(Context context) {
-        try (Fixture fixture = new Fixture(context, 1170, false)) {
+        try (Fixture fixture = new Fixture(context, 1170)) {
             fixture.accept(raw(context, "A", 100, null, null));
             fixture.accept(raw(context, "[动画表情]", 200, null, null));
             fixture.accept(raw(context, "[动画表情]", 300, null, null));
@@ -148,24 +148,20 @@ final class MediaConversationInstrumentation {
     }
 
     static void mediaAfterReplyUsesExistingRound(Context context) {
-        for (boolean showLastReply : new boolean[]{false, true}) {
-            try (Fixture fixture = new Fixture(context, showLastReply ? 1171 : 1172, showLastReply)) {
-                fixture.accept(raw(context, "A", 100, null, null));
-                fixture.accept(raw(context, "[文件]报告.pdf", 200, null, null));
-                try {
-                    java.lang.reflect.Field field = WeChatDecorator.Local.class.getDeclaredField("mReplyController");
-                    field.setAccessible(true);
-                    MessagingBuilder.Controller controller = (MessagingBuilder.Controller) field.get(fixture);
-                    ReplyTarget target = controller.replyTarget(fixture.id);
-                    controller.onReplyRead(fixture.id, target);
-                    controller.onReplySent(fixture.id, target, "B", 300, "synthetic-media-reply");
-                } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
-                fixture.expect(Arrays.asList("A", "[文件]报告.pdf", "B"));
-                fixture.accept(raw(context, "[视频]", 400, null, null));
-                fixture.expect(showLastReply ? Arrays.asList("B", "[视频]") : Arrays.asList("[视频]"));
-                fixture.accept(raw(context, "C", 500, null, null));
-                fixture.expect(showLastReply ? Arrays.asList("B", "[视频]", "C") : Arrays.asList("[视频]", "C"));
-            }
+        try (Fixture fixture = new Fixture(context, 1171)) {
+            fixture.accept(raw(context, "A", 100, null, null));
+            fixture.accept(raw(context, "[文件]报告.pdf", 200, null, null));
+            try {
+                java.lang.reflect.Field field = WeChatDecorator.Local.class.getDeclaredField("mReplyController");
+                field.setAccessible(true);
+                MessagingBuilder.Controller controller = (MessagingBuilder.Controller) field.get(fixture);
+                controller.onReplySubmitted(fixture.id, controller.replyTarget(fixture.id));
+            } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+            check(fixture.latest() == null, "submitted media history was not retired");
+            fixture.accept(raw(context, "[视频]", 400, null, null));
+            fixture.expect(Arrays.asList("[视频]"));
+            fixture.accept(raw(context, "C", 500, null, null));
+            fixture.expect(Arrays.asList("[视频]", "C"));
         }
     }
 
@@ -217,18 +213,13 @@ final class MediaConversationInstrumentation {
         final Context context;
         final int id;
         final SharedPreferences preferences;
-        final boolean hadDisplayChoice, previousDisplayChoice;
 
-        Fixture(Context context, int id, boolean showLastReply) {
+        Fixture(Context context, int id) {
             super("WeChatDecorator");
             this.context = context;
             this.id = id;
             clearArchivedNotifications(id);
             preferences = context.getSharedPreferences("synthetic-media-history", Context.MODE_PRIVATE);
-            hadDisplayChoice = preferences.contains(WeChatDecorator.PREF_SHOW_LAST_REPLY);
-            previousDisplayChoice = preferences.getBoolean(WeChatDecorator.PREF_SHOW_LAST_REPLY, false);
-            check(preferences.edit().putBoolean(WeChatDecorator.PREF_SHOW_LAST_REPLY, showLastReply).commit(),
-                    "test display preference was not set");
             onCreate(preferences);
         }
 
@@ -253,10 +244,7 @@ final class MediaConversationInstrumentation {
             try { clearArchivedNotifications(id); }
             finally {
                 onDestroy();
-                SharedPreferences.Editor editor = preferences.edit();
-                if (hadDisplayChoice) editor.putBoolean(WeChatDecorator.PREF_SHOW_LAST_REPLY, previousDisplayChoice);
-                else editor.remove(WeChatDecorator.PREF_SHOW_LAST_REPLY);
-                check(editor.commit(), "test display preference was not restored");
+
             }
         }
     }

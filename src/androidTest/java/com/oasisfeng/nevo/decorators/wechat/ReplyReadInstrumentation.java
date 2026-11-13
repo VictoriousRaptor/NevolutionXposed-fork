@@ -26,15 +26,12 @@ final class ReplyReadInstrumentation {
             car.remove("on_read");
             fixture.currentRead = null;
             fixture.build(current);
-            RemoteInput input = current.actions[0].getRemoteInputs()[0];
-            Intent fill = new Intent();
-            Bundle results = new Bundle();
-            results.putCharSequence(input.getResultKey(), "B");
-            RemoteInput.addResultsToIntent(new RemoteInput[]{input}, fill, results);
-            current.actions[0].actionIntent.send(context, 0, fill);
-            check(fixture.completed.await(5, TimeUnit.SECONDS), "reply outcome was not handled");
+            send(context, current);
+            check(fixture.dispatched.await(5, TimeUnit.SECONDS), "reply was not dispatched");
             check(fixture.nativeRead.getCount() == 1, "old notification read target was reused");
-            check(fixture.reads.get() == 1 && fixture.sent.get() == 1, "missing read action blocked reply");
+            check(fixture.completed.await(5, TimeUnit.SECONDS) && fixture.completions.get() == 1, "missing read action blocked UI completion");
+            check(fixture.submissions.get() == 1 && fixture.dispatches.get() == 1, "missing read action blocked submission");
+            check(fixture.conversation.round.endThroughToken == 1, "submission did not end the captured round");
         } catch (Exception failure) { throw new AssertionError(failure); }
     }
 
@@ -44,13 +41,8 @@ final class ReplyReadInstrumentation {
                 if (result == -1) fixture.reply.cancel();
                 Notification n = fixture.notification();
                 fixture.build(n);
-                RemoteInput input = n.actions[0].getRemoteInputs()[0];
-                Intent fill = new Intent();
-                Bundle results = new Bundle();
-                results.putCharSequence(input.getResultKey(), "B");
-                RemoteInput.addResultsToIntent(new RemoteInput[]{input}, fill, results);
-                n.actions[0].actionIntent.send(context, 0, fill);
-                fixture.verify(result == 0);
+                send(context, n);
+                fixture.verify();
             } catch (Exception failure) { throw new AssertionError(failure); }
         }
     }
@@ -68,26 +60,44 @@ final class ReplyReadInstrumentation {
                 java.lang.reflect.Field field = MessagingBuilder.class.getDeclaredField("mSyntheticReplyReceiver");
                 field.setAccessible(true);
                 ((BroadcastReceiver) field.get(fixture.builder)).onReceive(context, proxy);
-                fixture.verify(result == 0);
+                fixture.verify();
             } catch (Exception failure) { throw new AssertionError(failure); }
         }
+    }
+
+    private static void send(Context context, Notification notification) throws PendingIntent.CanceledException {
+        RemoteInput input = notification.actions[0].getRemoteInputs()[0];
+        Intent fill = new Intent();
+        Bundle results = new Bundle();
+        results.putCharSequence(input.getResultKey(), "B");
+        RemoteInput.addResultsToIntent(new RemoteInput[]{input}, fill, results);
+        notification.actions[0].actionIntent.send(context, 0, fill);
     }
 
     private static final class Fixture implements AutoCloseable {
         final Context context;
         final int result;
-        final AtomicInteger reads = new AtomicInteger(), sent = new AtomicInteger(), aborted = new AtomicInteger();
-        final CountDownLatch nativeRead = new CountDownLatch(1), completed = new CountDownLatch(1);
+        final boolean synthetic;
+        final AtomicInteger submissions = new AtomicInteger(), dispatches = new AtomicInteger(), completions = new AtomicInteger();
+        final CountDownLatch nativeRead = new CountDownLatch(1), dispatched = new CountDownLatch(1), completed = new CountDownLatch(1);
         final String readAction = "nevo.test.REPLY_READ", replyAction = "nevo.test.REPLY_SEND";
         final PendingIntent read, reply;
         PendingIntent currentRead;
+        final ConversationManager.Conversation conversation = new ConversationManager.Conversation(740);
         final MessagingBuilder builder;
+        volatile Notification latest;
         final BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context ignored, Intent intent) {
-                if (readAction.equals(intent.getAction())) nativeRead.countDown();
-                else {
-                    check(reads.get() == 1, "reply dispatched before local read");
+                check(submissions.get() == 1 && conversation.round.endThroughToken == 1,
+                        "native read or dispatch preceded submission boundary");
+                if (readAction.equals(intent.getAction())) {
+                    advanceWithC();
+                    nativeRead.countDown();
+                } else {
+                    advanceWithC();
+                    dispatches.incrementAndGet();
                     setResultCode(result);
+                    dispatched.countDown();
                 }
             }
         };
@@ -95,6 +105,9 @@ final class ReplyReadInstrumentation {
         Fixture(Context context, int result, boolean synthetic) {
             this.context = context;
             this.result = result;
+            this.synthetic = synthetic;
+            conversation.title = "Alice";
+            conversation.key = "synthetic-peer";
             IntentFilter filter = new IntentFilter(readAction);
             filter.addAction(replyAction);
             ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
@@ -104,21 +117,31 @@ final class ReplyReadInstrumentation {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
             currentRead = read;
             builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {
-                @Override public void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies) {}
-                @Override public ReplyTarget replyTarget(int id) {
-                    return new ReplyTarget(1, null, java.util.Collections.emptyList(), currentRead);
+                @Override public ReplyTarget replyTarget(int id) { return new ReplyTarget(1, conversation, currentRead); }
+                @Override public void onReplyFinished(int id, ReplyTarget target) {
+                    check(submissions.get() == 1 && target != null && target.token() == 1
+                            && target.conversation() == conversation, "completion used a newer reply target");
+                    completions.incrementAndGet();
+                    completed.countDown();
                 }
-                @Override public void onReplyRead(int id, ReplyTarget target) { reads.incrementAndGet(); }
-                @Override public void onReplySent(int id, ReplyTarget target, CharSequence text, long time, String replyId) {
-                    sent.incrementAndGet(); completed.countDown();
+                @Override public void onReplySubmitted(int id, ReplyTarget target) {
+                    check(nativeRead.getCount() == 1 && dispatches.get() == 0,
+                            "submission callback followed native read or dispatch");
+                    submissions.incrementAndGet();
+                    NotificationMessages.clearReadHistory(target.conversation(), latest, target.token());
+                    check(NotificationMessages.rebuild(conversation, latest, java.util.Collections.emptyList()).isEmpty(),
+                            "submitted round still contained A");
                 }
-                @Override public long beginNotificationReply(int id) { return 1; }
-                @Override public void abortNotificationReply(long reservation) { aborted.incrementAndGet(); completed.countDown(); }
             }) {
-                @Override boolean dispatchSyntheticReply(Context context, Intent intent) {
-                    check(synthetic && reads.get() == 1, "synthetic dispatch preceded local read");
-                    if (result == -1) throw new IllegalStateException("synthetic test dispatch failure");
-                    return result == 0;
+                @Override boolean dispatchSyntheticReply(Context ignored, Intent intent) {
+                    check(synthetic && submissions.get() == 1 && conversation.round.endThroughToken == 1,
+                            "synthetic dispatch preceded submission boundary");
+                    advanceWithC();
+                    dispatches.incrementAndGet();
+                    try {
+                        if (result == -1) throw new IllegalStateException("synthetic test dispatch failure");
+                        return result == 0;
+                    } finally { dispatched.countDown(); }
                 }
             };
         }
@@ -133,18 +156,41 @@ final class ReplyReadInstrumentation {
         }
 
         void build(Notification notification) {
-            ConversationManager.Conversation conversation = new ConversationManager.Conversation(740);
-            conversation.title = "Alice";
-            conversation.key = "synthetic-peer";
-            builder.buildConversation(conversation, 740, notification, java.util.Collections.emptyList());
+            notification.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 1);
+            androidx.core.app.NotificationCompat.MessagingStyle style =
+                    builder.buildConversation(conversation, 740, notification, java.util.Collections.emptyList());
+            NotificationMessages.stamp(conversation, notification);
+            NotificationMessages.flatIntoExtras(style, notification.extras);
+            latest = notification;
         }
 
-        void verify(boolean success) throws InterruptedException {
+        synchronized void advanceWithC() {
+            if (latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN) == 2) return;
+            Notification c = new Notification.Builder(context, "identity-test").setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("Alice").setContentText("C").setTicker("Alice: C").setWhen(0).build();
+            c.extras.putLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN, 2);
+            androidx.core.app.NotificationCompat.MessagingStyle style = new androidx.core.app.NotificationCompat.MessagingStyle(
+                    new androidx.core.app.Person.Builder().setName("Synthetic self").build());
+            for (androidx.core.app.NotificationCompat.MessagingStyle.Message message :
+                    NotificationMessages.rebuild(conversation, c, java.util.Collections.singletonList(latest))) style.addMessage(message);
+            NotificationMessages.stamp(conversation, c);
+            NotificationMessages.flatIntoExtras(style, c.extras);
+            latest = c;
+        }
+
+        void verify() throws InterruptedException {
             check(nativeRead.await(5, TimeUnit.SECONDS), "native read was skipped after a failed reply");
-            check(completed.await(5, TimeUnit.SECONDS), "reply outcome was not handled");
-            check(reads.get() == 1, "local read was not performed exactly once");
-            check(sent.get() == (success ? 1 : 0), "failed reply was recorded as sent");
-            check(aborted.get() == (success ? 0 : 1), "failed reply reservation was not aborted");
+            if (synthetic || result != -1)
+                check(dispatched.await(5, TimeUnit.SECONDS), "reply was not dispatched");
+            check(completed.await(5, TimeUnit.SECONDS) && completions.get() == 1,
+                    "send processing did not finish the notification UI on success/failure");
+            check(submissions.get() == 1, "valid send did not submit exactly once");
+            check(dispatches.get() == ((!synthetic && result == -1) ? 0 : 1), "unexpected dispatch count");
+            check(conversation.round.endThroughToken == 1, "dispatch result restored the ended round");
+            java.util.List<androidx.core.app.NotificationCompat.MessagingStyle.Message> messages =
+                    NotificationMessages.rebuild(conversation, latest, java.util.Collections.emptyList());
+            check(messages.size() == 1 && "C".contentEquals(messages.get(0).getText()),
+                    "dispatch failure or late result restored A or cleared the new C");
         }
 
         @Override public void close() {

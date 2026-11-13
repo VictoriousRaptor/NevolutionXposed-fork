@@ -1,5 +1,35 @@
 # 微信 8.0.79 / 3182、3183、3200 适配记录
 
+## 2026-11-13 当前：通知提交边界、独立已读与群头像
+
+当前已删除下文旧应用内发送状态/正文观察和跨轮本人回复展示。通知栏有效发送动作立即结束捕获轮次，原生已读及派发分别尝试，失败不恢复；不新增发送、入库或重发 hook。
+
+新增原始描述符为 `public boolean com.tencent.mm.storage.l4.b0(java.lang.String)`，BEFORE 捕获固定目标、AFTER 正常 true 提交。仅名称 8.0.79 **且**代码 3182/3183，运行时校验 public、非 static/abstract、返回 boolean 及 String 参数；其他构建签名不借用或实验启用。`z75.e1` 的 StatusNotifyMsgExtension op 1/2/5 调用同一入口，是多端已读路径的离线依据；本轮未做真实同步验收。
+
+3182 来源沿用 ADB base，SHA-256 `4382254fbb256f37b7b430e6f3d984c512c603e46d39f9c323cd8a6fa75d8364`，源码 `sources/sources/com/tencent/mm/storage/l4.java`、`z75/e1.java` 位于 `.debug-artifacts/wechat-8.0.79/`。3183 沿用 APKMirror 抽取 base，本轮复算 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0`，JADX 原始命名输出 `.debug-artifacts/wave-refactor-plan-20261113-l4-3183.java`、`wave-refactor-plan-20261113-status-sync-3183.java`。未将反编译字段别名用于 hook。
+
+群头像使用既有 `public static Bitmap com.tencent.mm.modelavatar.g.a(String)`；原服务不排除 chatroom，原模块的 contains(@) 与群通知门禁造成覆盖缺口。现仅扩展已确认 @chatroom ID，复用 500 ms 等待和有限重试，不改成员 Person。接口来源与 SHA 沿用下方头像小节；完整启用、生命周期、失败、诊断及分层验证见适配手册本日章节。3182/3183 的新能力不扩展至 3200；实际回复派发、图片和撤回门禁各自保持独立。
+
+本日后续：补回通知发送处理 finally 的静默 UI 确认，用于复位发送按钮；仅更新活动原卡片且不恢复历史，不新增微信/SystemUI hook。重新连接 Android 17/API 37、微信 8.0.79/3183 后，当前 framework 109/109 通过、0 跳过，安装微信描述符 41 项通过；覆盖修正后的四项媒体夹具及新增 UI、发布/取消交错回归。设备 base SHA-256 与上述 3183 离线样本一致。Debug 微信进程确认模块注入、精确已读 hook 及头像查询就绪。本次 Release 已覆盖临时 Debug，回拉哈希一致、非 debuggable、无测试 runner，独立测试包不存在；Release 重启微信后头像及取消观察入口就绪。真实微信收发、已读/多端、未读数及 OEM 转圈视觉表现仍未验收，详细边界见适配手册与本地 `.debug-artifacts/round-refactor-device-20261113/`。
+
+独立审查进一步要求完成卡片同时匹配本地已接受代次/tag及取消状态，覆盖 notify/cancel 原调用晚于 BEFORE 的窗口；已接收 C、cancel/cancelAll 均使旧 A 的 UI 发布失效。沿用既有 Android 取消目标及 BEFORE 时机，不更改微信混淆签名或版本门禁；主机回归与 Local 交错 framework 回归分层记录。
+
+## 2026-11-06 应用内文字回复与可选正文
+
+静态根因：`storage.e9.a3(): boolean` 判断类型 1/11/21/31/36/1107296305，包含普通文字；`M2(): boolean` 判断位置 48，`F2(): boolean` 判断名片 42/66。原模块复制微信 SendMsgSuccessEvent 的排除分类，导致普通文字在状态 2 时也无法交付轮次监听器。现移除这组事件筛选，仍校验原描述符作为画像指纹；方向、状态、ID、创建时间及会话有效性继续校验。真实 hook 回调合成测试已验证文字由失败变为通过，不能代替微信设备验证。
+
+可选正文只在精确版本/代码与原状态画像同时通过时启用，新增继承的 public 无参实例描述符：`j(): java.lang.String` 返回私有 `field_content: java.lang.String`；`getType(): int` 返回私有 `field_type: int`；`I0(): long` 返回私有 `field_msgSvrId: long`。均拒绝 static/abstract/错误返回类型；可选解析/读取失败不关闭状态 hook。同名未知代码不启用正文能力。
+
+| 版本 | 原始继承链和离线文件 | APK 来源与 SHA-256 |
+| --- | --- | --- |
+| 3182 | `com.tencent.mm.storage.e9 → ny0.q3 → hn.c8`；`.debug-artifacts/wechat-8.0.79/mapping-sources/sources/com/tencent/mm/storage/e9.java` 与 `sources/sources/hn/c8.java` | 沿用本文 ADB base 记录：`4382254fbb256f37b7b430e6f3d984c512c603e46d39f9c323cd8a6fa75d8364`；本轮核对源码，未重新读取原 APK |
+| 3183 | `com.tencent.mm.storage.e9 → ny0.q3 → hn.c8`；`.debug-artifacts/wechat-same-name-profile-probing/apkmirror-8079/3183-e9.java` 与 `3183-sources/sources/ny0/q3.java`、`hn/c8.java` | 沿用本文 APKMirror 抽取来源；本轮复核 base：`90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0` |
+| 3200 | `com.tencent.mm.storage.e9 → nx0.q3 → im.c8`；上述 APKMirror 目录 `3200-sources/sources/com/tencent/mm/storage/e9.java`、`nx0/q3.java`、`im/c8.java` | 沿用本文腾讯 CDN 与 APKMirror 对照来源；本轮复核：`f2a725bc04302ad218a563533ae79356e66b64aa711b275bc919a8d432f7e15d` |
+
+类型 1 读取正文；3/34/43/47 使用 `[图片]`/`[语音]`/`[视频]`/`[动画表情]`，其余 `[消息]`，媒体不读取 XML。正文与服务端 ID 仅保存在有界通知历史，不输出到日志。服务端 ID 可用于现有撤回裁剪；缺失 ID 不猜测撤回对象。设置关闭时下一波仅 C/CD，开启时保留应用内 B 为 BC/BCD；连续发送保持整组。发送事件未关联规范化归档时仍保守丢弃，不承诺跨已清空通知恢复 B。
+
+主机测试与 framework 编译不代表实机通过；未执行真实微信发送、未读数或 SystemUI 视觉验收。波次代次与晚到事件条件见适配手册最新章节。
+
 ## 2026-11-06 首条私聊头像冷缓存
 
 同日后续：3182/3183 沿用下列头像接口与门禁，首条缺头像通知改为最多等待 500 ms，超时再发送并继续静默补图。不增加微信混淆 hook；新增 Android NotificationManager 取消单条/全部的 BEFORE hook 与 notify 发布末端等待边界，完整签名和并发、撤回处理见适配手册本日章节。设备描述符检查已加入 `g.a(String): Bitmap`；源码证据与运行时/真实消息验证分别记录。

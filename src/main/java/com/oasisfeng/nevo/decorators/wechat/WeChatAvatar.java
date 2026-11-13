@@ -35,7 +35,7 @@ final class WeChatAvatar {
     boolean available() { return lookup != null; }
 
     Bitmap load(String talker) {
-        if (lookup == null || talker == null || talker.isEmpty() || talker.contains("@")) return null;
+        if (lookup == null || talker == null || talker.isEmpty() || (talker.contains("@") && !talker.endsWith("@chatroom"))) return null;
         try {
             Bitmap bitmap = (Bitmap) lookup.invoke(null, talker);
             // WeChat owns and may recycle its cached bitmap. Keep an independent notification copy.

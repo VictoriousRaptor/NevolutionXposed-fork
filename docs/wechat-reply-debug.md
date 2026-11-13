@@ -1,5 +1,29 @@
 # WeChat notification reply compatibility
 
+## 2026-11-13 当前诊断链路
+
+当前通知栏发送链路为：有效请求 → 捕获目标 → 本地轮次结束 → 独立原生已读/派发 → 结果诊断。结果不保存本人消息或修改轮次。已删除发送状态、应用内正文、来源预约和待回应组；下文 app_reply/wave 补偿描述保留作历史调查记录。
+
+独立已读能力使用 read_hook_ready/unavailable；成功目标捕获与提交分别记录 read_event_captured/committed，原方法失败记录 ignored，观察器异常记录 error。仅精确 8.0.79/3182、3183。上述事件仅使用 Debug logcat 记录结构字段；ready 不代表实际未读数或多端同步通过。分析旧语音是否复活时，同时检查可信身份首次代次、结束边界和新来信；现有日志不能直接证明通知发布者。
+
+### 后续发送按钮复位
+
+`onReplyFinished` 在派发处理的 finally 中运行，独立于网络结果；仅静默更新匹配的仍活动卡片，刷新异常通过 logcat 记录 `reply_ui_failed`。该路径不恢复本人历史，不改变结束边界；已移除或被新代次替换时跳过。排查“发送成功但转圈”时，区分本地轮次结束、实际派发以及 UI 更新，不将微信已发送等同于 SystemUI 已收到更新。
+
+活动卡片可能滞后于模块已观察的发布/取消，完成确认另要求本地已接受的 tag/代次匹配且未取消。C 已通过 Local 或 cancel/cancelAll 已进入 BEFORE 时，旧 A 的完成被拒绝，即使系统活动列表暂未变化；此发布失效标记独立于未读轮次，不记录消息内容。
+
+## 2026-11-07 Device wave follow-up
+
+The generation-order merge now treats only active `app:` replies as leading
+in-app context. A notification reply acknowledged by a late callback keeps its
+notification generation among the peers; an undated C followed by that reply B2
+and then D stays C/B2/D. Host regressions cover this distinction and capacity
+trimming; Android controller regressions also check zero/rollback/equal-time D
+and Parcel rebuilds. The updated Android framework suite subsequently passed
+104/104 cases with no skips, including the original failing controller case;
+46 installed-WeChat descriptor checks also passed. This is synthetic framework
+and signature evidence, not real-message delivery or unread-state acceptance.
+
 ## 2026-11-03 Unified conversation history and click-removal read requests
 
 Text and media placeholders now take the same conversation-building path. Reply selection keeps the CarExtender → original free-form Action → verified synthetic priority, but no reply target is required to render history. Replacing a reply preserves non-reply actions and their order. Body translation preserves media markers and notification-provided file/link text. Message serialization belongs to `NotificationMessages`; the independent `ReplyTarget` preserves the existing generation, conversation instance, pending reply IDs and native read target without changing wire fields or dispatch timing.

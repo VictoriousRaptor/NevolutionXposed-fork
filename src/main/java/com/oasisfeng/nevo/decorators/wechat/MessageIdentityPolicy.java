@@ -31,24 +31,44 @@ final class MessageIdentityPolicy {
         final Object signature;
         final String replyId;
         final int source;
+        /** Trusted message identity, already scoped to its conversation/sender; null when absent. */
+        final Object stableId;
         Entry(T value, long time, Object signature, String replyId, int source) {
+            this(value, time, signature, replyId, source, null);
+        }
+        Entry(T value, long time, Object signature, String replyId, int source, Object stableId) {
             this.value = value;
             this.time = time;
             this.signature = signature;
             this.replyId = replyId;
             this.source = source;
+            this.stableId = stableId;
         }
     }
 
-    /** Collapse cross-source copies by occurrence, not by text; retain repeated lines in one source. */
+    /** Trusted IDs collapse once; unidentified copies merge by occurrence across sources only. */
     static <T> List<T> merge(List<Entry<T>> input, int limit) {
+        return merge(input, limit, Comparator.comparingLong(e -> Math.max(0, e.time)));
+    }
+
+    /** Keep the first representation of each trusted stable ID. */
+    static <T> List<Entry<T>> distinctStableIds(List<Entry<T>> input) {
+        List<Entry<T>> result = new ArrayList<>();
+        Set<Object> messages = new HashSet<>();
+        for (Entry<T> entry : input)
+            if (entry.stableId == null || messages.add(entry.stableId)) result.add(entry);
+        return result;
+    }
+
+    static <T> List<T> merge(List<Entry<T>> input, int limit, Comparator<Entry<T>> order) {
+        input = distinctStableIds(input);
         List<Entry<T>> result = new ArrayList<>();
         Set<String> replies = new HashSet<>();
         for (int i = 0; i < input.size(); i++) {
             Entry<T> entry = input.get(i);
             if (entry.replyId != null && !replies.add(entry.replyId)) continue;
             int occurrence = 0;
-            if (entry.time > 0 && entry.replyId == null) {
+            if (entry.stableId == null && entry.time > 0 && entry.replyId == null) {
                 for (int j = 0; j <= i; j++) {
                     Entry<T> preceding = input.get(j);
                     if (preceding.source == entry.source && same(entry, preceding)) occurrence++;
@@ -60,15 +80,15 @@ final class MessageIdentityPolicy {
             }
             result.add(entry);
         }
-        // Undated history stays in source order, ahead of dated/current messages.
-        result.sort(Comparator.comparingLong(e -> Math.max(0, e.time)));
+        result.sort(order);
         List<T> values = new ArrayList<>();
         for (int i = Math.max(0, result.size() - limit); i < result.size(); i++) values.add(result.get(i).value);
         return values;
     }
 
     private static boolean same(Entry<?> a, Entry<?> b) {
-        return a.time == b.time && Objects.equals(a.signature, b.signature);
+        return a.stableId == null && b.stableId == null
+                && a.time == b.time && Objects.equals(a.signature, b.signature);
     }
 
     private MessageIdentityPolicy() {}

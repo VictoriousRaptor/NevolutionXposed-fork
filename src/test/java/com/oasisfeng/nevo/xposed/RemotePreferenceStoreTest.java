@@ -48,13 +48,13 @@ public class RemotePreferenceStoreTest {
 		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.singletonMap(key, false), Collections.singletonMap(key, true)).get(key));
 	}
 
-	@Test public void lastReplyDefaultsOffAndPreservesExplicitChoiceAcrossUpgrade() {
-		String key = RemotePreferenceStore.KEY_SHOW_LAST_REPLY;
-		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.emptyMap(), Collections.emptyMap()).get(key));
-		assertEquals(Boolean.FALSE, RemotePreferenceStore.migratedLocalValues(Collections.emptyMap(), 5).get(key));
-		assertEquals(Boolean.TRUE, RemotePreferenceStore.migratedLocalValues(Collections.singletonMap(key, true), 5).get(key));
-		assertEquals(Boolean.TRUE, RemotePreferenceStore.merge(Collections.emptyMap(), Collections.singletonMap(key, true)).get(key));
-	}
+	@Test public void removedLastReplyChoiceCannotReturnDuringMigrationOrSync() {
+        String key = "WeChatDecorator.show_last_reply";
+        assertFalse(RemotePreferenceStore.merge(Collections.emptyMap(), Collections.emptyMap()).containsKey(key));
+        assertFalse(RemotePreferenceStore.merge(Collections.emptyMap(), Collections.singletonMap(key, true)).containsKey(key));
+        assertFalse(RemotePreferenceStore.merge(Collections.singletonMap(key, true), Collections.emptyMap()).containsKey(key));
+        assertFalse(RemotePreferenceStore.migratedLocalValues(Collections.singletonMap(key, true), 11).containsKey(key));
+    }
 	@Test public void localValueWinsOverRemoteValue() {
 		Map<String, Boolean> local = Collections.singletonMap("WeChatDecorator.enabled", false);
 		Map<String, Boolean> remote = Collections.singletonMap("WeChatDecorator.enabled", true);

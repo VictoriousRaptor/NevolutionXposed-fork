@@ -7,6 +7,15 @@ import static org.junit.Assert.*;
 import static com.oasisfeng.nevo.decorators.wechat.MessageIdentityPolicy.Identity.*;
 
 public class MessageIdentityPolicyTest {
+    @Test public void confirmedGenerationOrderPrecedesClockAndCapacityTrimming() {
+        List<MessageIdentityPolicy.Entry<Long>> entries = Arrays.asList(
+                new MessageIdentityPolicy.Entry<>(11L, 100, "C", null, 0),
+                new MessageIdentityPolicy.Entry<>(12L, 90, "D", null, 1));
+        assertEquals(Arrays.asList(11L, 12L), MessageIdentityPolicy.merge(entries, 25,
+                java.util.Comparator.comparingLong(e -> e.value)));
+        assertEquals(Arrays.asList(12L), MessageIdentityPolicy.merge(entries, 1,
+                java.util.Comparator.comparingLong(e -> e.value)));
+    }
     @Test public void structuredPersonWinsEvenOverReplyMarker() {
         assertEquals(PEER, MessageIdentityPolicy.resolve(true, null, true, true));
     }
@@ -36,6 +45,51 @@ public class MessageIdentityPolicyTest {
     @Test public void repeatedTextsAtDifferentTimesSurvive() {
         assertEquals(2, merge(entry("same", 100, "same", null, 0), entry("same", 200, "same", null, 1)).size());
     }
+    @Test public void stableIdCollapsesRepublishedVoiceAtDifferentTimes() {
+        assertEquals(Arrays.asList("original"), merge(
+                stableEntry("original", 100, "peer", 7, 0),
+                stableEntry("reposted", 305, "peer", 7, 1)));
+    }
+    @Test public void stableIdCollapsesDuplicatesWithinOneSource() {
+        assertEquals(Arrays.asList("original"), merge(
+                stableEntry("original", 100, "peer", 7, 0),
+                stableEntry("copy", 100, "peer", 7, 0),
+                stableEntry("reposted", 305, "peer", 7, 0)));
+    }
+    @Test public void stableIdCollapsesUndatedAndDatedCopies() {
+        assertEquals(Arrays.asList("original"), merge(
+                stableEntry("original", 0, "peer", 7, 0),
+                stableEntry("copy", 0, "peer", 7, 1),
+                stableEntry("dated", 100, "peer", 7, 2)));
+    }
+    @Test public void differentStableIdsPreserveConsecutiveVoiceAtSameTime() {
+        assertEquals(Arrays.asList("first voice", "second voice"), merge(
+                stableEntry("first voice", 100, "peer", 7, 0),
+                stableEntry("second voice", 100, "peer", 8, 1)));
+    }
+    @Test public void stableIdIsScopedToSender() {
+        assertEquals(Arrays.asList("Alice", "Bob", "self"), merge(
+                stableEntry("Alice", 100, "peer-a", 7, 0),
+                stableEntry("Bob", 100, "peer-b", 7, 1),
+                stableEntry("self", 100, "self", 7, 2)));
+    }
+    @Test public void missingIdDoesNotMatchStableIdByTextOrTime() {
+        assertEquals(Arrays.asList("known", "unknown"), merge(
+                stableEntry("known", 100, "peer", 7, 0),
+                new MessageIdentityPolicy.Entry<>("unknown", 100, Arrays.asList("peer", "[语音]"), null, 1)));
+    }
+    @Test public void noIdRepeatedVoiceWithinOneSourceSurvives() {
+        assertEquals(Arrays.asList("first", "second"), merge(
+                entry("first", 100, "peer/[语音]", null, 0),
+                entry("second", 100, "peer/[语音]", null, 0)));
+    }
+    @Test public void stableIdDeduplicationPrecedesCapacityTrimming() {
+        List<MessageIdentityPolicy.Entry<String>> entries = Arrays.asList(
+                stableEntry("original", 100, "peer", 7, 0),
+                stableEntry("new message", 200, "peer", 8, 0),
+                stableEntry("reposted", 305, "peer", 7, 1));
+        assertEquals(Arrays.asList("new message"), MessageIdentityPolicy.merge(entries, 1));
+    }
     @Test public void crossSourceCopiesCollapseButRepeatedOccurrencesSurvive() {
         assertEquals(Arrays.asList("a", "b"), merge(
                 entry("a", 100, "same", null, 0), entry("b", 100, "same", null, 0),
@@ -64,5 +118,9 @@ public class MessageIdentityPolicyTest {
     }
     private static MessageIdentityPolicy.Entry<String> entry(String value, long time, String signature, String reply, int source) {
         return new MessageIdentityPolicy.Entry<>(value, time, signature, reply, source);
+    }
+    private static MessageIdentityPolicy.Entry<String> stableEntry(String value, long time, String sender, long serverId, int source) {
+        return new MessageIdentityPolicy.Entry<>(value, time, Arrays.asList(sender, "[语音]"), null, source,
+                Arrays.asList(sender, serverId));
     }
 }

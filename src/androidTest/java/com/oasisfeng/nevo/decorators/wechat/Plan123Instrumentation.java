@@ -33,8 +33,7 @@ final class Plan123Instrumentation {
             Notification pruned = normalize(c, recall, b);
             texts(c, pruned, "A");
             check("A".contentEquals(pruned.extras.getCharSequence(Notification.EXTRA_TEXT)), "fallback retained recall");
-            check(pruned.extras.getBundle(NotificationMessages.ROUND).getLong("latestPeer") == 200,
-                    "recall advanced peer watermark");
+            check(c.round.endThroughToken == 0, "recall ended the conversation round");
             Notification d = normalize(c, raw(context, "D", 400, 4), pruned);
             texts(c, d, "A", "D");
             texts(c, normalize(c, d, b), "A", "D");
@@ -72,17 +71,21 @@ final class Plan123Instrumentation {
         check(empty.extras.getParcelableArray(Notification.EXTRA_MESSAGES).length == 0, "empty snapshot retained old array");
     }
 
-    static void recallSelfAndRoundMetadata(Context context) {
+    static void recallLegacySelfAndRoundMetadata(Context context) {
         Conversation c = conversation(false);
         Notification n = normalize(c, raw(context, "A", 100, 1), null);
-        NotificationMessages.recordReply(n, "self", 150, "reply");
-        Parcelable[] messages = n.extras.getParcelableArray(Notification.EXTRA_MESSAGES);
-        ((Bundle) messages[messages.length - 1]).getBundle("extras").putLong(NotificationMessages.SERVER_ID, 2);
+        Message legacy = new Message("legacy self", 150, (Person) null);
+        legacy.getExtras().putString(NotificationMessages.REPLY_ID, "synthetic-legacy-reply");
+        legacy.getExtras().putLong(NotificationMessages.SERVER_ID, 2);
+        MessagingStyle style = new MessagingStyle(new Person.Builder().setName("Synthetic self").build());
+        for (Message message : NotificationMessages.rebuild(c, n, Collections.emptyList())) style.addMessage(message);
+        style.addMessage(legacy);
+        NotificationMessages.flatIntoExtras(style, n.extras);
         NotificationMessages.markRecall(n, 2);
         Notification pruned = normalize(c, n, null);
         texts(c, pruned, "A");
-        check(pruned.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null, "recalled self in input history");
-        check(pruned.extras.getBundle(NotificationMessages.ROUND).getStringArrayList("pending").isEmpty(), "recalled reply ID in round");
+        check(pruned.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null, "recalled legacy self in input history");
+        check(c.round.endThroughToken == 0, "recalling legacy self ended the round");
     }
 
     static void recallReusedNotificationId(Context context) {
@@ -111,35 +114,24 @@ final class Plan123Instrumentation {
     }
 
     static void replyAlertsAfterIncoming(Context context) {
-        for (boolean showLastReply : new boolean[]{false, true}) replyAlertsAfterIncoming(context, showLastReply);
-    }
-
-    private static void replyAlertsAfterIncoming(Context context, boolean showLastReply) {
         android.content.SharedPreferences preferences = context.getSharedPreferences("reply-alert-test", Context.MODE_PRIVATE);
-        android.content.SharedPreferences.Editor settings = preferences.edit().remove(WeChatDecorator.PREF_SHOW_LAST_REPLY);
-        if (showLastReply) settings.putBoolean(WeChatDecorator.PREF_SHOW_LAST_REPLY, true);
-        check(settings.commit(), "reply display setting not saved");
         ReplyAlertFixture local = new ReplyAlertFixture();
         android.app.NotificationManager manager = context.getSystemService(android.app.NotificationManager.class);
         try {
             local.onCreate(preferences);
             Notification a = raw(context, "A", 100, 1);
             local.apply(manager, null, 830, a);
-            NotificationMessages.recordReply(a, "B1", 110, "alert-reply-1");
-            NotificationMessages.recordReply(a, "B2", 120, "alert-reply-2");
-            local.apply(manager, null, 830, a);
-            check((a.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0, "reply refresh could alert again");
-            CharSequence[] history = a.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY);
-            check(history.length == 2, "consecutive pending replies lost");
-
-            Notification c = raw(context, "C", 200, 2);
+            java.lang.reflect.Field field = WeChatDecorator.Local.class.getDeclaredField("mReplyController");
+            field.setAccessible(true);
+            MessagingBuilder.Controller controller = (MessagingBuilder.Controller) field.get(local);
+            ReplyTarget captured = controller.replyTarget(830);
+            controller.onReplySubmitted(830, captured);
+            Notification c = raw(context, "C", 0, 2);
             local.apply(manager, null, 830, c);
-            if (showLastReply) texts(conversation(false), c, "B1", "B2", "C");
-            else texts(conversation(false), c, "C");
+            texts(conversation(false), c, "C");
             check(c.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
-                    "answered replies remained in input history");
-            check((c.flags & Notification.FLAG_ONLY_ALERT_ONCE) == 0, "incoming message was muted after reply");
-
+                    "submitted reply created input history");
+            check((c.flags & Notification.FLAG_ONLY_ALERT_ONCE) == 0, "incoming message was muted after submission");
             Notification preview = Notification.Builder.recoverBuilder(context, c)
                     .setStyle(new Notification.BigPictureStyle().bigPicture(
                             android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)))
@@ -148,25 +140,20 @@ final class Plan123Instrumentation {
             local.apply(manager, null, 830, preview);
             check((preview.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0, "preview lost its silent update flag");
             check(preview.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
-                    "preview restored answered input history");
-
-            Notification d = raw(context, "D", 300, 3);
+                    "preview restored local reply history");
+            Notification d = raw(context, "D", 0, 3);
             local.apply(manager, null, 830, d);
-            if (showLastReply) texts(conversation(false), d, "B1", "B2", "C", "D");
-            else texts(conversation(false), d, "C", "D");
-            check((d.flags & Notification.FLAG_ONLY_ALERT_ONCE) == 0, "later incoming message was still muted");
-
+            texts(conversation(false), d, "C", "D");
+            check((d.flags & Notification.FLAG_ONLY_ALERT_ONCE) == 0, "later incoming message was muted");
             Notification silent = raw(context, "E", 400, 4);
             silent.flags |= Notification.FLAG_ONLY_ALERT_ONCE;
             local.apply(manager, null, 830, silent);
             check((silent.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0, "original silent update flag was cleared");
-        } finally {
-            local.close();
-            check(preferences.edit().remove(WeChatDecorator.PREF_SHOW_LAST_REPLY).commit(), "reply display setting not cleared");
-        }
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        finally { local.close(); }
     }
 
-    /** Each preference branch owns its archived reply identities, even if the branch fails. */
+    /** Clears its synthetic archive even when the notification assertion fails. */
     private static final class ReplyAlertFixture extends WeChatDecorator.Local implements AutoCloseable {
         ReplyAlertFixture() {
             super("WeChatDecorator");
@@ -180,7 +167,7 @@ final class Plan123Instrumentation {
     }
 
     static void replyEligibility(Context context) {
-        MessagingBuilder builder = new MessagingBuilder(context, (id, modifies) -> {});
+        MessagingBuilder builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {});
         PendingIntent nativeReply = PendingIntent.getBroadcast(context, 802,
                 new Intent("com.oasisfeng.nevo.test.NATIVE").setPackage(context.getPackageName()), flags());
         try {
@@ -209,7 +196,7 @@ final class Plan123Instrumentation {
     }
 
     static void mediaReplyActionDeduplication(Context context) {
-        MessagingBuilder builder = new MessagingBuilder(context, (id, modifies) -> {});
+        MessagingBuilder builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {});
         PendingIntent nativeReply = PendingIntent.getBroadcast(context, 805,
                 new Intent("com.oasisfeng.nevo.test.MEDIA_DEDUP").setPackage(context.getPackageName()), flags());
         PendingIntent otherActionIntent = PendingIntent.getBroadcast(context, 806,
@@ -417,7 +404,7 @@ final class Plan123Instrumentation {
         final int[] latestCount = {0};
         final Bundle[] receivedBundle = {null};
         final CountDownLatch dispatchedLatch = new CountDownLatch(1);
-        final CountDownLatch recastLatch = new CountDownLatch(1);
+        final CountDownLatch submittedLatch = new CountDownLatch(1);
 
         String actionFirst = "com.oasisfeng.nevo.test.ANIMATED_REPLY_FIRST";
         String actionLatest = "com.oasisfeng.nevo.test.ANIMATED_REPLY_LATEST";
@@ -445,18 +432,20 @@ final class Plan123Instrumentation {
                 new Intent(actionLatest).setPackage(context.getPackageName()), flags());
 
         final Notification[] latestNotification = {null};
-        MessagingBuilder[] builderHolder = new MessagingBuilder[1];
+        Conversation replyConversation = conversation(false);
         MessagingBuilder.Controller controller = new MessagingBuilder.Controller() {
-            @Override public void recastNotification(int recastId, WeChatDecorator.ModifyNotification... modifies) {
-                if (recastId == id && latestNotification[0] != null) {
-                    for (WeChatDecorator.ModifyNotification m : modifies) m.modify(latestNotification[0]);
-                    buildReply(builderHolder[0], id, latestNotification[0]);
-                    recastLatch.countDown();
-                }
+            @Override public ReplyTarget replyTarget(int targetId) {
+                return new ReplyTarget(latestNotification[0].extras.getLong(
+                        WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), replyConversation, null);
+            }
+            @Override public void onReplySubmitted(int targetId, ReplyTarget captured) {
+                check(targetId == id && captured.token() == latestNotification[0].extras.getLong(
+                        WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), "submission captured an outdated card");
+                replyConversation.round.end(captured.token());
+                submittedLatch.countDown();
             }
         };
         MessagingBuilder builder = new MessagingBuilder(context, controller);
-        builderHolder[0] = builder;
 
         try {
             // Notification 1: first message arrived, reply action attached
@@ -496,7 +485,7 @@ final class Plan123Instrumentation {
             oldProxy.send(context, 0, fillInIntent);
 
             check(dispatchedLatch.await(5, TimeUnit.SECONDS), "native reply dispatch timed out");
-            check(recastLatch.await(5, TimeUnit.SECONDS), "recastNotification callback timed out");
+            check(submittedLatch.getCount() == 0, "reply dispatched before submission boundary");
 
             check(firstCount[0] == 0, "firstCount != 0, was " + firstCount[0]);
             check(latestCount[0] == 1, "latestCount != 1, was " + latestCount[0]);
@@ -507,8 +496,7 @@ final class Plan123Instrumentation {
                     "second notification text lost");
             check(countFreeFormReplyActions(notif2) == 1, "notif2 reply action count != 1 after recast");
             CharSequence[] history2 = notif2.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY);
-            check(history2 != null && history2.length == 1 && "动画表情后的回复🙂".contentEquals(history2[0]),
-                    "reply history not recorded on latest notification");
+            check(history2 == null, "successful reply wrote local body history");
             check(notif1.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
                     "reply history was written into old notification");
             check(oldProxy.equals(notif2.actions[0].actionIntent), "currentProxy identity changed after reply recast");
@@ -522,12 +510,12 @@ final class Plan123Instrumentation {
         }
     }
 
-    static void concurrentMediaReplyRecast(Context context) {
+    static void concurrentMediaReplySubmission(Context context) {
         final int id = 807;
         final int[] dispatchCount = {0};
         final Bundle[] receivedBundle = {null};
         final CountDownLatch dispatchedLatch = new CountDownLatch(1);
-        final CountDownLatch recastLatch = new CountDownLatch(1);
+        final CountDownLatch submittedLatch = new CountDownLatch(1);
 
         BroadcastReceiver nativeTarget = new BroadcastReceiver() {
             @Override public void onReceive(Context ctx, Intent intent) {
@@ -542,18 +530,20 @@ final class Plan123Instrumentation {
                 new Intent(testAction).setPackage(context.getPackageName()), flags());
 
         final Notification[] latestNotification = {null};
-        MessagingBuilder[] builderHolder = new MessagingBuilder[1];
+        Conversation replyConversation = conversation(false);
         MessagingBuilder.Controller controller = new MessagingBuilder.Controller() {
-            @Override public void recastNotification(int recastId, WeChatDecorator.ModifyNotification... modifies) {
-                if (recastId == id && latestNotification[0] != null) {
-                    for (WeChatDecorator.ModifyNotification m : modifies) m.modify(latestNotification[0]);
-                    buildReply(builderHolder[0], id, latestNotification[0]);
-                    recastLatch.countDown();
-                }
+            @Override public ReplyTarget replyTarget(int targetId) {
+                return new ReplyTarget(latestNotification[0].extras.getLong(
+                        WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), replyConversation, null);
+            }
+            @Override public void onReplySubmitted(int targetId, ReplyTarget captured) {
+                check(targetId == id && captured.token() == latestNotification[0].extras.getLong(
+                        WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), "submission captured an outdated card");
+                replyConversation.round.end(captured.token());
+                submittedLatch.countDown();
             }
         };
         MessagingBuilder builder = new MessagingBuilder(context, controller);
-        builderHolder[0] = builder;
 
         try {
             // Notification 1: first message arrived, reply action attached and user starts typing.
@@ -582,14 +572,14 @@ final class Plan123Instrumentation {
             ((BroadcastReceiver) field.get(builder)).onReceive(context, proxy);
 
             check(dispatchedLatch.await(5, TimeUnit.SECONDS), "native reply dispatch timed out");
-            check(recastLatch.await(5, TimeUnit.SECONDS), "recastNotification callback timed out");
+            check(submittedLatch.getCount() == 0, "reply dispatched before submission boundary");
 
             check(dispatchCount[0] == 1, "native reply dispatched " + dispatchCount[0] + " times, expected 1");
             check(receivedBundle[0] != null && "Test reply".contentEquals(receivedBundle[0].getCharSequence("native-key")),
                     "unexpected reply content in native target");
 
             // Verify latestNotification[0] (notif2):
-            // 1. The callback modifies the latest notification and preserves its actual text.
+            // Submission captures the latest generation and leaves the displayed card content intact.
             check(latestNotification[0] == notif2, "recast did not use latest notification");
             check("[文件] second".contentEquals(latestNotification[0].extras.getCharSequence(Notification.EXTRA_TEXT)),
                     "second notification content lost");
@@ -602,10 +592,9 @@ final class Plan123Instrumentation {
             RemoteInput activeInput = findFirstFreeFormRemoteInput(latestNotification[0]);
             check(activeInput != null && "native-key".equals(activeInput.getResultKey()),
                     "resultKey != native-key: " + (activeInput == null ? "null" : activeInput.getResultKey()));
-            // 4. Remote input history recorded the reply.
+            // Dispatch success does not store a local reply body.
             CharSequence[] history = latestNotification[0].extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY);
-            check(history != null && history.length == 1 && "Test reply".contentEquals(history[0]),
-                    "reply history not recorded on latest notification");
+            check(history == null, "successful reply wrote local body history");
         } catch (Exception e) {
             throw new AssertionError(e);
         } finally {
@@ -651,20 +640,25 @@ final class Plan123Instrumentation {
 
     static void nativeReplyForwarding(Context context) {
         final Bundle[] received = {null};
-        CountDownLatch forwarded = new CountDownLatch(1), recorded = new CountDownLatch(1);
+        CountDownLatch forwarded = new CountDownLatch(1), submitted = new CountDownLatch(1);
+        Conversation conversation = conversation(false);
+        Notification history = normalize(conversation, raw(context, "A", 100, 1), null);
+        long token = history.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
         BroadcastReceiver target = new BroadcastReceiver() {
             @Override public void onReceive(Context ctx, Intent intent) {
+                check(submitted.getCount() == 0, "native dispatch preceded submission boundary");
                 received[0] = RemoteInput.getResultsFromIntent(intent); forwarded.countDown();
             }
         };
         String action = "com.oasisfeng.nevo.test.FORWARD";
         ContextCompat.registerReceiver(context, target, new IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED);
         PendingIntent nativeReply = PendingIntent.getBroadcast(context, 804, new Intent(action).setPackage(context.getPackageName()), flags());
-        Notification history = normalize(conversation(false), raw(context, "A", 100, 1), null);
-        NotificationMessages.recordReply(history, "earlier", 150, "earlier");
-        MessagingBuilder builder = new MessagingBuilder(context, (id, modifies) -> {
-            for (WeChatDecorator.ModifyNotification modify : modifies) modify.modify(history);
-            recorded.countDown();
+        MessagingBuilder builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {
+            @Override public ReplyTarget replyTarget(int id) { return new ReplyTarget(token, conversation, null); }
+            @Override public void onReplySubmitted(int id, ReplyTarget captured) {
+                NotificationMessages.clearReadHistory(conversation, history, captured.token());
+                submitted.countDown();
+            }
         });
         try {
             Intent proxy = new Intent().setData(android.net.Uri.fromParts("id", "804", null))
@@ -676,9 +670,9 @@ final class Plan123Instrumentation {
             ((BroadcastReceiver) field.get(builder)).onReceive(context, proxy);
             check(forwarded.await(5, TimeUnit.SECONDS), "native results not forwarded");
             check("@Bob\u2005hello".contentEquals(received[0].getCharSequence("native-key")), "mention prefix/result key lost");
-            check(recorded.await(5, TimeUnit.SECONDS), "reply success not recorded");
-            CharSequence[] replies = history.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY);
-            check(replies.length == 2 && "earlier".contentEquals(replies[1]), "continuous reply history lost");
+            texts(conversation, history);
+            check(history.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null,
+                    "successful dispatch wrote local reply text");
         } catch (Exception error) { throw new AssertionError(error); }
         finally { builder.close(); nativeReply.cancel(); context.unregisterReceiver(target); }
     }
@@ -710,13 +704,13 @@ final class Plan123Instrumentation {
     }
     private static Notification normalize(Conversation c, Notification n, Notification old) {
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
-        List<Message> messages = NotificationMessages.rebuild(c, n, old == null ? Collections.emptyList() : Collections.singletonList(old), true);
+        List<Message> messages = NotificationMessages.rebuild(c, n, old == null ? Collections.emptyList() : Collections.singletonList(old));
         for (Message message : messages) style.addMessage(message);
         NotificationMessages.stamp(c, n); NotificationMessages.flatIntoExtras(style, n.extras);
         n.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle"); return n;
     }
     private static void texts(Conversation c, Notification n, String... expected) {
-        List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList(), true);
+        List<Message> messages = NotificationMessages.rebuild(c, n, Collections.emptyList());
         check(messages.size() == expected.length, "unexpected history length " + messages.size());
         for (int i = 0; i < expected.length; i++) check(expected[i].contentEquals(messages.get(i).getText()), "history mismatch at " + i);
     }
