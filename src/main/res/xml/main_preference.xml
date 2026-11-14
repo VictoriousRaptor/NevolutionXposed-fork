@@ -44,4 +44,12 @@
 		android:summary="@string/settings_restart_summary"
 		android:title="@string/settings_apply_title" />
 
+	<Preference
+		android:summary="@string/project_url"
+		android:title="@string/settings_project_url_title">
+		<intent
+			android:action="android.intent.action.VIEW"
+			android:data="@string/project_url" />
+	</Preference>
+
 </PreferenceScreen>

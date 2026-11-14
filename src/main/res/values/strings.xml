@@ -7,6 +7,8 @@
 	<string name="settings_core_category">Core feature</string>
 	<string name="settings_apply_title">Applying changes</string>
 	<string name="settings_restart_summary">Restart the affected target process after changing a setting. WeChat enhancement is enabled by default.</string>
+	<string name="settings_project_url_title">Project URL</string>
+	<string name="project_url" translatable="false">https://github.com/VictoriousRaptor/NevolutionXposed-fork</string>
 
 	<!-- decorators-misc -->
 

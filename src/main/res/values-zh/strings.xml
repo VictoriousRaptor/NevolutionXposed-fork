@@ -24,6 +24,7 @@
 	<string name="settings_core_category">核心功能</string>
 	<string name="settings_apply_title">应用设置</string>
 	<string name="settings_restart_summary">修改后请重启对应的目标进程。微信增强默认开启。</string>
+	<string name="settings_project_url_title">项目地址</string>
 
 	<!-- decorator-wechat -->
 
