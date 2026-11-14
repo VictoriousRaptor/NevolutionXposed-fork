@@ -43,7 +43,7 @@ final class ConversationRoundInstrumentation {
         spinning.extras.putBoolean(NotificationMessages.REMOTE_INPUT_SPINNER, true);
         spinning.extras.putBoolean(NotificationMessages.HIDE_SMART_REPLIES, true);
         c.round.end(10);
-        Notification ready = NotificationMessages.completeReplyUi(context, spinning);
+        Notification ready = NotificationMessages.completeReplyUi(context, spinning, "Synthetic reply");
         check(!ready.extras.getBoolean(NotificationMessages.REMOTE_INPUT_SPINNER), "reply spinner remained set");
         check(!ready.extras.getBoolean(NotificationMessages.HIDE_SMART_REPLIES), "reply actions stayed hidden");
         check(ready.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) == null
@@ -57,7 +57,14 @@ final class ConversationRoundInstrumentation {
                 && spinning.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY) != null,
                 "completion mutated the source card");
         check(c.round.endThroughToken == 10, "UI completion changed the history boundary");
+        android.os.Parcelable[] displayed = ready.extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+        check(displayed.length == 2
+                && "Synthetic reply".contentEquals(((Bundle) displayed[1]).getCharSequence("text"))
+                && !((Bundle) displayed[1]).containsKey("sender"), "completion omitted the self reply");
         texts(c, ready);
+        Conversation nextConversation = conversation(false);
+        nextConversation.round.end(10);
+        texts(nextConversation, normalize(nextConversation, raw(context, "C", 0, 2, 20), ready), "C");
         Notification next = raw(context, "C", 0, 2, 20);
         next.extras.putAll(spinning.extras);
         next.extras.remove(NotificationMessages.STORED);

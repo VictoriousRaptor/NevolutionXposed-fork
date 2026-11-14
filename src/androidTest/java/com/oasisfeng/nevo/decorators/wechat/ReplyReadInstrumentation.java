@@ -118,9 +118,11 @@ final class ReplyReadInstrumentation {
             currentRead = read;
             builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {
                 @Override public ReplyTarget replyTarget(int id) { return new ReplyTarget(1, conversation, currentRead); }
-                @Override public void onReplyFinished(int id, ReplyTarget target) {
+                @Override public void onReplyFinished(int id, ReplyTarget target, CharSequence replyText) {
                     check(submissions.get() == 1 && target != null && target.token() == 1
                             && target.conversation() == conversation, "completion used a newer reply target");
+                    check((synthetic ? result == 0 : result != -1) ? "B".contentEquals(replyText) : replyText == null,
+                            "reply echo did not match dispatch outcome");
                     completions.incrementAndGet();
                     completed.countDown();
                 }

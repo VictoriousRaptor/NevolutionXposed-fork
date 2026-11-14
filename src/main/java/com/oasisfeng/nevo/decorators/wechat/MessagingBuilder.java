@@ -228,6 +228,7 @@ class MessagingBuilder {
 		final String part = data.getSchemeSpecificPart();
 		final ReplyTarget replyTarget = mController.replyTarget(id);
 		submitBeforeReply(id, replyTarget);
+		boolean dispatched = false;
 		try {
 			final Intent input_data = addTargetPackageAndWakeUp(reply_action);
 			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder(result_key).build() }, input_data, results);
@@ -236,6 +237,7 @@ class MessagingBuilder {
 			reply_action.send(mContext, 0, input_data, (pendingIntent, intent, _result_code, _result_data, _result_extras) -> {
 				logReply("native_pending_intent_callback", "notificationId=" + part + " resultCode=" + _result_code);
 			}, null);
+			dispatched = true;
 		} catch (final PendingIntent.CanceledException e) {
 			logReply("native_dispatch_failed", "reason=pending_intent_cancelled notificationId=" + id);
 			Log.w(TAG, "NX_REPLY stage=native_dispatch_failed reason=pending_intent_cancelled notificationId=" + part, e);
@@ -245,7 +247,7 @@ class MessagingBuilder {
 			Log.w(TAG, "NX_REPLY stage=native_dispatch_failed reason=runtime notificationId=" + part, e);
 			abortBroadcast();
 		} finally {
-			finishReply(id, replyTarget);
+			finishReply(id, replyTarget, dispatched ? text : null);
 			// 延迟清除防循环标志
 			final String finalReplyKey = replyKey;
 			new Handler(Looper.getMainLooper()).post(() -> mPendingReplies.remove(finalReplyKey));
@@ -261,8 +263,8 @@ class MessagingBuilder {
 		catch (RuntimeException failure) { logReply("read_action_failed", "notificationId=" + id + " type=" + failure.getClass().getSimpleName()); }
 	}
 
-	private void finishReply(int id, ReplyTarget target) {
-		try { mController.onReplyFinished(id, target); }
+	private void finishReply(int id, ReplyTarget target, @Nullable CharSequence reply) {
+		try { mController.onReplyFinished(id, target, reply); }
 		catch (RuntimeException failure) { logReply("reply_ui_failed", "notificationId=" + id + " type=" + failure.getClass().getSimpleName()); }
 	}
 
@@ -285,7 +287,7 @@ class MessagingBuilder {
 	interface Controller {
 		default ReplyTarget replyTarget(int id) { return null; }
 		default void onReplySubmitted(int id, ReplyTarget target) {}
-		default void onReplyFinished(int id, ReplyTarget target) {}
+		default void onReplyFinished(int id, ReplyTarget target, @Nullable CharSequence reply) {}
 	}
 
 	MessagingBuilder(final Context context, final Controller controller) {
@@ -509,7 +511,7 @@ class MessagingBuilder {
 			return;
 		}
 		logReply("synthetic_receiver", "notificationId=" + notif_id + " inputLength=" + reply_text.length());
-		final boolean dispatched;
+		boolean dispatched = false;
 		final ReplyTarget replyTarget = mController.replyTarget(notif_id);
 		submitBeforeReply(notif_id, replyTarget);
 		try {
@@ -529,7 +531,7 @@ class MessagingBuilder {
 			Log.w(TAG, "NX_REPLY stage=synthetic_dispatch_failed notificationId=" + notif_id, e);
 			return;
 		} finally {
-			finishReply(notif_id, replyTarget);
+			finishReply(notif_id, replyTarget, dispatched ? reply_text : null);
 		}
 		if (!dispatched) {
 			logReply("synthetic_dispatch_failed", "notificationId=" + notif_id + " reason=dispatch_rejected");

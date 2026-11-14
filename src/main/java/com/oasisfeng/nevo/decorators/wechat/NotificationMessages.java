@@ -272,9 +272,21 @@ final class NotificationMessages {
     }
 
     /** Presentation-only update of a still-active card; this does not restore the retired archive. */
-    static Notification completeReplyUi(Context context, Notification active) {
+    static Notification completeReplyUi(Context context, Notification active, CharSequence reply) {
         Notification copy = active.clone();
         clearRemoteInput(copy.extras);
+        // Echo belongs only to this visible card, never to the retired unread archive.
+        // Use the submitted text, since SystemUI's input history can be missing or stale.
+        if (!TextUtils.isEmpty(reply) && "android.app.Notification$MessagingStyle".equals(
+                copy.extras.getString(Notification.EXTRA_TEMPLATE))) {
+            Parcelable[] previous = copy.extras.getParcelableArray(EXTRA_MESSAGES);
+            int retained = previous == null ? 0
+                    : Math.min(previous.length, Notification.MessagingStyle.MAXIMUM_RETAINED_MESSAGES - 1);
+            Parcelable[] messages = new Parcelable[retained + 1];
+            if (retained > 0) System.arraycopy(previous, previous.length - retained, messages, 0, retained);
+            messages[retained] = toBundle(new Message(reply, System.currentTimeMillis(), (Person) null));
+            copy.extras.putParcelableArray(EXTRA_MESSAGES, messages);
+        }
         Notification completed = Notification.Builder.recoverBuilder(context, copy).setOnlyAlertOnce(true).build();
         NevoDecoratorService.LocalDecorator.markActionsSerialized(completed);
         return completed;

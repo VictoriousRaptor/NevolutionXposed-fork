@@ -144,7 +144,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private final MessagingBuilder.Controller mReplyController = new MessagingBuilder.Controller() {
 			@Override public ReplyTarget replyTarget(int id) { return Local.this.captureReplyTarget(id); }
 			@Override public void onReplySubmitted(int id, ReplyTarget target) { Local.this.onReplySubmitted(id, target); }
-			@Override public void onReplyFinished(int id, ReplyTarget target) { Local.this.onReplyFinished(id, target); }
+			@Override public void onReplyFinished(int id, ReplyTarget target, CharSequence reply) { Local.this.onReplyFinished(id, target, reply); }
 
 		};
 		private boolean mActive;
@@ -274,13 +274,13 @@ public class WeChatDecorator extends NevoDecoratorService {
 					latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN), current, latest.deleteIntent);
 		}
 
-		private synchronized void onReplyFinished(int id, ReplyTarget target) {
+		private synchronized void onReplyFinished(int id, ReplyTarget target, CharSequence reply) {
 			if (!mActive || isDisabled() || target == null) return;
 			NotificationManager manager = getAppContext().getSystemService(NotificationManager.class);
 			for (android.service.notification.StatusBarNotification active : manager.getActiveNotifications()) {
 				Notification n = active.getNotification();
 				if (active.getId() != id || !canCompleteReply(id, active.getTag(), target, n)) continue;
-				Notification completed = NotificationMessages.completeReplyUi(getAppContext(), n);
+				Notification completed = NotificationMessages.completeReplyUi(getAppContext(), n, reply);
 				ReplyTarget previous = postingReplyCompletion;
 				postingReplyCompletion = target;
 				try {

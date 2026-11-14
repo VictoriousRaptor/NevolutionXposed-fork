@@ -35,8 +35,8 @@ android {
 	defaultConfig {
 		minSdk 26
 		targetSdk 34
-		versionCode 17
-		versionName "3.4.0"
+		versionCode 18
+		versionName "3.5.0"
 		buildConfigField 'boolean', 'IMAGE_DIAGNOSTICS', 'false'
 		testInstrumentationRunner "com.oasisfeng.nevo.decorators.wechat.MessageIdentityInstrumentation"
 	}
@@ -92,4 +92,5 @@ dependencies {
 	implementation 'androidx.appcompat:appcompat:1.8.0'
 	implementation 'androidx.preference:preference:1.2.1'
 	testImplementation 'junit:junit:4.13.2'
+	testImplementation 'org.robolectric:robolectric:4.14.1'
 }
