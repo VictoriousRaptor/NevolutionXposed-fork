@@ -79,10 +79,9 @@ class MessagingBuilder {
 			final Notification n, final List<Notification> archive) {
 		configureReplyAction(conversation, id, n);
 		final MessagingStyle messaging = new MessagingStyle(mUserSelf);
-		for (Message message : NotificationMessages.rebuild(conversation, n, archive, mController.showLastReply()))
+		for (Message message : NotificationMessages.rebuild(conversation, n, archive))
 			messaging.addMessage(message);
-		return messaging.getMessages().isEmpty() && !n.extras.getBoolean(NotificationMessages.RECALL_PROMPT)
-				? null : messaging;
+		return messaging;
 	}
 
 	private void configureReplyAction(final Conversation conversation, final int id, final Notification n) {
@@ -115,6 +114,8 @@ class MessagingBuilder {
 			reply = fromActions != null ? fromActions : buildSyntheticReplyAction(conversation, id, n);
 		}
 		if (reply != null) replaceReplyAction(n, reply);
+		logReply("reply_action", "notificationId=" + id + " ready=" + (reply != null)
+				+ " nativeReply=" + (nativeReply != null));
 	}
 
 	/** @return appropriate PendingIntent flags, including FLAG_MUTABLE on Android 12+ for RemoteInput. */
@@ -165,7 +166,7 @@ class MessagingBuilder {
 		return action.build();
 	}
 
-	/** Intercept the PendingIntent in RemoteInput to update the notification with replied message upon success. */
+	/** Proxy RemoteInput through the local submission and dispatch lifecycle. */
 	private PendingIntent proxyDirectReply(final int id, final PendingIntent on_reply, final RemoteInput remote_input,
 			final @Nullable String mention_prefix) {
 		final Intent proxy = new Intent(mention_prefix != null ? ACTION_MENTION : ACTION_REPLY)		// Separate action to avoid PendingIntent overwrite.
@@ -207,7 +208,7 @@ class MessagingBuilder {
 			return;
 		}
 		final CharSequence input = results.getCharSequence(result_key);
-		if (input == null) {
+		if (input == null || input.length() == 0) {
 			logReply("native_drop", "reason=missing_input resultKey=" + result_key + " availableKeys=" + results.keySet());
 			return;
 		}
@@ -217,7 +218,7 @@ class MessagingBuilder {
 		logReply("native_receiver", "notificationId=" + data.getSchemeSpecificPart() + " resultKey=" + result_key + " inputLength=" + input.length());
 		// M3: 防止无限循环 — 使用 id:text 作为 key，避免 hashCode 碰撞
 		final String replyKey = data.getSchemeSpecificPart() + ":" + input.toString();
-		if (mPendingReplies.contains(replyKey)) return;
+		if (mPendingReplies.contains(replyKey)) { logReply("native_drop", "reason=duplicate_input notificationId=" + id); return; }
 		mPendingReplies.add(replyKey);
 		final CharSequence text;
 		if (reply_prefix != null) {
@@ -225,35 +226,28 @@ class MessagingBuilder {
 			results.putCharSequence(result_key, text);
 		} else text = input;
 		final String part = data.getSchemeSpecificPart();
-		final long replyTimestamp = System.currentTimeMillis();
-		final String replyId = NotificationMessages.newReplyId();
 		final ReplyTarget replyTarget = mController.replyTarget(id);
-		readBeforeReply(id, replyTarget);
-		long replyReservation = 0;
+		submitBeforeReply(id, replyTarget);
+		boolean dispatched = false;
 		try {
 			final Intent input_data = addTargetPackageAndWakeUp(reply_action);
 			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder(result_key).build() }, input_data, results);
 			logReply("native_remote_input_attached", "resultKey=" + result_key + " inputLength=" + text.length());
 
-			replyReservation = mController.beginNotificationReply(id);
-			final long reservation = replyReservation;
 			reply_action.send(mContext, 0, input_data, (pendingIntent, intent, _result_code, _result_data, _result_extras) -> {
 				logReply("native_pending_intent_callback", "notificationId=" + part + " resultCode=" + _result_code);
-				if (_result_code != 0) {
-					mController.abortNotificationReply(reservation);
-					return;
-				}
-				mController.onReplySent(id, replyTarget, text, replyTimestamp, replyId);
 			}, null);
+			dispatched = true;
 		} catch (final PendingIntent.CanceledException e) {
-			mController.abortNotificationReply(replyReservation);
+			logReply("native_dispatch_failed", "reason=pending_intent_cancelled notificationId=" + id);
 			Log.w(TAG, "NX_REPLY stage=native_dispatch_failed reason=pending_intent_cancelled notificationId=" + part, e);
 			abortBroadcast();
 		} catch (final RuntimeException e) {
-			mController.abortNotificationReply(replyReservation);
+			logReply("native_dispatch_failed", "type=" + e.getClass().getSimpleName() + " notificationId=" + id);
 			Log.w(TAG, "NX_REPLY stage=native_dispatch_failed reason=runtime notificationId=" + part, e);
 			abortBroadcast();
 		} finally {
+			finishReply(id, replyTarget, dispatched ? text : null);
 			// 延迟清除防循环标志
 			final String finalReplyKey = replyKey;
 			new Handler(Looper.getMainLooper()).post(() -> mPendingReplies.remove(finalReplyKey));
@@ -261,19 +255,26 @@ class MessagingBuilder {
 	} };
 
 	/** @param id the notification id */
-	private void readBeforeReply(int id, ReplyTarget target) {
+	private void submitBeforeReply(int id, ReplyTarget target) {
 		logReply("read_requested", "notificationId=" + id);
-		try { mController.onReplyRead(id, target); }
-		catch (RuntimeException failure) { Log.w(TAG, "Reply read history failed: " + id, failure); }
+		try { mController.onReplySubmitted(id, target); }
+		catch (RuntimeException failure) { logReply("read_history_failed", "notificationId=" + id + " type=" + failure.getClass().getSimpleName()); }
 		try { markRead(target == null ? null : target.readAction()); }
-		catch (RuntimeException failure) { Log.w(TAG, "Reply read action failed: " + id, failure); }
+		catch (RuntimeException failure) { logReply("read_action_failed", "notificationId=" + id + " type=" + failure.getClass().getSimpleName()); }
+	}
+
+	private void finishReply(int id, ReplyTarget target, @Nullable CharSequence reply) {
+		try { mController.onReplyFinished(id, target, reply); }
+		catch (RuntimeException failure) { logReply("reply_ui_failed", "notificationId=" + id + " type=" + failure.getClass().getSimpleName()); }
 	}
 
 	private void markRead(@Nullable final PendingIntent action) {
-		if (action == null) return;
+		if (action == null) { logReply("read_action_skipped", "reason=missing_action"); return; }
 		try {
 			action.send(mContext, 0, addTargetPackageAndWakeUp(action));
+			logReply("read_action_dispatched", "");
 		} catch (final PendingIntent.CanceledException e) {
+			logReply("read_action_failed", "reason=pending_intent_cancelled");
 			Log.w(TAG, "Mark-read action is already cancelled");
 		}
 	}
@@ -284,19 +285,9 @@ class MessagingBuilder {
 	}
 
 	interface Controller {
-		void recastNotification(int id, WeChatDecorator.ModifyNotification... modifies);
-		default boolean showLastReply() { return false; }
 		default ReplyTarget replyTarget(int id) { return null; }
-		default void onReplyRead(int id, ReplyTarget target) {}
-		default void onReplySent(int id, ReplyTarget target, CharSequence text, long time, String replyId) {
-			recastNotification(id, n -> {
-				com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "pre-applied", null);
-				com.oasisfeng.nevo.xposed.compat.XposedHelpers.setAdditionalInstanceField(n, "applied", null);
-				NotificationMessages.recordReply(n, text, time, replyId);
-			});
-		}
-		default long beginNotificationReply(int id) { return 0; }
-		default void abortNotificationReply(long reservation) {}
+		default void onReplySubmitted(int id, ReplyTarget target) {}
+		default void onReplyFinished(int id, ReplyTarget target, @Nullable CharSequence reply) {}
 	}
 
 	MessagingBuilder(final Context context, final Controller controller) {
@@ -508,8 +499,6 @@ class MessagingBuilder {
 			return;
 		}
 		final String part = data.getSchemeSpecificPart();
-		final long replyTimestamp = System.currentTimeMillis();
-		final String replyId = NotificationMessages.newReplyId();
 		final int notif_id;
 		try { notif_id = Integer.parseInt(part); } catch (final NumberFormatException e) { return; }
 		String reply_text = null;
@@ -522,10 +511,9 @@ class MessagingBuilder {
 			return;
 		}
 		logReply("synthetic_receiver", "notificationId=" + notif_id + " inputLength=" + reply_text.length());
-		final boolean dispatched;
+		boolean dispatched = false;
 		final ReplyTarget replyTarget = mController.replyTarget(notif_id);
-		readBeforeReply(notif_id, replyTarget);
-		final long replyReservation = mController.beginNotificationReply(notif_id);
+		submitBeforeReply(notif_id, replyTarget);
 		try {
 			// 直接调用 MMAutoMessageReplyReceiver.onReceive，绕过广播系统
 			final Intent reply_intent = new Intent(MainHook.WECHAT_AUTO_REPLY_ACTION);
@@ -539,17 +527,17 @@ class MessagingBuilder {
 			RemoteInput.addResultsToIntent(new RemoteInput[]{ new RemoteInput.Builder(DEFAULT_AUTO_REPLY_RESULT_KEY).build() }, reply_intent, remoteInputResults);
 			dispatched = dispatchSyntheticReply(context, reply_intent);
 		} catch (final RuntimeException e) {
-			mController.abortNotificationReply(replyReservation);
+			logReply("synthetic_dispatch_failed", "notificationId=" + notif_id + " type=" + e.getClass().getSimpleName());
 			Log.w(TAG, "NX_REPLY stage=synthetic_dispatch_failed notificationId=" + notif_id, e);
 			return;
+		} finally {
+			finishReply(notif_id, replyTarget, dispatched ? reply_text : null);
 		}
 		if (!dispatched) {
-			mController.abortNotificationReply(replyReservation);
+			logReply("synthetic_dispatch_failed", "notificationId=" + notif_id + " reason=dispatch_rejected");
 			return;
 		}
 		logReply("synthetic_dispatched", "notificationId=" + notif_id);
-		final String finalReplyText = reply_text;
-		mController.onReplySent(notif_id, replyTarget, finalReplyText, replyTimestamp, replyId);
 	}};
 
 	boolean dispatchSyntheticReply(Context context, Intent intent) {

@@ -58,7 +58,7 @@ final class NotificationMarkdownInstrumentation {
             check("Bold\nMedium 123".contentEquals(notification.extras.getCharSequence(Notification.EXTRA_TEXT)),
                     "heading render changed on repeat");
             notification.extras = parcel(notification.extras);
-            check(raw.contentEquals(NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true)
+            check(raw.contentEquals(NotificationMessages.rebuild(conversation, notification, Collections.emptyList())
                     .get(0).getText()), "heading source lost");
             notification = normalized(conversation, notification);
         }
@@ -135,7 +135,7 @@ final class NotificationMarkdownInstrumentation {
         NotificationMarkdown.apply(notification, true);
         notification.extras = parcel(notification.extras);
         for (int i = 0; i < 3; i++) {
-            List<Message> messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true);
+            List<Message> messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList());
             check(messages.size() == 1 && "**原文**".contentEquals(messages.get(0).getText()), "source or identity lost");
             notification = normalized(conversation, notification);
             NotificationMarkdown.apply(notification, true);
@@ -147,7 +147,7 @@ final class NotificationMarkdownInstrumentation {
         check(!notification.extras.containsKey(NotificationMarkdown.RAW_TEXT), "stale source metadata");
     }
 
-    static void identityReplyAndRecallUseSource(Context context) {
+    static void identityAndRecallUseSource(Context context) {
         Conversation conversation = conversation();
         Notification notification = notification(context, "**相同**", 100);
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
@@ -158,17 +158,14 @@ final class NotificationMarkdownInstrumentation {
         NotificationMessages.stamp(conversation, notification);
         NotificationMessages.flatIntoExtras(style, notification.extras);
         NotificationMarkdown.apply(notification, true);
-        List<Message> messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true);
-        check(messages.size() == 2, "visually identical messages were merged");
-        NotificationMessages.recordReply(notification, "**回复**", 200, "markdown-reply");
-        check("**回复**".contentEquals(notification.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY)[0]), "reply payload changed");
+        List<Message> messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList());
+        check(messages.size() == 2, "visually identical incoming messages were merged");
         notification = normalized(conversation, notification);
         NotificationMarkdown.apply(notification, true);
-        messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true);
-        check(messages.size() == 3 && "**回复**".contentEquals(messages.get(2).getText()), "reply source lost");
         NotificationMessages.markRecall(notification, 11);
-        messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true);
-        check(messages.size() == 2 && "相同".contentEquals(messages.get(0).getText()), "recall removed wrong line");
+        messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList());
+        check(messages.size() == 1 && "相同".contentEquals(messages.get(0).getText()), "recall removed wrong source line");
+        check(messages.get(0).getPerson() != null, "incoming Markdown text became self");
     }
 
     static void sourceSurvivesBuilderAndPreview(Context context) {
@@ -176,13 +173,13 @@ final class NotificationMarkdownInstrumentation {
         Notification notification = normalized(conversation, notification(context, "**原文**", 100));
         NotificationMarkdown.apply(notification, true);
         Notification rebuilt = Notification.Builder.recoverBuilder(context, notification).build();
-        check("**原文**".contentEquals(NotificationMessages.rebuild(conversation, rebuilt, Collections.emptyList(), true).get(0).getText()), "builder lost source");
+        check("**原文**".contentEquals(NotificationMessages.rebuild(conversation, rebuilt, Collections.emptyList()).get(0).getText()), "builder lost source");
         Notification preview = Notification.Builder.recoverBuilder(context, rebuilt)
                 .setStyle(new Notification.BigPictureStyle()).build();
         NotificationMessages.copyIdentityExtras(rebuilt, preview);
         preview.extras = parcel(preview.extras);
         check("**原文**".contentEquals(NotificationMarkdown.originalText(preview.extras)), "preview lost collapsed source");
-        check("**原文**".contentEquals(NotificationMessages.rebuild(conversation, preview, Collections.emptyList(), true).get(0).getText()), "preview lost message source");
+        check("**原文**".contentEquals(NotificationMessages.rebuild(conversation, preview, Collections.emptyList()).get(0).getText()), "preview lost message source");
     }
 
     static void codeStylesSurviveParcel() {
@@ -211,9 +208,9 @@ final class NotificationMarkdownInstrumentation {
         check(raw.contentEquals(source), "code source was mutated");
     }
 
-    static void codeSourceAndReplySurviveRebuild(Context context) {
+    static void codeSourceAndIncomingSurviveRebuild(Context context) {
         String raw = "代码 `**同**`\n```txt\n  x();\n```";
-        String reply = "`**回复**`";
+        String incoming = "`**后续来信**`";
         Conversation conversation = conversation();
         Notification notification = normalized(conversation, notification(context, raw, 100));
         Bundle originalBundle = (Bundle) notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES)[0];
@@ -221,25 +218,26 @@ final class NotificationMarkdownInstrumentation {
         NotificationMarkdown.apply(notification, true);
         notification.extras = parcel(notification.extras);
         check(raw.contentEquals(originalBundle.getCharSequence("text")), "code source bundle was mutated");
-        check(raw.contentEquals(NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true).get(0).getText()),
-                "code source lost after Parcel");
-        NotificationMessages.recordReply(notification, reply, 200, "markdown-code-reply");
+        MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
+        for (Message message : NotificationMessages.rebuild(conversation, notification, Collections.emptyList())) style.addMessage(message);
+        style.addMessage(new Message(incoming, 200, NotificationMessages.peer(conversation, null)));
+        NotificationMessages.flatIntoExtras(style, notification.extras);
         notification = normalized(conversation, notification);
         NotificationMarkdown.apply(notification, true);
         notification.extras = parcel(notification.extras);
-        List<Message> messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true);
-        check(messages.size() == 2 && raw.contentEquals(messages.get(0).getText()) && reply.contentEquals(messages.get(1).getText()),
-                "code source or reply changed");
-        check(reply.contentEquals(notification.extras.getCharSequenceArray(Notification.EXTRA_REMOTE_INPUT_HISTORY)[0]),
-                "code reply payload changed");
+        List<Message> messages = NotificationMessages.rebuild(conversation, notification, Collections.emptyList());
+        check(messages.size() == 2 && raw.contentEquals(messages.get(0).getText()) && incoming.contentEquals(messages.get(1).getText()),
+                "code source or subsequent incoming text changed");
+        check(messages.get(1).getPerson() != null, "code incoming text became self");
         NotificationMarkdown.apply(notification, false);
         Bundle first = (Bundle) notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES)[0];
         Bundle last = (Bundle) notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES)[1];
-        check(raw.contentEquals(first.getCharSequence("text")) && reply.contentEquals(last.getCharSequence("text")),
+        check(raw.contentEquals(first.getCharSequence("text")) && incoming.contentEquals(last.getCharSequence("text")),
                 "disabled code messages not restored");
         check(raw.contentEquals(notification.extras.getCharSequence(Notification.EXTRA_TEXT)), "disabled code collapsed text not restored");
-        check(!last.getBundle("extras").containsKey(NotificationMarkdown.RAW_TEXT), "stale code source metadata");
-        check(!last.getBundle("extras").containsKey(NotificationMarkdown.OWNER), "stale code owner metadata");
+        Bundle extras = last.getBundle("extras");
+        check(extras == null || (!extras.containsKey(NotificationMarkdown.RAW_TEXT) && !extras.containsKey(NotificationMarkdown.OWNER)),
+                "stale code source metadata");
     }
 
     static void frameworkCodeCleanupRoundTrip() {
@@ -341,7 +339,7 @@ final class NotificationMarkdownInstrumentation {
     private static Notification normalized(Conversation conversation, Notification notification) {
         NotificationMarkdown.restoreText(notification.extras);
         MessagingStyle style = new MessagingStyle(new Person.Builder().setName("我").build());
-        for (Message message : NotificationMessages.rebuild(conversation, notification, Collections.emptyList(), true)) style.addMessage(message);
+        for (Message message : NotificationMessages.rebuild(conversation, notification, Collections.emptyList())) style.addMessage(message);
         NotificationMessages.stamp(conversation, notification);
         NotificationMessages.flatIntoExtras(style, notification.extras);
         notification.extras.putString(Notification.EXTRA_TEMPLATE, "android.app.Notification$MessagingStyle");

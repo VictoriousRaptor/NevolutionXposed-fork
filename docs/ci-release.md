@@ -26,14 +26,15 @@ After the build job passes, master pushes and manual master runs build and verif
 and publish it with SHA256SUMS.txt. Tags use v<versionName>-build.<run number> so multiple
 master updates at the same app version have distinct releases. Reruns preserve
 an already published release. For reference, v3.2.0 used Android versionCode 13; the current app
-version is 3.4.0 with versionCode 17. Version 3.3.1 used versionCode 16.
+version is 3.5.0 with versionCode 18. Version 3.4.0 used versionCode 17.
 Bump versionCode for the next app version. CI run numbers do not alter Android versionCode.
 
-Version 3.4.0 removes the standalone media-notification decorator and its setting,
-preserves native read actions in partial car-conversation bundles, copies channel
-sound/light/vibration settings during migration, and reuses stable WXGF conversion
-results in a bounded single-slot cache. See [3.4.0 notes](release-3.4.0.md) for
-validation scope and pending device checks.
+Version 3.5.0 ends notification rounds at reply submission or a supported native
+read, removes app-side outgoing-message observers and the last-reply preference,
+and keeps successful local reply echoes on the current card. Exact native-read
+observation is limited to WeChat 8.0.79/3182 and 3183; reply, image and recall gates
+remain independent. See [3.5.0 notes](release-3.5.0.md) for validation scope and
+pending device checks.
 
 Since version 3.3.1, the module requests read handling as soon as a valid notification reply is
 submitted, independently of the send outcome. Failed dispatches do not add a

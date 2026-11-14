@@ -15,10 +15,6 @@ public class WeChat8079AdaptersTest {
         assertEquals("com.tencent.mm.storage.e9", build3183.message);
         assertEquals("com.tencent.mm.storage.e9", build3200.message);
         assertEquals("H0", build3200.serverId);
-        WeChatAppReplyEvents.Profile reply3200 = WeChatAppReplyEvents.Profile.forVersion("8.0.79", 3200);
-        assertNotNull(reply3200);
-        assertEquals("s1", reply3200.setStatus);
-        assertEquals("z0", reply3200.isSend);
         WeChatImageProfile image3200 = WeChatImageProfile.forVersion("8.0.79", 3200);
         assertNotNull(image3200);
         assertEquals("s4", image3200.pathMethod);
@@ -27,23 +23,16 @@ public class WeChat8079AdaptersTest {
 
     @Test public void sharesVerifiedMessageIdentityAcrossIndependentComponents() {
         WeChatImageProfile image = WeChatImageProfile.forVersion("8.0.79", 3182);
-        WeChatAppReplyEvents.Profile reply = WeChatAppReplyEvents.Profile.forVersion("8.0.79", 3182);
         WeChatRecallEvents.Profile recall = WeChatRecallEvents.Profile.forVersion("8.0.79", 3182);
-        assertNotNull(image); assertNotNull(reply); assertNotNull(recall);
+        assertNotNull(image); assertNotNull(recall);
         assertEquals("com.tencent.mm.storage.e9", image.message);
-        assertEquals(image.message, reply.messageClass);
         assertEquals(image.message, recall.message);
         assertEquals("N0", image.talker);
-        assertEquals(image.talker, reply.talker);
         assertEquals(image.talker, recall.talker);
         assertEquals("C0", image.sender);
-        assertEquals(image.sender, reply.isSend);
         assertEquals("I0", image.serverId);
         assertEquals(image.serverId, recall.serverId);
         assertEquals("en.js", recall.payload);
-        assertEquals("r1", reply.setStatus);
-        assertEquals("M0", reply.status);
-        assertArrayEquals(new String[]{"a3", "M2", "F2"}, reply.excluded);
     }
 
     @Test public void selectsNewStateAccessorWithoutChangingOlderBuilds() {
@@ -65,7 +54,6 @@ public class WeChat8079AdaptersTest {
                 if (!name.equals("8.0.79") && code != 3182 && code != 3183 && code != 3200) continue;
                 boolean expected = name.equals("8.0.79") && (code == 3182 || code == 3183 || code == 3200);
                 assertEquals(name + "/" + code, expected, WeChatImageProfile.forVersion(name, code) != null);
-                assertEquals(name + "/" + code, expected, WeChatAppReplyEvents.Profile.forVersion(name, code) != null);
                 assertEquals(name + "/" + code, expected, WeChatRecallEvents.Profile.forVersion(name, code) != null);
             }
         }

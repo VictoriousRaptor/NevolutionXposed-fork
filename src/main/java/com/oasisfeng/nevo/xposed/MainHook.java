@@ -260,6 +260,7 @@ public class MainHook extends XposedModule {
 
 	private void hookWeChat(PackageHookContext loadPackageParam) {
 		if (!"com.tencent.mm".equals(loadPackageParam.processName)) return;
+		final boolean cancellationObserved = hookWeChatCancellation();
 		try {
 			final Class<?> clazz = XposedHelpers.findClass("android.app.NotificationManager", loadPackageParam.classLoader);
 			Method method = XposedHelpers.findMethodExact(clazz, "notify", String.class, int.class, Notification.class);
@@ -267,15 +268,19 @@ public class MainHook extends XposedModule {
 			XposedBridge.hookMethod(method, new XC_MethodHook() {
 				@Override
 				protected void beforeHookedMethod(MethodHookParam param) {
-					NotificationManager nm = (NotificationManager)param.thisObject;
-					String tag = (String)param.args[0];
-					int id = (int)param.args[1];
-					Notification n = (Notification)param.args[2];
-					imageNotificationTrace("notify_before", id, n);
-					if (BuildConfig.DEBUG) Log.d(TAG, "before apply " + nm + " " + tag + " " + id);
-					if (applyLocally(nm, tag, id, n) == com.oasisfeng.nevo.sdk.Decorating.StopPost) {
-						param.setResult(null);
-						return;
+					// One transaction with the deferred queue: no newer apply may interleave with beforePost.
+					Object lock = NevoDecoratorService.getAppContext() == null ? MainHook.this
+							: MainHook.this.wechat.getLocalDecorator("com.tencent.mm");
+					synchronized (lock) {
+						NotificationManager nm = (NotificationManager)param.thisObject;
+						String tag = (String)param.args[0];
+						int id = (int)param.args[1];
+						Notification n = (Notification)param.args[2];
+						imageNotificationTrace("notify_before", id, n);
+						if (BuildConfig.DEBUG) Log.d(TAG, "before apply " + nm + " " + tag + " " + id);
+						if (applyLocally(nm, tag, id, n) == com.oasisfeng.nevo.sdk.Decorating.StopPost) {
+							param.setResult(null);
+							return;
 					}
 					imageNotificationTrace("notify_decorated", id, n);
 					// 用 Notification.Builder 重建通知，确保 actions 被正确序列化
@@ -298,6 +303,10 @@ public class MainHook extends XposedModule {
 						Log.w(TAG, "Failed to rebuild: " + e.getMessage());
 					}
 					imageNotificationTrace("notify_outgoing", id, (Notification) param.args[2]);
+					if (NevoDecoratorService.getAppContext() != null
+							&& MainHook.this.wechat.getLocalDecorator("com.tencent.mm").beforePost(
+								nm, tag, id, (Notification) param.args[2], cancellationObserved)) param.setResult(null);
+					}
 				}
 			});
 		} catch (XposedHelpers.ClassNotFoundError e) { XposedBridge.log(this.wechat + " NotificationManager hook failed"); }
@@ -340,6 +349,34 @@ public class MainHook extends XposedModule {
 		} catch (Throwable e) {
 			XposedBridge.rethrowFrameworkError(e);
 			XposedBridge.log(this.wechat + " Application.onCreate hook failed: " + e.getMessage());
+		}
+	}
+
+	private boolean hookWeChatCancellation() {
+		try {
+			Method cancel = NotificationManager.class.getDeclaredMethod("cancel", String.class, int.class);
+			Method all = NotificationManager.class.getDeclaredMethod("cancelAll");
+			for (Method method : new Method[]{cancel, all})
+				if (method.getReturnType() != void.class || java.lang.reflect.Modifier.isStatic(method.getModifiers()))
+					throw new NoSuchMethodException("Notification cancellation signature");
+			XposedBridge.hookMethod(cancel, new XC_MethodHook() {
+				@Override protected void beforeHookedMethod(MethodHookParam param) {
+					if (NevoDecoratorService.getAppContext() != null)
+						wechat.getLocalDecorator("com.tencent.mm").onCancel((String) param.args[0], (int) param.args[1]);
+				}
+			});
+			XposedBridge.hookMethod(all, new XC_MethodHook() {
+				@Override protected void beforeHookedMethod(MethodHookParam param) {
+					if (NevoDecoratorService.getAppContext() != null)
+						wechat.getLocalDecorator("com.tencent.mm").onCancelAll();
+				}
+			});
+			Log.i("WeChat.Avatar", "source=cancel_hooks_ready");
+			return true;
+		} catch (Throwable failure) {
+			XposedBridge.rethrowFrameworkError(failure);
+			Log.w("WeChat.Avatar", "source=cancel_hooks_unavailable type=" + failure.getClass().getSimpleName());
+			return false;
 		}
 	}
 

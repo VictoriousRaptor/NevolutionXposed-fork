@@ -14,8 +14,6 @@
 
 	<string name="decorator_wechat_title">WeChat</string>
 	<string name="decorator_wechat_description">Better notification for WeChat: Messaging Style, Direct Reply and Clear to Mark Read.</string>
-	<string name="decorator_wechat_show_last_reply_title">Show your last reply</string>
-	<string name="decorator_wechat_show_last_reply_description">Keep your last notification reply when new messages arrive. Applies to subsequent notification updates.</string>
 	<string name="decorator_wechat_markdown_title">Markdown in notifications</string>
 	<string name="decorator_wechat_preserve_emoji_title">Keep original emoji in notifications</string>
 	<string name="decorator_wechat_preserve_emoji_description">Keep Unicode emoji instead of WeChat’s emoji labels or [表情] placeholder. Applies to new notifications on supported WeChat versions. Does not display sticker images.</string>

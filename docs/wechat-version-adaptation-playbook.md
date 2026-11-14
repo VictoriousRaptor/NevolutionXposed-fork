@@ -1,5 +1,142 @@
 # 微信版本适配手册
 
+## 2026-11-14 3.5.0 发布检查
+
+3.5.0 / versionCode 18 包含下述轮次重构、独立已读观察、头像等待和回复回显。发布检查发现回显路径调用 API 28 的 `Builder.getStyle()`，已改用现有消息 Bundle 编码追加，保留 minSdk 26、最新 25 条消息、既有消息 extras 及附件字段；未修改 hook 或版本门禁。344 项主机测试全部通过，包含新增 API 26 回归。Debug、androidTest、Release 构建及 release 证书一致性、16 KB 对齐检查通过，Release 非 debuggable、无测试入口。完整 Debug/Release Lint 在源码和构建输入 SHA-256 一致的隔离副本通过，均为 0 errors，分别有 37/12 warnings。本次发布未重新安装 APK 或执行设备测试，下文 109 项 framework 与用户回复回显确认属于升版及此 API 兼容修复之前的设备记录。
+
+## 2026-11-14 分支整理后的验证
+
+整理后的轮次重构分支重新执行 339 项主机测试，0 失败、错误或跳过；使用 `-PrequireReleaseSigning=true` 完成 Debug 与 androidTest 构建，两包签名证书均与既有 release 证书一致，16 KB 对齐检查通过。本次未安装 APK、运行设备测试或验证真实微信行为；下文设备结果属于整理前的集成版本记录，不能替代本次源码状态的设备验收。
+
+## 2026-11-13 通知发送即结束轮次与独立已读 observer
+
+本节为当前行为；下文关于应用内发送状态/正文、待回应分组、“显示你最后回复”开关及迟到成功补偿的章节保留为历史记录，不再描述当前实现。
+
+### 轮次入口与门禁
+
+- 通知栏原生与合成回复均在本地收到有效发送请求、捕获 `ReplyTarget` 后立即提交结束代次，再分别尝试原生已读 PendingIntent 和实际发送。三者独立：本地结束不以原生已读成功、PendingIntent 结果或网络发送结果为门槛；失败不恢复旧轮，结果回调只保留诊断。
+- 删除 `WeChatAppReplyEvents` 的所有发送状态 hook（包括旧版本画像）及正文访问器、来源预约和回复分组；不新增 `f9.zc`、`e9.r1` 或其他发送/入库/重发观察点。实际原生/合成通知回复派发、版本选择及必要接收器门禁保持各自原规则。
+- 新增唯一微信已读目标：`public boolean com.tencent.mm.storage.l4.b0(java.lang.String)`，非 static、非 abstract，必须声明于解析到的 storage 类；参数为指定会话的真实 talker。仅 **versionName=8.0.79 且 versionCode 为 3182 或 3183** 启用，无同名未知代码实验性回退，不借用回复/图片/撤回画像的可用性。
+- 初始化沿用微信主进程 `Application.onCreate(): void` AFTER 的 LocalDecorator 初始化链路。BEFORE 在模块存活且增强启用时捕获匹配的会话实例/代次闭包，AFTER 仅原调用无异常且结果为 true 时提交；原参数、返回值和异常不被修改。嵌套与线程交错调用各自关联捕获，AFTER 不重新查询更新目标。无归档、会话替换、模块停用时不推进。
+- `b0` 在未读已为零或记录不存在时也可能返回 true，因此不能把返回成功解释为新消息已读回执；只提交先前捕获的已知本地目标，结束幂等。多端仅在已读同步实际抵达本机并执行该入口后生效，不读取其他客户端状态，不用同步到达时间推算本人发送顺序。
+- 类/完整签名/安装失败或未知构建，仅关闭新已读 observer；通用通知增强、通知栏提交结束、用户移除及原生微信行为继续独立。未增加 SystemUI 点击 hook；现有 `REASON_CLICK/CANCEL/CANCEL_ALL` 广播及原生点击已读路径保留。
+
+### 离线依据与版本记录
+
+| 构建 | 来源与 SHA-256 | 原始源码证据 |
+| --- | --- | --- |
+| 8.0.79/3182 | 沿用 ADB base 记录 `4382254fbb256f37b7b430e6f3d984c512c603e46d39f9c323cd8a6fa75d8364`；本轮核对已有源码，未重新读取原 APK | `.debug-artifacts/wechat-8.0.79/sources/sources/com/tencent/mm/storage/l4.java` 的 `b0(String): boolean`；`z75/e1.java` 状态同步 op 1/2/5 调用同一入口 |
+| 8.0.79/3183 | APKMirror APKM 抽取 base，本轮重新计算 SHA-256 为 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0` | 使用 JADX `--rename-flags none --single-class` 输出 `.debug-artifacts/wave-refactor-plan-20261113-l4-3183.java`、`wave-refactor-plan-20261113-status-sync-3183.java`；原始类 `com.tencent.mm.storage.l4`、`z75.e1`，同步分支调用 `b0(String): boolean` |
+
+读取入口将 `rconversation` 对应会话 `unReadCount`、`unReadMuteCount` 等归零；状态同步源码对私聊和群聊调用该入口。此为离线调用链证据，不代表运行时 hook 安装或真实多端验收。
+
+### 群头像与历史边界
+
+- 头像反射仍仅精确 3182/3183：`public static android.graphics.Bitmap com.tencent.mm.modelavatar.g.a(java.lang.String)`。复用既有头像服务，不增加头像 hook；允许经过确认的 `@chatroom` ID，仍拒绝其他未知 `@` 标识。群会话图标只写通知大图标，不写成员 Person。
+- 首次最多等待 500 ms；超时正常发出，再做既有有限静默补取。复用取消观察、ID/tag、会话实例、peer ID 和代次校验；结束后取消旧任务，陈旧规范化通知在 apply/beforePost 均不得复活。
+- 每会话一个结束代次及 64 个按发送者隔离的可信 ID 首次代次记录，历史仍上限 25。结束立即退休旧归档，但当前系统卡片可保留；下一条仅显示新轮来信。原始结构化历史缺少可靠新代次时不跨结束边界导入。旧轮次 Bundle 不再写入，旧本人行不恢复。
+- 默认关闭的 show_last_reply 设置已移除，schema 12 清理本地和远端旧值。头像、撤回和图片生命周期门禁独立于已删除的发送观察能力。
+
+### 诊断与回归
+
+Debug logcat 的 `read_hook_ready/read_hook_unavailable` 记录独立能力状态，`read_event_captured/committed/ignored/error` 记录已读观察结果，`WeChat.Identity source=merge` 记录合并计数；不记录原始 talker、正文或消息 ID。回归包含提交前捕获、派发失败、零/回退时间、重复/嵌套已读、AFTER false/异常、C 在捕获后到达、旧 ID 重投、跨发送者/会话、图片/头像取消和群头像冷缓存。主机测试、framework 编译、hook 安装及真实微信/OEM 行为必须分别记录。
+
+### 本轮验证结果
+
+发送 UI 修复及审查跟进后的主机测试重新执行，352/352 通过，0 失败、错误或跳过；Debug/androidTest/Release 签名构建通过，三包均匹配既有 release 证书且通过 16 KB zipalign，Release 无测试入口。2026-11-13 在 Android 17/API 37、微信 8.0.79/3183 上执行当前全部 framework 用例，109/109 通过、0 跳过，安装微信描述符 41 项通过。设备微信 base SHA-256 为 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0`，与上述离线样本一致。Debug 重启微信后确认模块注入、`read_hook_ready version=8.0.79 code=3183 match=exact` 和 `lookup_ready`；这些仅证明 hook 安装和接口解析。结束时安装本次 Release，回拉哈希一致，非 debuggable、无同包 runner，独立测试包不存在；Release 重启微信后的头像查询及取消观察入口就绪，捕获窗口未见致命异常。只重启微信，未重启 SystemUI 或整机。真实会话收发、实际已读/多端同步、未读数和 OEM 发送按钮视觉表现仍未验收。本次原始日志、回滚 APK 和结果保存在本地忽略目录 `.debug-artifacts/round-refactor-device-20261113/`；此前独立审查及主机修复记录继续保存在 `.debug-artifacts/round-refactor-20261113/verification.md`。
+
+### 2026-11-13 后续：发送按钮转圈的本地 UI 确认
+
+通知栏发送仍在有效动作开始时结束轮次。原生 PendingIntent 派发尝试的 finally、合成派发的 finally 新增 `onReplyFinished`，成功、拒绝、取消或异常均结束本地 UI 的等待，不等待网络发送成功；原生 OnFinished 继续只记录结果。不恢复发送状态/入库 hook、来源预约或本人跨轮消息。
+
+SystemUI 的 [RemoteInputView.onNotificationUpdateOrReset](https://android.googlesource.com/platform/frameworks/base/+/master/packages/SystemUI/src/com/android/systemui/statusbar/policy/RemoteInputView.java) 在发送后收到通知更新时 reset，移除 spinning 并恢复发送按钮。精简时删除了原历史重发，也遗漏了这个 UI 确认。现仅对仍活动、会话实例/peer ID/通知代次均匹配的同一张卡片做一次静默更新，清除旧式与结构化 RemoteInput history、`android.remoteInputSpinner` 和 `android.hideSmartReplies`，不改消息历史边界。字段语义见 [Android 17 Notification extras](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android17-release/core/java/android/app/Notification.java)。
+
+更新使用当前活动卡片，保留其最新图标、附件、actions 和消息快照；不重新加入归档，不推进代次。apply/beforePost 仅在同步派发作用域内，对再次核验为活动的原目标允许这次已结束代次的 UI 更新。通知已移除、被新 C 替换、会话实例更换或 peer ID 不符时跳过，不能用旧结果覆盖 C 或恢复已取消卡片。连续回复可从仍活动的规范化卡片捕获目标；进程重启后仅从自身活动卡片恢复缺失的身份，不导入旧归档。
+
+活动查询之外还校验每个会话的本地发布状态：原始新消息成功规范化入缓存时记录 tag/代次，现有 `NotificationManager.cancel(String,int): void` 和 `cancelAll(): void` BEFORE 回调立即使对应发布资格失效。原始系统调用在 BEFORE 同步区退出后才执行，因此系统仍显示 A 时，已接受的 C 或已观察的取消也必须拒绝 A 的 UI 确认。单条取消精确匹配 tag，cancelAll 同时阻止从旧活动卡片首次恢复发布资格；只有后续原始新消息可以重新建立资格。正常提交退休归档不清除发布资格，取消展示资格本身也不推进未读结束边界。两处完成校验共用这一条件，完成 notify 保持 Local 锁至原始调用返回。
+
+本地 UI 确认沿用现有 NotificationManager.notify(String,int,Notification) 边界，不新增任何 Android/SystemUI/微信 hook 目标、完整签名或网络能力。适用于现有可用通知回复路径；微信原生已读 observer 与头像的精确 3182/3183 门禁不变。`reply_ui_failed` 通过 logcat 记录结构信息，缺活动卡片时不冒充发送成功。
+
+设备首轮 framework 为 103/107、0 跳过；4 个保留的原始媒体夹具绕过 Local.apply，漏掉入缓存前必备的通知代次，使消息顺序前置，条数没有丢失。已仅补齐夹具代次，保留全部内容/成员/顺序断言，生产排序不回退到时间。2026-11-13 重新连接后，四项夹具及 UI 确认、发布/取消交错回归已包含在当前 109/109 通过的设备 framework 测试中，安装微信描述符仍为 41 项通过。OEM 转圈实际复位尚未通过真实通知交互验收。
+
+全会话独立审查提出的发布竞态已加入主机状态回归（8项，先观察失败）和真实 Local 的确定性交错 framework 回归：C 通过本地入口但尚未向系统发布、cancel/cancelAll 已观察但旧卡片仍可见、错误 tag 取消、新 C 恢复资格，以及提交清归档后允许完成原卡片。另删除已无调用的旧回复重发接口链。复查及最终构建记录独立保存在本地验证报告中。
+
+### 2026-11-14 通知栏回复正文回显修复
+
+上一节的 UI 确认仅清除 RemoteInput 状态，遗漏了本人回复正文。现在原生 `PendingIntent.send` 正常返回、或合成派发返回 true 后，将本次提交文本传入 `onReplyFinished`，在匹配的活动卡片 MessagingStyle 末尾追加 sender 为 null 的本人行，再静默重建通知。发布检查时改用现有消息 Bundle 编码追加并保留最新 25 条，避免调用 API 28 才提供的 `Builder.getStyle()`，继续支持 minSdk 26；不改其他消息、用户身份或附件字段。原生返回值不证明微信或网络发送成功，回显只表示本地派发；取消、异常或合成拒绝时传入 null，仅复位 UI，不追加本人行。清除系统 RemoteInput history 后只显示一份模块回显，不从可能缺失或陈旧的系统 history 猜测正文。
+
+继续使用原卡片最新消息、头像、附件、动作与群聊属性，连续回复逐次追加。本人行只属于仍可见的这一张卡片；不写回退休归档、不改变结束代次，下一条新来信仍从新轮开始。会话实例、peer ID、tag、通知代次、本地发布/取消资格的双重校验保持不变，过期完成不覆盖新 C、不复活取消卡片。
+
+本次不新增或修改任何微信、Android、SystemUI hook 目标、完整签名、回调时机、进程、版本匹配规则或功能开关。适用于已有原生/合成通知回复路径；原生已读 observer、图片、撤回与应用内行为的独立门禁不变。现有 `native_dispatch_failed`、`synthetic_dispatch_failed`、`reply_ui_failed` 用于区分派发及 UI 更新异常，不记录回复正文。
+
+回归覆盖当前卡片的本人行、重复同文回复、无系统输入历史、明确派发失败、旧轮结束与新来信隔离。343 项主机测试通过；2026-11-14 在 Android 17/API 37、微信 8.0.79/3183 上重新执行 framework 为 109/109 通过、0 跳过，安装微信描述符 41 项通过。Debug 微信进程确认模块注入、精确已读 hook 与头像查询就绪；修复版 Release 已覆盖安装，回拉 APK 哈希一致、非 debuggable、无临时 runner，独立测试包确认不存在。Release 重启微信进程后头像查询就绪。上述为本轮自动化与运行时验证。2026-11-14 用户在安装的修复版 Release 上实际从微信通知栏回复并展开通知，确认“回复已显示”，本次报告的回复回显问题通过真实交互验收；这不扩展为所有 OEM 布局、群聊或网络送达场景的验证。原始材料仅保存在本地忽略目录 `.debug-artifacts/reply-echo-device-20261114/`。
+
+## 2026-11-10 稳定消息 ID 的重复发布去重
+
+通知历史合并在同会话、同发送者范围内，以已有正值服务端消息 ID 作为可信身份；相同 ID 不再要求 `Notification.when` 相等，跨来源、同来源及零时间副本均只保留首次表示。已有确认移除/撤回过滤仍优先执行；发送者规范化后、计算新来信证据和本次推进触发的回复/已读边界过滤之前即去除副本，随后才排序和裁剪容量，保留首次消息的时间、附件、extras 与通知代次；旧消息重发不确认应用内/通知栏回复已被回应，也不提交待生效已读边界，真正新 ID 仍照常推进。原始 `EXTRA_MESSAGES` 与当前正文同时存在时，具有 ID 的条目统一交由身份合并判断，不再提前仅凭正文/时间省略当前消息。不同 ID、不同发送者或只有一方有 ID 不作启发式合并；均无 ID 的条目继续沿用原有时间/签名/occurrence 规则，不引入语音短时间窗口。
+
+ID 仍由既有 `NotificationItem.a(android.content.Context): void` BEFORE 链路读取 `NotificationItem.f: android.app.Notification`、`h: java.lang.String` 与 `i: long` 后写入模块 extras，要求完整画像及运行时签名校验成功、会话非空且 ID 为正；历史只沿用已保存的消息元数据。本次不新增 hook、不改变回调时机、微信主进程范围、功能开关、版本映射或兼容回退。适用于现有撤回身份画像 8.0.72/3085、8.0.77/3141/3160、8.0.78/3180、8.0.79/3182/3183/3200，以及原有同版本名、完整签名唯一匹配的实验性候选；精确画像仍须版本名与代码同时匹配。缺少身份能力或正值 ID 时退回原合并规则；回复、图片、应用内发送和撤回处理各自保留独立门禁。
+
+Debug logcat 沿用 `WeChat.Identity source=merge` 的 `inputs/output/currentTime`；结构计数只能辅助观察去重结果，日志没有原始消息 ID/正文，不能据此唯一证明现场两个语音的 ID 相同。本次依用户指定先按同 ID 假设修复可复现的合并缺口；多端本人发送捕获和按时间间隔切轮不在本轮变更内。
+
+回归以本人回复前的稳定 ID 重复追加为基本场景；回复后重发不误切轮属于同一去重规则的补充边界，不将它作为现场根因。源码复核中，动作序列化仅替换原 notify 参数；头像、预览及回复刷新路径沿用规范化身份。现有结构日志未记录 notify 调用来源和来信匿名服务端 ID；通知规范化标记只说明通知是否已经处理，不能单独证明发布者或排除模块间接触发。
+
+拆分前集成版本的 353 项主机测试通过（0 失败、0 错误、0 跳过）；本分支的重新验证结果单独记录。Debug/androidTest 构建通过，两包证书均与现有 release 密钥一致且 zipalign 通过。8 项新增 framework 用例覆盖相同 ID 时间变化、同来源/零时间重复、不同 ID 的连续语音、发送者/会话隔离、有/无 ID 混合、容量裁剪与原始结构化历史、附件、Parcel/Builder 重建及待回应边界。这些 framework 用例仅编译，真实微信/SystemUI 验收尚未执行，不能以编译通过或旧设备记录替代本次验收。本轮未安装或操作设备。
+
+## 2026-11-07 真机回归后的排序修正
+
+Device wave 测试发现 `replyControllerAppReplyInterleaving` 在保留回复开启、应用内发送先于 C、C 无时间戳时，预期 C/B2/D 却得到 B2/C/D。根因为应用内波次的代次排序将 `activeReplies` 中所有已回应回复都视为前置上下文。
+
+现仅将 ID 为 `app:` 且属于当前 active 组的应用内正文放在波次前；通知栏回复与来信按各自已确认的通知代次排列。缺代次时继续沿用既有时间排序回退，不根据正文推断顺序。C/D 的零、相同或回退时间仍不改变该波次的代次顺序，容量裁剪在排序后执行；规范化及 Parcel 重建复用同一规则。显示开关、已读动作、回复去重和撤回行为保持原门禁。
+
+此项属于通知归档合并，不新增微信或 SystemUI hook，不改变完整签名、AFTER 时机、主进程范围或版本名/代码同时匹配语义；影响使用应用内波次边界的现有画像，应用内正文仍只限精确 8.0.79/3182、3183、3200。合成回复、图片、应用内状态/正文及撤回能力仍分别判断。本节保留旧排序实现的历史调查；当前轮次与诊断入口见顶部 2026-11-13 章节。
+
+真实消息发送、未读数与本次修正后的设备显示仍需分别验收。Android 17 缺失的两个旧 compact heads-up 模板继续走既有能力回退，该路径未被实际重写。
+
+本次验证：两项新增主机回归先在旧比较器下失败，再在修正后通过；完整主机测试 337 项、0 失败/错误/跳过。Debug、androidTest 和 Release 使用 `-PrequireReleaseSigning=true` 构建通过，三包均与现有 release 证书一致且通过 16 KB zipalign。随后设备执行框架用例 104/104 通过、0 跳过，包括扩充后的控制器交错、Parcel 和异常 D 时间组合；已安装微信描述符 46 项通过。结束后卸载精确测试包并确认 instrumentation 消失，以本次 Release 覆盖临时 Debug，回拉哈希一致、非 debuggable、自带测试 runner 已移除。框架合成用例通过不代表真实微信收发、未读数或 OEM 通知显示已验收。
+
+## 2026-11-06 应用内回复后的波次边界
+
+当前语义：A → 微信内回复 B → C → D，关闭保留回复显示 C/CD，开启且正文能力可用显示 BC/BCD；连续本人回复沿用整组保留。B 作为上下文，不进入 RemoteInput 待发送历史。捕获不到正文时仍尝试切轮，只显示 C/CD。设置不恢复已经裁掉或被明确移除的历史。
+
+修正发送事件筛选：状态 setter AFTER 中，参数与更新后状态均为 2、本人方向为 1、ID/创建时间/talker 有效即可交付。微信 SendMsgSuccessEvent 对文字/位置/名片的分类过滤不再用于本模块；原有三个 boolean 描述符仍作为画像完整签名指纹。此项影响当前 8.0.72/3085、8.0.77/3141/3160、8.0.78/3180、8.0.79/3182/3183/3200 及其原有同名唯一实验性候选。setter、作用进程与 AFTER 时机不变；精确匹配仍要求版本名和代码同时成立，未知同名代码只接受唯一完整签名候选，失败保持组件关闭。
+
+可选正文能力仅对精确 8.0.79/3182、3183、3200 启用：额外校验继承的 public、非 static、非 abstract 无参实例方法 `j(): String`、`getType(): int`、`I0(): long`。类型 1 保留文字，3/34/43/47 分别使用图片/语音/视频/动画表情占位，其他类型显示 `[消息]`，不读取媒体 XML。解析或读取异常只丢弃正文，不影响发送边界。其余版本和实验性候选暂不采集正文。原始描述符、来源和哈希见 8.0.79 findings。回复、图片、撤回门禁继续独立。
+
+已捕获 B 且有非零通知代次时，新一代原始来信可推进波次，即使通知时间相同、较旧或为零；C 的归属随消息 extras 保存，D 不再裁掉 C。规范化重建和补图不推进。无代次证据时沿用原时间门槛。晚到 B 仅在规范化归档中存在其前后的严格时间来信，且代次也严格分隔、无零/相同时间歧义时补设旧来信边界；不以当前 C/D 的代次替代 A。明确移除已清空归档或会话未关联时不重建旧历史；顺序证据不足时保留原历史。原生已读动作不变，本地展示边界不是微信已读或网络送达证明。
+
+同波次持续使用已确认的代次归属与排序，D 与 C 同时间或时间回退时也不会被丢弃或排到 C 前；容量裁剪在该顺序确定后执行。已确认的波次前后时间随 ROUND 保存，同一波次连续迟到 B1/B2 可在 A 已裁剪及 Parcel 往返后追加，不能清空先前同组回复。
+
+诊断：`app_reply_ready` 新增 content 布尔值；`app_reply_sent` 保留 matched，增加 candidates/missingArchive/mismatched/content，均不输出正文、talker 或消息 ID。来源去重仍沿用同会话有界预留，极端混合发送竞争未证明已解决。会话未知或无归档不缓存发送正文以等待以后恢复。
+
+回归：主机覆盖真实 hook 回调对文字的接收、失败/非本人拒绝、正文继承签名/失败/媒体不读 XML、连续应用内回复组、相同/旧/零时间代次、晚到边界证据及歧义拒绝；framework 覆盖两种开关、A/B/C/D、Parcel、撤回和 RemoteInput 历史隔离。最终主机测试 327 项通过、0 失败、0 跳过；Debug 和 androidTest APK 均构建通过并核对为现有 release 证书，zipalign 通过。framework 用例只编译，真实微信 hook、未读数、消息发送与 OEM 通知外观待设备验收。
+
+## 2026-11-06 私聊首条通知异步补头像
+
+### 同日更新：首次发布最多等待 500 ms
+
+用户确认采用先等头像再发出通知的方案。成功归一化的原始私聊缺头像、且该 tag/id 尚无活动卡片时，暂存已完成装饰/动作序列化的通知；每 50 ms 尝试读取头像，头像就绪或首个请求的 500 ms 截止时间到达时发送。同一 tag/id 的新来信替换待发送内容但沿用首次截止时间；已有活动卡片、已有头像、非适用通知立即发送。队列上限 64 个会话，满时立即发送并转静默补图。期限以 uptime 单调时钟计，系统主线程调度停顿可能延后实际执行，不阻塞线程等待。
+
+微信主进程新增 framework BEFORE hook：`android.app.NotificationManager.cancel(java.lang.String,int): void` 和 `cancelAll(): void`，要求精确实例方法及 void 返回。二者都安装成功才启用等待；失败记录 `cancel_hooks_unavailable type=异常类`，退回立即发布及静默补图。两项成功记录 `cancel_hooks_ready`。既有 `notify(String,int,Notification): void` BEFORE 在装饰及动作序列化之后调用 `beforePost`，入队成功则以 null 结束原 void 调用；装饰、动作序列化与入队共用 Local 锁，避免并发来信覆盖较新请求或重置 deadline。延迟发布在同一锁内调用 notify，通过进程内重入标志防止再次等待。
+
+未发布队列以 tag/id 为键，按 Conversation 实例、最新归档 token、生命周期校验；旧 token 的 late beforePost 不能替换新请求。取消单条按完整 tag/id 清理、取消全部逐项清理，已读删除对应归档后使任务失效，应用内回复取消相应会话待发项。撤回按发送时最新归档的 recalled IDs 重建：A+B 等待中撤回 B，发出 A；仅有 B 时撤回则停止发布。销毁清空队列及 Handler 回调。
+
+首次发布保留原提醒标志，不强制 ONLY_ALERT_ONCE；500 ms 超时缺头像则发出通知，再使用下文有上限的静默补图。日志 `initial_dispatched avatar=true/false` 仅表示交回 notify 链路，不能证明已显示或未被撤回过滤；Builder 失败记录 `initial_build_failed` 并保留无头像通知。版本名/代码门禁、头像调用签名和其他功能适配仍独立。
+
+新增主机假时钟用例覆盖 0/150/500 ms、替换不续期、取消/全部取消、过期身份、加载期间取消、多个联系人和重入。新增 framework 用例覆盖 Local 暂存/取消/错误 tag/缺取消 hook 的立即回退、旧请求不得覆盖新请求、A+B 撤回 B 与单消息撤回、首发提醒标志及原快照隔离；设备描述符检查增加头像接口。实际设备执行结果见外观说明本日更新。
+
+### 首轮实现与离线证据
+
+新增独立头像读取能力，仅 `versionName == 8.0.79` **且** `versionCode == 3182 或 3183` 启用，不沿用其他功能的同名探测结果。微信主进程既有初始化入口解析 `com.tencent.mm.modelavatar.g.a(java.lang.String): android.graphics.Bitmap`，要求 public static、精确参数和返回类型；不新增方法 hook 或修改现有 framework hook 时机。APK 来源、哈希和离线调用链见 `wechat-8.0.79-findings.md` 本日章节。
+
+总开关开启、成功归一化的原始非群聊/非已确认 bot/非撤回通知缺头像时，在主线程以 100、200、400、800、1600、3200 ms 间隔补取，最多六次。每次使用当前 Conversation 已核验/解析的 talker，绝不使用显示昵称或猜测账号目录；身份未解析时本次空读，含 `@` 的群聊等身份不调用接口。头像服务处理当前账号的缓存/异步加载，模块复制返回位图后交给通知持有。
+
+每次读取前后及发出更新前核对装饰器生命周期、总开关、原 Conversation 实例、通知 tag/id、非零 round token、peer ID、归一化私聊标记、未撤回且仍缺头像。更新以系统当前活动通知为源，保留当前消息、回复和图片状态，设置 ONLY_ALERT_ONCE；不使用最初消息快照，不主动恢复已移除通知。销毁时移除所有待执行任务。系统移除与 notify 之间仍无原子条件更新 API，最终核对只能缩小该平台竞态窗口。
+
+未知版本、签名不符、身份未解析、头像超时或读取异常均保留现有通知；调用异常停止本进程头像读取，不影响回复、图片、应用内回复和撤回的独立门禁。匿名日志 `WeChat.Avatar`：`lookup_ready`、`lookup_unavailable type=异常类`、Debug 的 `refresh_posted`、`refresh_failed type=异常类`；不输出 talker、头像路径或消息正文。ready 仅证明接口解析，posted 仅证明请求更新。
+
+回归范围：A1/A2/B1/B2 冷/热缓存、首次身份稍后解析、始终无头像的有限重试、读取前后移除/替换、同 ID 换联系人、后续回复与图片补图、总开关关闭、未知构建及错误签名。主机测试与构建结果记录于外观说明；未进行本次真机安装、hook 安装验证或真实微信视觉验收。
+
 ## 2026-11-03 会话媒体即时历史、点击移除已读与能力缓存
 
 - 文字和媒体占位统一走 `buildConversation()`，不再按 `[文件]` 等正文子串保留原生媒体卡片并提前返回。消息到达即重建历史，最多 25 条；成功规范化后清除原生内容视图。正文保留表情、动画表情、图片、视频、文件、链接、音乐、位置、红包、转账、小程序和语音的方括号标记，以及通知提供的文件名/链接标题。普通正文中的这些字面标记同样保留；其他内置表情、标题和 Markdown 沿用原规则。不新增媒体资源获取或消息身份猜测。

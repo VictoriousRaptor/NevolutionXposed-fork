@@ -198,23 +198,23 @@ final class NotificationAppearanceInstrumentation {
             check("Synthetic peer".contentEquals(groupStyle.getMessages().get(0).getPerson().getName()),
                     "group sender identity changed");
 
-            Notification replyOnly = privateText(context, "Incoming", 400, avatar);
-            replyOnly.extras.putLong(NotificationMessages.SERVER_ID, 3);
-            check(local.apply(manager, null, id + 2, replyOnly) == Decorating.Processed, "reply fixture was not rebuilt");
-            NotificationMessages.recordReply(replyOnly, "Synthetic reply", 410, "synthetic-title-reply");
-            NotificationMessages.markRecall(replyOnly, 3);
-            check(local.apply(manager, null, id + 2, replyOnly) == Decorating.Processed, "self-only private message was not rebuilt");
-            Notification replyRebuilt = Notification.Builder.recoverBuilder(context, replyOnly).build();
-            androidx.core.app.NotificationCompat.MessagingStyle replyStyle =
-                    androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(replyRebuilt);
-            check(replyStyle != null && !replyStyle.isGroupConversation()
-                    && "Alice".contentEquals(replyStyle.getConversationTitle()), "self-only conversation lost its contact title");
-            check(replyRebuilt.extras.getCharSequence(Notification.EXTRA_TITLE).toString().contains("Alice"),
-                    "self-only compact title lost the contact");
-            check(replyStyle.getMessages().size() == 1 && replyStyle.getMessages().get(0).getPerson() == null
-                    && "Synthetic reply".contentEquals(replyStyle.getMessages().get(0).getText()),
-                    "self-only message gained a fake peer or restored the recalled message");
-        } finally { local.onDestroy(); }
+            Notification readCard = privateText(context, "Incoming", 400, avatar);
+            check(local.apply(manager, null, id + 2, readCard) == Decorating.Processed, "read fixture was not rebuilt");
+            java.lang.reflect.Field field = WeChatDecorator.Local.class.getDeclaredField("mReplyController");
+            field.setAccessible(true);
+            MessagingBuilder.Controller controller = (MessagingBuilder.Controller) field.get(local);
+            controller.onReplySubmitted(id + 2, controller.replyTarget(id + 2));
+            Notification newRound = privateText(context, "New round", 0, avatar);
+            check(local.apply(manager, null, id + 2, newRound) == Decorating.Processed, "new round was not rebuilt");
+            checkPrivateTitle(context, newRound, "New round");
+            androidx.core.app.NotificationCompat.MessagingStyle newStyle =
+                    androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(
+                            Notification.Builder.recoverBuilder(context, newRound).build());
+            check(newStyle != null && newStyle.getMessages().size() == 1
+                    && "New round".contentEquals(newStyle.getMessages().get(0).getText()),
+                    "private title rebuild restored the ended round");
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        finally { local.onDestroy(); }
     }
 
     private static void checkPrivateTitle(Context context, Notification notification, String text) {

@@ -155,6 +155,12 @@ public abstract class NevoDecoratorService {
 		}
 	
 		@Keep public void onDestroy() {}
+
+		/** Called after decoration and action serialization; true suppresses this original notify call. */
+		public boolean beforePost(NotificationManager manager, String tag, int id, Notification notification,
+				boolean cancellationObserved) { return false; }
+		public void onCancel(String tag, int id) {}
+		public void onCancelAll() {}
 	
 		@Keep public Decorating apply(NotificationManager nm, String tag, int id, Notification n) {
 			return Decorating.Unprocessed;

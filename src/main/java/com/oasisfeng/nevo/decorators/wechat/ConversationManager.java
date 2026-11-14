@@ -52,6 +52,8 @@ class ConversationManager {
 		String knownKey() { return resolvedKey != null ? resolvedKey : key; }
 		CharSequence title;
 		IconCompat icon;
+		ConversationRound round = new ConversationRound();
+		final ReplyPresentation presentation = new ReplyPresentation();
 		PendingIntent contentIntent;
 		PendingIntent replyIntent;
 		String notificationPeerId;
@@ -103,6 +105,10 @@ class ConversationManager {
 
 	synchronized void resetConversation(final int id) { mConversations.remove(id); }
 
+	synchronized void cancelAllPresentations() {
+		for (Conversation conversation : mConversations.values()) conversation.presentation.cancelAll();
+	}
+
 	synchronized @Nullable String knownKeyForId(final int id) {
 		Conversation conversation = mConversations.get(id);
 		return conversation == null ? null : conversation.knownKey();
@@ -124,8 +130,17 @@ class ConversationManager {
 		return true;
 	}
 
+	/** History cleanup must not invalidate a newer notification's pending identity lookup. */
+	synchronized Conversation historySnapshot(Conversation cached, android.app.Notification notification) {
+		return snapshot(cached, notification, false);
+	}
+
 	/** Render-local fields cannot be changed by the asynchronous identity callback. */
 	synchronized Conversation snapshot(Conversation cached, android.app.Notification notification) {
+		return snapshot(cached, notification, true);
+	}
+
+	private Conversation snapshot(Conversation cached, android.app.Notification notification, boolean resolveTalker) {
 		ConversationTypePolicy.Decision decision = ConversationClassification.resolve(cached, notification);
 		if (cached.notificationPeerId == null) {
 			cached.notificationPeerId = notification.extras.getBoolean(NotificationMessages.STORED)
@@ -136,12 +151,15 @@ class ConversationManager {
 		view.key = cached.knownKey();
 		view.title = cached.title;
 		view.icon = cached.icon;
+		view.round = cached.round;
 		view.contentIntent = cached.contentIntent;
 		view.notificationPeerId = cached.notificationPeerId;
 		view.typeEvidence = decision;
 		view.setType(decision.type);
-		final long generation = ++cached.resolutionGeneration;
-		view.onTalkerResolved = key -> acceptTalker(cached, generation, key);
+		if (resolveTalker) {
+			final long generation = ++cached.resolutionGeneration;
+			view.onTalkerResolved = key -> acceptTalker(cached, generation, key);
+		}
 		return view;
 	}
 

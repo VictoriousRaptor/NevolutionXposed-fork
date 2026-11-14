@@ -22,6 +22,10 @@ final class WeChatDescriptorChecks {
         Context wechat = context.createPackageContext("com.tencent.mm",
                 Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY);
         WeChatDescriptorChecks v = new WeChatDescriptorChecks(wechat.getClassLoader());
+        if (WeChatAvatar.supported(info.versionName, info.versionCode)) {
+            WeChatAvatar.resolve(v.type("com.tencent.mm.modelavatar.g"), android.graphics.Bitmap.class);
+            v.checks++;
+        }
         Class<?> msg = v.type(p.message), state = v.type(p.state), simple = v.type(p.simple);
         v.method(state, p.stateGet, Object.class, String.class);
         v.field(simple, "d", int.class);
@@ -62,12 +66,14 @@ final class WeChatDescriptorChecks {
         v.staticMethod(v.type("com.tencent.mm.plugin.gif.MMWXGFJNI"), "wxam2PicBuf",
                 byte[].class, byte[].class, int.class, int.class);
 
-        WeChatAppReplyEvents.Profile app = WeChatAppReplyEvents.Profile.forVersion(info.versionName, info.versionCode);
-        if (app == null) throw new AssertionError("No exact app reply profile");
-        if (v.method(msg, app.setStatus, void.class, int.class).getDeclaringClass() != msg)
-            throw new AssertionError("Status override missing");
-        v.method(msg, app.status, int.class);
-        for (String excluded : app.excluded) v.method(msg, excluded, boolean.class);
+        if (WeChatReadEvents.supports(info.versionName, info.versionCode)) {
+            Method read = WeChatReadEvents.resolve(v::type);
+            if (read.getDeclaringClass() != v.type("com.tencent.mm.storage.l4")
+                    || !"b0".equals(read.getName()) || read.getReturnType() != boolean.class
+                    || !java.util.Arrays.equals(read.getParameterTypes(), new Class<?>[]{String.class}))
+                throw new AssertionError("Independent read descriptor did not resolve");
+            v.checks++;
+        }
 
         WeChatRecallEvents.Profile recall = WeChatRecallEvents.Profile.forVersion(info.versionName, info.versionCode);
         if (recall == null) throw new AssertionError("No exact recall profile");
@@ -89,7 +95,6 @@ final class WeChatDescriptorChecks {
         // Exercise production validation too: descriptor presence alone can miss stricter gates.
         WeChatImageEvents.resolve(p, v::type); v.checks++;
         WeChatImageDownloader.resolve(p, v::type); v.checks++;
-        WeChatAppReplyEvents.resolve(app, v.loader); v.checks++;
         WeChatRecallEvents.resolve(recall, v.loader); v.checks++;
         if (WeChatEmojiHooks.supports(info.versionName, info.versionCode)) {
             if (!WeChatEmojiHooks.selectCandidate(WeChatProfileSelector.BuildId.fromPackageInfo(info),
