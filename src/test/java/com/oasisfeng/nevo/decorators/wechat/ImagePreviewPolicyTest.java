@@ -123,4 +123,39 @@ public class ImagePreviewPolicyTest {
 		assertEquals(1, ImagePreviewPolicy.sampleSize(1280, 720, 1080, 608));
 		assertEquals(1, ImagePreviewPolicy.sampleSize(320, 240, 320, 240));
 	}
+
+	@Test public void decodeRetainsDetailBeyondTheDisplayBox() {
+		ImagePreviewPolicy.Size photo = ImagePreviewPolicy.decodeSize(4000, 3000);
+		assertEquals(1200, photo.width);
+		assertEquals(900, photo.height);
+		ImagePreviewPolicy.Size square = ImagePreviewPolicy.decodeSize(3000, 3000);
+		assertEquals(1200, square.width);
+		assertEquals(1200, square.height);
+		ImagePreviewPolicy.Size tall = ImagePreviewPolicy.decodeSize(1080, 6000);
+		assertEquals(848, tall.width);
+		assertEquals(4714, tall.height);
+		assertTrue((long) tall.width * tall.height <= ImagePreviewPolicy.MAX_PIXELS);
+	}
+
+	@Test public void decodeLimitsWidthRatherThanTheLongestEdgeAndNeverUpscales() {
+		ImagePreviewPolicy.Size tall = ImagePreviewPolicy.decodeSize(600, 5000);
+		assertEquals(600, tall.width);
+		assertEquals(5000, tall.height);
+		ImagePreviewPolicy.Size small = ImagePreviewPolicy.decodeSize(320, 240);
+		assertEquals(320, small.width);
+		assertEquals(240, small.height);
+		ImagePreviewPolicy.Size wide = ImagePreviewPolicy.decodeSize(6000, 600);
+		assertEquals(1200, wide.width);
+		assertEquals(120, wide.height);
+	}
+
+	@Test public void decodeBudgetHandlesExtremeDimensionsWithoutOverflow() {
+		for (int[] bounds : new int[][]{{Integer.MAX_VALUE, Integer.MAX_VALUE}, {1, Integer.MAX_VALUE},
+				{Integer.MAX_VALUE, 1}, {1200, 3334}, {1200, 3333}}) {
+			ImagePreviewPolicy.Size size = ImagePreviewPolicy.decodeSize(bounds[0], bounds[1]);
+			assertTrue(size.width >= 1 && size.width <= ImagePreviewPolicy.MAX_DECODE_WIDTH);
+			assertTrue(size.height >= 1);
+			assertTrue((long) size.width * size.height <= ImagePreviewPolicy.MAX_PIXELS);
+		}
+	}
 }

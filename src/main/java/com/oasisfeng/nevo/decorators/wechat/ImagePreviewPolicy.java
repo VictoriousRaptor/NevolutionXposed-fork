@@ -7,7 +7,9 @@ public final class ImagePreviewPolicy {
 	public static final int MIN_WAIT_MS = 100;
 	public static final int MAX_WAIT_MS = 30000;
 	private static final int IDENTITY_FALLBACK_MARGIN_MS = 500;
-	static final int MAX_PIXELS = 1024 * 1024;
+	static final int MAX_PIXELS = 4_000_000;
+	static final int MAX_DECODE_WIDTH = 1200;
+	static final int MAX_DISPLAY_PIXELS = 1024 * 1024;
 	static final int QUALITY_UNKNOWN = 0;
 	static final int QUALITY_THUMBNAIL = 1;
 	static final int QUALITY_HD = 2;
@@ -63,6 +65,11 @@ public final class ImagePreviewPolicy {
 		return quality(width, height, targetWidth, targetHeight) >= 1d;
 	}
 
+	/** Retains image detail independently of the notification's display height. */
+	static Size decodeSize(int width, int height) {
+		return fitInside(width, height, MAX_DECODE_WIDTH, Integer.MAX_VALUE, MAX_PIXELS);
+	}
+
 	/** Returns the largest non-upscaled size inside both the display box and pixel budget. */
 	static Size fitInside(int width, int height, int maxWidth, int maxHeight, int maxPixels) {
 		if (width <= 0 || height <= 0 || maxWidth <= 0 || maxHeight <= 0 || maxPixels <= 0)
@@ -70,7 +77,10 @@ public final class ImagePreviewPolicy {
 		double scale = Math.min(1d, Math.min((double) maxWidth / width, (double) maxHeight / height));
 		double scaledPixels = (double) width * height * scale * scale;
 		if (scaledPixels > maxPixels) scale *= Math.sqrt(maxPixels / scaledPixels);
-		return new Size(Math.max(1, (int) Math.floor(width * scale)), Math.max(1, (int) Math.floor(height * scale)));
+		// Rounding an extremely thin edge up to one pixel must still respect the pixel budget.
+		int outputWidth = Math.min(maxPixels, Math.max(1, (int) Math.floor(width * scale)));
+		int outputHeight = Math.min(maxPixels / outputWidth, Math.max(1, (int) Math.floor(height * scale)));
+		return new Size(outputWidth, outputHeight);
 	}
 
 	/** Keeps the sampled decode at or above the requested output size, avoiding a later upscale. */

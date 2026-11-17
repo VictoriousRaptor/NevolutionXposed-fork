@@ -80,7 +80,8 @@ final class ImagePreviewLoader {
 	private static final long PREVIEW_REATTACH_RETRY_MS = 150;
 	private static final int PREVIEW_REATTACH_RETRIES = 4;
 	private static final int PREVIEW_CACHE = 4;
-	private static final long PREVIEW_CACHE_BYTES = (long) ImagePreviewPolicy.MAX_PIXELS * 4 * PREVIEW_CACHE;
+	// Keep the total cache budget independent of the larger per-image decode budget.
+	private static final long PREVIEW_CACHE_BYTES = 16L * 1024 * 1024;
 	private static final long MAX_SOURCE_BYTES = 20L * 1024 * 1024;
 
 	static boolean isPreview(Notification n) { return n.extras.getBoolean(READY); }
@@ -368,7 +369,7 @@ final class ImagePreviewLoader {
 			boolean waitForQuality = ImagePreviewPolicy.shouldWaitForQuality(best.width, best.height, best.quality,
 					target.width, target.height, elapsed, request.largeDownloadComplete, request.deadline - request.started);
 			if (waitForQuality && retry(context, manager, tag, id, request, "waiting_for_quality")) return;
-			Bitmap bitmap = decode(best, target);
+			Bitmap bitmap = decode(best);
 			if (bitmap == null) {
 				if (BuildConfig.DEBUG) log("decode_failed", "request=" + request.token + " quality=" + best.quality
 						+ " fileChanged=" + (best.file.length() != best.size || best.file.lastModified() != best.modified));
@@ -379,8 +380,7 @@ final class ImagePreviewLoader {
 			claimed.put(event.key, request.token);
 			while (claimed.size() > 64) claimed.remove(claimed.keySet().iterator().next());
 			if (BuildConfig.DEBUG) {
-				ImagePreviewPolicy.Size planned = ImagePreviewPolicy.fitInside(best.width, best.height,
-						target.width, target.height, ImagePreviewPolicy.MAX_PIXELS);
+				ImagePreviewPolicy.Size planned = ImagePreviewPolicy.decodeSize(best.width, best.height);
 				int sample = ImagePreviewPolicy.sampleSize(best.width, best.height, planned.width, planned.height);
 				log("decoded", "request=" + request.token + " source=message_event scans=0 mime=" + best.mime
 						+ " quality=" + best.quality + " sourceSize=" + best.width + "x" + best.height + " sample=" + sample
@@ -550,12 +550,12 @@ final class ImagePreviewLoader {
 		return info;
 	}
 
-	private static Bitmap decode(Candidate candidate, ImagePreviewPolicy.Size target) {
-		ImagePreviewPolicy.Size output = ImagePreviewPolicy.fitInside(candidate.width, candidate.height,
-				target.width, target.height, ImagePreviewPolicy.MAX_PIXELS);
+	static Bitmap decode(Candidate candidate) {
+		ImagePreviewPolicy.Size output = ImagePreviewPolicy.decodeSize(candidate.width, candidate.height);
 		int sample = ImagePreviewPolicy.sampleSize(candidate.width, candidate.height, output.width, output.height);
 		BitmapFactory.Options options = new BitmapFactory.Options();
 		options.inSampleSize = sample;
+		options.inScaled = false;
 		options.inPreferredConfig = Bitmap.Config.ARGB_8888;
 		Bitmap decoded = candidate.decodedBytes == null
 				? BitmapFactory.decodeFile(candidate.file.getAbsolutePath(), options)
@@ -565,8 +565,7 @@ final class ImagePreviewLoader {
 			decoded.recycle();
 			return null;
 		}
-		ImagePreviewPolicy.Size exact = ImagePreviewPolicy.fitInside(decoded.getWidth(), decoded.getHeight(),
-				target.width, target.height, ImagePreviewPolicy.MAX_PIXELS);
+		ImagePreviewPolicy.Size exact = ImagePreviewPolicy.decodeSize(decoded.getWidth(), decoded.getHeight());
 		if (exact.width == decoded.getWidth() && exact.height == decoded.getHeight()) return decoded;
 		Bitmap scaled = Bitmap.createScaledBitmap(decoded, exact.width, exact.height, true);
 		if (scaled != decoded) decoded.recycle();
@@ -580,7 +579,7 @@ final class ImagePreviewLoader {
 		int height = systemDimension(resources, "notification_big_picture_max_height");
 		if (width <= 0) width = display.widthPixels;
 		if (height <= 0) height = Math.max(1, display.heightPixels / 2);
-		return ImagePreviewPolicy.fitInside(width, height, width, height, ImagePreviewPolicy.MAX_PIXELS);
+		return ImagePreviewPolicy.fitInside(width, height, width, height, ImagePreviewPolicy.MAX_DISPLAY_PIXELS);
 	}
 
 	@SuppressLint("DiscouragedApi") // Framework notification dimensions are private resources and vary by device density.
