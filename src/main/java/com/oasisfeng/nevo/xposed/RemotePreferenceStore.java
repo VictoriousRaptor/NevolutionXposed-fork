@@ -15,7 +15,8 @@ import com.oasisfeng.nevo.decorators.wechat.ImagePreviewPolicy;
 final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenceChangeListener {
 	static final String GROUP = "settings";
 	private static final String SCHEMA_VERSION_KEY = "settings_schema_version";
-	static final int CURRENT_SCHEMA_VERSION = 12;
+	static final int CURRENT_SCHEMA_VERSION = 13;
+	static final String KEY_VOICE_TRANSCRIBE = "WeChatDecorator.voice_auto_transcribe";
 	/** Key of the removed MIUI decorator; purged from local and remote storage on migration. */
 	private static final String OBSOLETE_MIUI_KEY = "MIUIDecorator.enabled";
 	private static final String OBSOLETE_MEDIA_KEY = "MediaDecorator.enabled";
@@ -30,7 +31,8 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 			KEY_IMAGE_PREVIEW,
 			KEY_IMAGE_PREVIEW_LARGE,
 			KEY_MARKDOWN,
-			KEY_PRESERVE_EMOJI
+			KEY_PRESERVE_EMOJI,
+			KEY_VOICE_TRANSCRIBE
 	};
 
 	private static final String TAG = "RemotePreferenceStore";
@@ -157,7 +159,7 @@ final class RemotePreferenceStore implements SharedPreferences.OnSharedPreferenc
 	}
 
 	static boolean defaultValue(String key) {
-		return "WeChatDecorator.enabled".equals(key);
+		return "WeChatDecorator.enabled".equals(key) || KEY_VOICE_TRANSCRIBE.equals(key);
 	}
 
 	private static boolean isBooleanKey(String key) {

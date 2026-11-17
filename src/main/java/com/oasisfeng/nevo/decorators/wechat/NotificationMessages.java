@@ -427,5 +427,19 @@ final class NotificationMessages {
         return false;
     }
 
+    /** A raw repost of a message seen while transcription was off is not a new voice message. */
+    static boolean isFirstAppearance(Notification notification, long serverId) {
+        long token = notification.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
+        if (serverId <= 0 || token <= 0) return false;
+        Parcelable[] messages = notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES);
+        if (messages != null) for (Parcelable message : messages) {
+            if (!(message instanceof Bundle)) continue;
+            Bundle metadata = ((Bundle) message).getBundle("extras");
+            if (metadata != null && metadata.getLong(SERVER_ID) == serverId
+                    && metadata.getLong(MESSAGE_NOTIFICATION_TOKEN) == token) return true;
+        }
+        return false;
+    }
+
     private static String string(CharSequence value) { return value == null ? null : value.toString(); }
 }

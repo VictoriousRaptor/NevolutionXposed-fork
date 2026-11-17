@@ -901,3 +901,29 @@ service base 与 service/implementation、download interface 与 implementation 
 主机回归覆盖 receiver hook 未成功而门禁已 ready、成功状态恢复，以及 abstract、无无参构造、private 无参构造和非 public 接收器的拒绝；覆盖构造与安装门禁不代表消息已送达。3183 仍无 APK 来源、SHA-256 或反编译证据，本轮未安装设备、未验证运行时 hook、真实回复或 OEM 展示。
 
 2026-10-28 试验性 IPC 版本的设备 instrumentation 为 4/70；大量旧用例因测试 APK 与目标 APK 跨类加载器的 package-private `IllegalAccessError` 失败。单独修正后的接收器故障注入用例为 1/1 通过，但只证明直接调用的异常保护。该 IPC 路径已移除，这些结果不能当作当前画像缓存或真实微信行为验收。当前缓存的设备证据见本手册开头；完整 framework instrumentation 仍需使用最终 APK 重新运行，测试包必须在 finally 卸载并核验。
+
+## 2026-11-15 图片身份校验与语音自动转文字
+
+基于当前分支独立吸收上游转写能力，不 merge。图片仍沿用现有版本画像、下载与原生解码接口；完成及复用判断增加本地消息 ID、服务端消息 ID 和会话一致性，不改变图片开关、等待时间或普通中图下载参数。
+
+语音仅在版本名 `8.0.79` **且**版本号 `3183` 或 `3200` 时分别启用。微信主进程初始化时读取语音开关快照；仅开启时解析完整画像、安装对应消息服务端 ID getter 的 AFTER hook（3183 `hn.c8.I0(): long`，3200 `im.c8.H0(): long`，由 `com.tencent.mm.storage.e9` 继承）。返回无异常且服务端 ID 为正、消息 type 34、isSend 0 才捕获身份；捕获不发起网络操作。仅新通知的已核验 NotificationItem 身份触发转写，不扫描历史。文件名访问可能再次调用 ID getter，采用线程局部重入保护。
+
+`WeChatDecorator.voice_auto_transcribe` 默认开启，schema 13；既有显式 false 保留。既有偏好同步保存设置，微信进程初始化时读取快照，修改后重启微信生效。移除语音专用实时监听、开关代次和队列开关状态；未重启时沿用旧快照，重启后关闭则不安装语音 hook，重新开启不补扫历史。保留微信缓存优先、音频有限等待、64 条／30 分钟记录、串行请求和 60 秒超时。成功结果以普通文本更新准确的原条目并静默刷新，不播放、不改已读、不结束轮次。任务与发布分别校验账号、会话实例、消息 ID、原轮次、撤回和当前卡片资格；原轮结束不能被转写结果复活。
+
+完整微信方法、字段、输入／输出类型及两版 APK 来源见 `wechat-8.0.79-findings.md` 同日章节；行为与图片覆盖审计见 `voice-transcription-and-image-audit.md`。所有画像方法校验精确参数／返回值、static 属性及非 abstract，字段校验完整类型与非 static；原生事件要求直接继承 IEvent。任一解析／安装失败只关闭语音，未知版本不探测；回复、图片、撤回及已读 observer 各自门禁不变，不能由语音画像推断其适配状态。
+
+诊断为 `WeChat.Voice` 的 adapter_ready／adapter_unavailable 及 Debug 队列阶段，不包含正文、账号、会话或附件路径。回归重点：生命周期清理后的旧回调不得影响新任务、A 转写期间收到 B、发送后结束旧轮、取消／撤回／换账号、相同内容不同 ID、超时后下一任务、API 26／28 消息及附件往返、Markdown 原样保留。新增 Debug 完整语音描述符检查尚未在实体设备执行；本轮离线核对、主机测试与构建不表示真实语音或图片验收。
+
+### 2026-11-15：尺寸足够的缩略图仍请求中图
+
+图片清晰预览开启、消息身份及版本画像验证通过时，候选质量低于 `QUALITY_HD`（缩略图或未知质量）即使覆盖显示区域，也必须进入 ImgInfo2 基础行查询及普通图片下载判断。外层查询入口与内层提交入口统一使用 `ImagePreviewPolicy.shouldRequestNormalImage`；查询后若已找到覆盖显示区域的 HD 文件，则直接使用，不再下载。没有候选或 HD 尺寸不足时沿用原请求行为。既有 `largeSubmitAttempted`、任务去重及身份校验继续限制提交。
+
+下载接口、compressType=0、原生解码、版本门禁均不变。保留图片开关、清晰预览开关、默认 1500 ms 的可配置等待及超时回退；本次不延长后台跟踪、不调整输出分辨率、不新增 SystemUI hook 或通知布局。下载未在等待窗口内完成时仍可能显示缩略图，因此此修复不承诺最终清晰度与上游一致。
+
+诊断沿用 `large_lookup`、`large_submitted`、`decoded` 的 quality/sourceSize/output 状态，不增加消息正文或附件路径日志。回归覆盖等于／大于显示区域的缩略图、未知质量、足尺寸 HD 不请求、欠尺寸候选及无有效尺寸请求。`displaySizedThumbnailStillRequestsNormalImage` 在旧尺寸策略下先失败，再应用质量判断修复；真实下载与通知视觉效果尚未做真机验收。
+
+### 2026-11-16 真机语音枚举修正
+
+3183 实机完整描述符检查发现 `NoSuchFieldException: AUDIO`：反编译恢复的枚举常量标签不能当成运行时字段名。3183/3200 分别改为验证 `nw5.e0.valueOf(String): nw5.e0`／`pv5.e0.valueOf(String): pv5.e0` 的完整 public static 签名，在音频就绪检查阶段传入 AUDIO 获取枚举值。离线描述符构造仍不初始化枚举；常量解析失败按原异常回退，不放宽版本或接口门禁。此项以实机失败作为回归证据，额外测试 typed valueOf 返回类型和常量解析。
+
+2026-11-16 实机验证补记：3183 完整语音及图片等描述符修正后共 42 项通过，framework runner 109/109 通过；语音 adapter_ready 和图片 large_ready exact 已在微信进程确认。真实新语音／图片未触发，仍不能声称转写、下载、特殊解码或通知视觉验收通过；3200 未实机测试。测试结束已安装同证书非 Debug Release 3.5.0/18，回读 APK 哈希一致，测试包及两个 runner 入口均不存在。详细证据与安装等待／旧版恢复失败处理见 voice-transcription-and-image-audit.md。

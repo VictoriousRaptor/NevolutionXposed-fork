@@ -49,7 +49,7 @@ final class NotificationMarkdown {
         Bundle extras = notification.extras;
         restoreText(extras);
         CharSequence raw = extras.getCharSequence(Notification.EXTRA_TEXT);
-        CharSequence rendered = enabled ? render(raw) : raw;
+        CharSequence rendered = enabled && !extras.getBoolean(VoiceNotificationText.PLAIN) ? render(raw) : raw;
         if (rendered != raw) {
             extras.putCharSequence(RAW_TEXT, raw);
             extras.putCharSequence(Notification.EXTRA_TEXT, rendered);
@@ -61,8 +61,8 @@ final class NotificationMarkdown {
             if (!(messages[i] instanceof Bundle)) continue;
             Bundle original = (Bundle) messages[i];
             raw = originalMessageText(original);
-            rendered = enabled ? render(raw) : raw;
             Bundle metadata = original.getBundle("extras");
+            rendered = enabled && (metadata == null || !metadata.getBoolean(VoiceNotificationText.PLAIN)) ? render(raw) : raw;
             if (rendered == raw && (metadata == null || !metadata.containsKey(RAW_TEXT))) continue;
             Bundle message = new Bundle(original);
             message.putCharSequence("text", rendered);

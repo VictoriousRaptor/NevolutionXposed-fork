@@ -5,6 +5,27 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class ImagePreviewPolicyTest {
+	@Test public void displaySizedThumbnailStillRequestsNormalImage() {
+		assertTrue(ImagePreviewPolicy.coversTarget(1920, 1080, 1080, 608));
+		assertTrue(ImagePreviewPolicy.shouldRequestNormalImage(1920, 1080,
+				ImagePreviewPolicy.QUALITY_THUMBNAIL, 1080, 608));
+		assertTrue(ImagePreviewPolicy.shouldRequestNormalImage(1080, 608,
+				ImagePreviewPolicy.QUALITY_THUMBNAIL, 1080, 608));
+		assertTrue(ImagePreviewPolicy.shouldRequestNormalImage(1920, 1080,
+				ImagePreviewPolicy.QUALITY_UNKNOWN, 1080, 608));
+	}
+
+	@Test public void normalImageRequestRetainsExistingHdAndMissingCandidatePolicy() {
+		assertFalse(ImagePreviewPolicy.shouldRequestNormalImage(1920, 1080,
+				ImagePreviewPolicy.QUALITY_HD, 1080, 608));
+		assertTrue(ImagePreviewPolicy.shouldRequestNormalImage(320, 180,
+				ImagePreviewPolicy.QUALITY_HD, 1080, 608));
+		assertTrue(ImagePreviewPolicy.shouldRequestNormalImage(320, 180,
+				ImagePreviewPolicy.QUALITY_THUMBNAIL, 1080, 608));
+		assertTrue(ImagePreviewPolicy.shouldRequestNormalImage(0, 0,
+				ImagePreviewPolicy.QUALITY_UNKNOWN, 1080, 608));
+	}
+
 	@Test public void customWaitParsesMillisecondsAndKeepsTheDefault() {
 		assertEquals(1500, ImagePreviewPolicy.waitMillis(null));
 		assertEquals(5000, ImagePreviewPolicy.waitMillis("5000"));

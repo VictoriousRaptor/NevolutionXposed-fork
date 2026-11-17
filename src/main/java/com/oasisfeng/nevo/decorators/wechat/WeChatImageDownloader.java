@@ -187,6 +187,7 @@ final class WeChatImageDownloader {
 		boolean created = false;
 		synchronized (tasks) {
 			task = tasks.get(base.msgSvrId);
+			if (task != null && !task.base.sameMessage(base)) return false;
 			if (task == null) {
 				if (tasks.size() >= MAX_TASKS) return false;
 				task = new Task(base);
@@ -425,8 +426,14 @@ final class WeChatImageDownloader {
 		}
 
 		boolean isComplete(BaseRow original) {
-			return original != null && id == original.id && totalLen > 0 && offset >= totalLen
+			return sameMessage(original) && totalLen > 0 && offset >= totalLen
 					&& (!bigImgPath.isEmpty() || !hevcPath.isEmpty() || !midImgPath.isEmpty());
+		}
+
+		boolean sameMessage(BaseRow other) {
+			// A pre-existing complete image can lack a local ID; request() still refuses to download it.
+			return other != null && id > 0 && id == other.id && msgLocalId == other.msgLocalId
+					&& msgSvrId > 0 && msgSvrId == other.msgSvrId && !talker.isEmpty() && talker.equals(other.talker);
 		}
 
 		List<ImageEventIndex.Path> paths() {

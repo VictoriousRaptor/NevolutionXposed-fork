@@ -316,7 +316,8 @@ final class ImagePreviewLoader {
 			Scan scan = scanCandidates(request, event.paths, target, resolvedPaths, null);
 			boolean largeCandidateConsidered = false;
 			if (largePreviewEnabled && event.msgSvrId > 0
-					&& (scan.best == null || !ImagePreviewPolicy.coversTarget(scan.best.width, scan.best.height, target.width, target.height))) {
+					&& (scan.best == null || ImagePreviewPolicy.shouldRequestNormalImage(scan.best.width,
+							scan.best.height, scan.best.quality, target.width, target.height))) {
 				long now = SystemClock.elapsedRealtime();
 				if (request.largeRow == null && now >= request.largeNextLookupAt) {
 					request.largeNextLookupAt = now + 200;
@@ -336,7 +337,8 @@ final class ImagePreviewLoader {
 					scan = scanCandidates(request, largePaths, target, resolvedPaths, scan.best);
 				}
 				if (request.largeRow != null && !request.largeSubmitAttempted
-						&& (scan.best == null || !ImagePreviewPolicy.coversTarget(scan.best.width, scan.best.height, target.width, target.height))) {
+						&& (scan.best == null || ImagePreviewPolicy.shouldRequestNormalImage(scan.best.width,
+								scan.best.height, scan.best.quality, target.width, target.height))) {
 					WeChatImageDownloader.BaseRow row = request.largeRow;
 					request.largeSubmitAttempted = true;
 					largePreview.request(row, request.token,

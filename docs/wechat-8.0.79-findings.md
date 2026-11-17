@@ -366,3 +366,47 @@ provider 持久化，并在每个新进程重验；缓存不可用时仍执行�
 主机回归覆盖 receiver hook 未成功而门禁已 ready、成功状态恢复，以及 abstract、无无参构造、private 无参构造和非 public 接收器的拒绝；覆盖构造与安装门禁不代表消息已送达。3183 仍无 APK 来源、SHA-256 或反编译证据，本轮未安装设备、未验证运行时 hook、真实回复或 OEM 展示。
 
 2026-10-28 试验性 IPC 版本的设备 instrumentation 为 4/70，大量旧用例因测试 APK 与目标 APK 跨类加载器的 package-private `IllegalAccessError` 失败；单独修正后的接收器故障注入为 1/1 通过。该 IPC 路径已移除，这些数字不代表当前缓存实现的验收。3200 当前实现的首次持久化及下次进程复核由上述运行时日志单独确认；3183 仍待取得 APK 和对应真机证据。
+
+## 2026-11-15 语音自动转文字独立画像
+
+本轮重新计算两个既有 APK 的 SHA-256，与本文 APKMirror 来源记录一致：3183 base 为 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0`，3200 APK 为 `f2a725bc04302ad218a563533ae79356e66b64aa711b275bc919a8d432f7e15d`。样本位置仍为 `.debug-artifacts/wechat-same-name-profile-probing/apkmirror-8079/`。未更换样本，也未以仅版本名相同推断兼容。
+
+下表全部为原始名称。常规证据在上述目录的 `3183-sources/sources/`、`3200-sources/sources/`；3183 e9 补充源码为 `3183-e9.java`。3183 `ed0.b` 用 JADX `--rename-flags none --single-class` 重读，保存于 `.debug-artifacts/voice-transcription-20261115/3183-media.java`，其 `bk` 完整方法体可读；JADX 对该大类另报一项反编译错误，不将整类宣称为无错误反编译。
+
+| 用途 | 3183 | 3200 |
+| --- | --- | --- |
+| 当前账号 | `public static String l51.z1.u()` | `public static String l41.y1.u()` |
+| 消息对象 | `com.tencent.mm.storage.e9 extends ny0.q3 extends hn.c8` | `com.tencent.mm.storage.e9 extends nx0.q3 extends im.c8` |
+| ID 观察 AFTER | `public long hn.c8.I0()` | `public long im.c8.H0()` |
+| 只接收对方消息 | `public int hn.c8.C0()` 为 0 | `public int im.c8.z0()` 为 0 |
+| 精确消息校验 | `getMsgId(): long`、`N0(): String`、`getType(): int`，继承字段 `private long field_msgSvrId` | 同名／同类型方法与字段 |
+| 微信原生文件标识 | `public String com.tencent.mm.storage.e9.A0()` | `public String com.tencent.mm.storage.e9.u0()` |
+| 转写缓存存储 | `public static com.tencent.mm.storage.kb f81.v0.zj()` | `public static com.tencent.mm.storage.kb f71.v0.zj()` |
+| 转写缓存查询 | `public com.tencent.mm.storage.jb kb.m1(String)` | `public com.tencent.mm.storage.jb kb.P1(String)` |
+| 缓存字段 | `jb extends hn.tb`，`public long field_msgId`、`public String field_content` | `jb extends im.tb`，相同原始字段／类型 |
+| 媒体描述符 | `public static final nw5.x nw5.x.a(e9,nw5.e0)`，枚举接口 `public static nw5.e0 nw5.e0.valueOf(String)`，参数 AUDIO | `public static final pv5.x pv5.x.a(e9,pv5.e0)`，枚举接口 `public static pv5.e0 pv5.e0.valueOf(String)`，参数 AUDIO |
+| 服务注册表 | `public static kj5.m kj5.n0.c(Class)`，契约 `kp3.u0`，实现 `ed0.b` | `public static ni5.m ni5.n0.c(Class)`，契约 `no3.u0`，实现 `ec0.b` |
+| 语音文件路径 | `public String ed0.b.bk(nw5.x,String,boolean)`，boolean=false | `public String ec0.b.bk(pv5.x,String,boolean)`，boolean=false |
+| VFS 就绪 | `public static boolean com.tencent.mm.vfs.z6.j(String)`、`public static long z6.k(String)` | 同名同签名 |
+| 转写事件 | `public ExtTranslateVoiceEvent()`，直接继承 `com.tencent.mm.sdk.event.IEvent`；`public final boolean IEvent.e()` | 同名同签名 |
+| 输入／输出对象 | `ExtTranslateVoiceEvent.g: en.z8`、`h: en.a9` | `ExtTranslateVoiceEvent.g: fm.z8`、`h: fm.a9` |
+
+事件输入字段在两版均为：`a: String` 文件标识、`b: String` 本地消息 ID 十进制、`c: int` 操作 0、`d: int` 场景 1、`e: Runnable` 回调、`f: int` 私聊 1／群聊 2、`g: String` 会话。输出 `a: String` 为文本、`b: boolean` 为完成标记，只有完成标记为 true 才接受回调文本。以上字段均为 public 实例字段；事件 g/h 是 public final 实例字段，仅读取对象引用，不替换字段。
+
+3200 `co4/g.java` 展示 ExtTranslateVoiceEvent 的缓存保存、完成字段赋值与 Runnable 回调调用；原生忙／失败／空结果仍保留占位。缓存读取额外核对 `field_msgId`，不只相信文件名。文件名必须通过上述原生 getter 取得：3183 `field_imgPath` 为 private，且 e9 getter 包含语音文件标识回退；不能照搬 3200 的 `u0()` 或反编译别名。
+
+启用条件是版本名 **且**版本号精确匹配、默认开启的语音开关、所有方法／字段签名校验通过。getter AFTER 只捕获 type 34、isSend 0、正本地／服务端 ID 及非空账号／会话／文件标识。任务仅由新的已核验通知触发；当前账号变化、关闭再开启、消息身份变化、撤回、轮次结束和取消后均不允许晚到结果发布。
+
+本轮图片没有新增微信 hook 或替换解码器；只补全下载任务复用及完成身份比较，沿用本文既有图片映射。语音、回复、图片、撤回及已读 observer 仍为独立门禁，3183/3200 语音画像不扩展任何其他功能支持范围。
+
+证据层级：本节为 APK 哈希与离线源码核对；完整语音描述符已接入 Debug 设备检查入口，但尚未执行。本轮未安装、未观察运行时 hook，未做真实语音转写或图片收发验收。主机测试、签名构建与后续结果见 `voice-transcription-and-image-audit.md`。
+
+音频就绪额外校验：3183 `public static f81.m1 f81.v0.Bj()` → `public f81.c1 f81.m1.m1(String)`；3200 `public static f71.m1 f71.v0.Bj()` → `public f71.c1 f71.m1.P1(String)`。两版 c1 的 public 实例字段 `b: String`=FileName、`e: long`=MsgId（服务端）、`m: long`=MsgLocalId、`x: String`=MsgTalker、`g: int`=FileNowSize、`h: int`=TotalLen，由同目录 m1 的 SELECT 列顺序及 c1.a(Cursor)／b() 映射核实。身份必须一致，TotalLen>0 且 FileNowSize>=TotalLen，再核对 VFS 文件至少 8 字节，避免只凭已有文件头请求尚未下载完整的音频。
+
+2026-11-15 开关简化：3183/3200 的语音画像、签名及 AFTER 时机不变；安装新增进程初始化时的语音开关快照门禁。修改设置后重启微信生效，与图片设置一致；删除即时偏好监听和开关专用世代，保留适配器实例／账号／消息身份和通知轮次检查。
+
+### 2026-11-16 真机语音枚举修正
+
+3183 实机完整描述符检查发现 `NoSuchFieldException: AUDIO`：反编译恢复的枚举常量标签不能当成运行时字段名。3183/3200 分别改为验证 `nw5.e0.valueOf(String): nw5.e0`／`pv5.e0.valueOf(String): pv5.e0` 的完整 public static 签名，在音频就绪检查阶段传入 AUDIO 获取枚举值。离线描述符构造仍不初始化枚举；常量解析失败按原异常回退，不放宽版本或接口门禁。此项以实机失败作为回归证据，额外测试 typed valueOf 返回类型和常量解析。
+
+2026-11-16 实机验证补记：3183 完整语音及图片等描述符修正后共 42 项通过，framework runner 109/109 通过；语音 adapter_ready 和图片 large_ready exact 已在微信进程确认。真实新语音／图片未触发，仍不能声称转写、下载、特殊解码或通知视觉验收通过；3200 未实机测试。测试结束已安装同证书非 Debug Release 3.5.0/18，回读 APK 哈希一致，测试包及两个 runner 入口均不存在。详细证据与安装等待／旧版恢复失败处理见 voice-transcription-and-image-audit.md。

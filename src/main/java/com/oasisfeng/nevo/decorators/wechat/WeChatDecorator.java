@@ -104,6 +104,12 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private final WeChatReadEvents readEvents = new WeChatReadEvents();
 		private final WeChatRecallEvents recallEvents = new WeChatRecallEvents();
 		private final WeChatAvatar avatars = new WeChatAvatar();
+		static final String PREF_VOICE = "WeChatDecorator.voice_auto_transcribe";
+		private final WeChatVoiceAdapter voiceAdapter = new WeChatVoiceAdapter();
+		private final VoiceTranscriptionQueue voiceQueue = new VoiceTranscriptionQueue(SystemClock::elapsedRealtime, this::scheduleAvatar,
+				stage -> { if (BuildConfig.DEBUG) Log.d("WeChat.Voice", "stage=" + stage); });
+		private boolean mVoiceAutoTranscribeEnabled;
+		private Notification postingVoice;
 		private android.os.Handler avatarHandler;
 		private static final String AWAIT_AVATAR = "nevo.wechat.awaitAvatar";
 		private final InitialAvatarGate<android.util.Pair<String, Integer>, Notification, android.graphics.Bitmap> initialAvatars =
@@ -128,6 +134,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		 * @param loadPackageParam
 		 */
 		@Override public void hook(PackageHookContext loadPackageParam) {
+			if (mVoiceAutoTranscribeEnabled) voiceAdapter.install(getAppContext(), loadPackageParam.classLoader);
 			avatars.initialize(getAppContext(), loadPackageParam.classLoader);
 			readEvents.install(getAppContext(), loadPackageParam.classLoader, this::captureRead);
 			recallEvents.install(getAppContext(), loadPackageParam.classLoader, this::onRecalled,
@@ -168,6 +175,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 		};
 
 		@Override public void onCreate(SharedPreferences pref) {
+			// Match image settings: read once when the WeChat process initializes.
+			mVoiceAutoTranscribeEnabled = pref.getBoolean(PREF_VOICE, true);
 			imageLog("process_init", "revision=image-events-9");
 			super.onCreate(pref);
 			mImagePreviewEnabled = pref.getBoolean(PREF_IMAGE_PREVIEW, false);
@@ -363,6 +372,58 @@ public class WeChatDecorator extends NevoDecoratorService {
 			});
 		}
 
+		private void requestVoice(NotificationManager manager, String tag, int id, Notification notification, Conversation expected) {
+			if (!mVoiceAutoTranscribeEnabled) return;
+			long serverId = notification.extras.getLong(NotificationMessages.SERVER_ID);
+			if (!NotificationMessages.isFirstAppearance(notification, serverId)) return;
+			WeChatVoiceAdapter.Capture capture = voiceAdapter.find(expected.knownKey(), serverId);
+			if (capture == null) return;
+			long token = notification.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN);
+			scheduleAvatar(() -> {
+				voiceQueue.submit(capture.id, capture,
+						() -> voiceTarget(tag, id, expected, token, capture),
+						text -> finishVoice(manager, tag, id, expected, token, capture, text));
+			}, 0);
+		}
+
+		private boolean voiceTarget(String tag, int id, Conversation expected, long token, WeChatVoiceAdapter.Capture capture) {
+			if (!mActive || !mVoiceAutoTranscribeEnabled || !capture.valid() || mConversationManager.getConversation(id) != expected
+					|| !expected.round.retains(token)) return false;
+			Notification latest = getArchivedNotification(id);
+			if (latest == null || !expected.presentation.allows(tag,
+					latest.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN))
+					|| !java.util.Objects.equals(expected.notificationPeerId, latest.extras.getString(NotificationMessages.PEER_ID))
+					|| !NotificationMessages.containsServerId(latest, capture.id.serverId())) return false;
+			long[] recalled = latest.extras.getLongArray(NotificationMessages.RECALLED_IDS);
+			if (recalled != null) for (long value : recalled) if (value == capture.id.serverId()) return false;
+			return true;
+		}
+
+		private void finishVoice(NotificationManager manager, String tag, int id, Conversation expected, long token,
+				WeChatVoiceAdapter.Capture capture, String text) {
+			if (!voiceTarget(tag, id, expected, token, capture)) return;
+			// The archive is updated as well so a later message or deferred first-avatar post retains the result.
+			for (Notification archived : getArchivedNotifications(id)) {
+				if (expected.round.retains(archived.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN))
+						&& java.util.Objects.equals(expected.notificationPeerId, archived.extras.getString(NotificationMessages.PEER_ID)))
+					VoiceNotificationText.apply(archived, capture.id.serverId(), text);
+			}
+			for (android.service.notification.StatusBarNotification active : manager.getActiveNotifications()) {
+				if (active.getId() != id || !java.util.Objects.equals(tag, active.getTag())) continue;
+				Notification current = active.getNotification();
+				if (!expected.presentation.allows(tag, current.extras.getLong(WeChatNotificationRemoval.NOTIFICATION_ROUND_TOKEN))
+						|| !java.util.Objects.equals(expected.notificationPeerId, current.extras.getString(NotificationMessages.PEER_ID))) return;
+				Notification copy = current.clone();
+				if (!VoiceNotificationText.apply(copy, capture.id.serverId(), text)) return;
+				Notification result = Notification.Builder.recoverBuilder(getAppContext(), copy).setOnlyAlertOnce(true).build();
+				markActionsSerialized(result);
+				postingVoice = result;
+				try { manager.notify(tag, id, result); }
+				finally { postingVoice = null; }
+				return;
+			}
+		}
+
 		private void scheduleAvatar(Runnable task, long delay) {
 			if (avatarHandler == null) avatarHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 			avatarHandler.postDelayed(() -> {
@@ -377,6 +438,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 
 		@Override public synchronized boolean beforePost(NotificationManager manager, String tag, int id, Notification n,
 				boolean cancellationObserved) {
+			if (postingVoice == n) return false;
 			if (postingReplyCompletion != null) return !isReplyCompletion(manager, tag, id, n);
 			Conversation current = mConversationManager.getConversation(id);
 			if (rejectsSnapshot(current, n)) return true;
@@ -508,6 +570,7 @@ public class WeChatDecorator extends NevoDecoratorService {
 		}
 
 		@Override public synchronized Decorating apply(NotificationManager nm, String tag, int id, Notification n) {
+			if (postingVoice == n) return Decorating.Processed;
 			if (postingReplyCompletion != null)
 				return isReplyCompletion(nm, tag, id, n) ? Decorating.Processed : Decorating.StopPost;
 			if (n.extras.getBoolean(EXTRA_SUPPRESSED_RECALL)) return Decorating.StopPost;
@@ -700,7 +763,10 @@ public class WeChatDecorator extends NevoDecoratorService {
 			final boolean firstAvatarRequest = !extras.getBoolean(NotificationMessages.STORED)
 					&& conversation.getType() != Conversation.TYPE_BOT_MESSAGE
 					&& !is_recall && conversation.icon == null && n.getLargeIcon() == null;
+			boolean newVoiceCandidate = !extras.getBoolean(NotificationMessages.STORED)
+					&& extras.getBoolean(WeChatRecallEvents.VERIFIED_KEY) && !is_recall;
 			NotificationMessages.flatIntoExtras(messaging, extras);
+			if (newVoiceCandidate) requestVoice(nm, tag, id, n, cached);
 			WeChatNotificationAppearance.mark(n);
 			NotificationMarkdown.apply(n, mMarkdownEnabled);
 			extras.putString(Notification.EXTRA_TEMPLATE, TEMPLATE_MESSAGING);
@@ -805,6 +871,8 @@ public class WeChatDecorator extends NevoDecoratorService {
 		}
 
 		@Override public synchronized void onDestroy() {
+			voiceQueue.clear();
+			voiceAdapter.close();
 			initialAvatars.clear();
 			if (avatarHandler != null) avatarHandler.removeCallbacksAndMessages(null);
 			if (mMessagingBuilder != null) {

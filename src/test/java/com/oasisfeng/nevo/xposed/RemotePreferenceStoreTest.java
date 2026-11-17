@@ -11,6 +11,15 @@ import java.util.Map;
 import org.junit.Test;
 
 public class RemotePreferenceStoreTest {
+	@Test public void voiceDefaultsOnButPreservesExplicitLocalAndRemoteChoices() {
+		String key = RemotePreferenceStore.KEY_VOICE_TRANSCRIBE;
+		assertEquals(13, RemotePreferenceStore.CURRENT_SCHEMA_VERSION);
+		Map<String, Boolean> upgraded = RemotePreferenceStore.migratedLocalValues(Collections.emptyMap(), 12);
+		assertEquals(Boolean.TRUE, RemotePreferenceStore.merge(upgraded, Collections.emptyMap()).get(key));
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(upgraded, Collections.singletonMap(key, false)).get(key));
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.merge(Collections.singletonMap(key, false), Collections.singletonMap(key, true)).get(key));
+		assertEquals(Boolean.FALSE, RemotePreferenceStore.migratedLocalValues(Collections.singletonMap(key, false), 12).get(key));
+	}
 	@Test public void localInitializationPreservesRemoteMarkdownChoice() {
 		String key = RemotePreferenceStore.KEY_MARKDOWN;
 		Map<String, Boolean> initialized = RemotePreferenceStore.migratedLocalValues(Collections.emptyMap(), 9);

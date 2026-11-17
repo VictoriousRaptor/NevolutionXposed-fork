@@ -34,4 +34,6 @@
 	<string name="channel_group_message">New Group Message</string>
 	<string name="channel_misc">Other Notification</string>
 
+    <string name="decorator_wechat_voice_transcribe_title">Automatically transcribe voice messages</string>
+    <string name="decorator_wechat_voice_transcribe_description">Automatically transcribe new voice messages using WeChat’s native service. May use the network. Restart the WeChat process after changing this setting.</string>
 </resources>

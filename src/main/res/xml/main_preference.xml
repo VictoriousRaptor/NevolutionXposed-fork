@@ -10,6 +10,12 @@
 			android:summary="@string/decorator_wechat_description"
 			android:title="@string/decorator_wechat_title"/>
 		<CheckBoxPreference
+			android:key="WeChatDecorator.voice_auto_transcribe"
+			android:defaultValue="true"
+			android:dependency="WeChatDecorator.enabled"
+			android:summary="@string/decorator_wechat_voice_transcribe_description"
+			android:title="@string/decorator_wechat_voice_transcribe_title"/>
+		<CheckBoxPreference
 			android:key="WeChatDecorator.preserve_emoji"
 			android:defaultValue="false"
 			android:dependency="WeChatDecorator.enabled"

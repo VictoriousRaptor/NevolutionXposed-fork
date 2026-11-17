@@ -20,6 +20,14 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertTrue;
 
 public class WeChatImageDownloaderTest {
+	@Test public void completedRowMustRetainBothMessageIdsAndConversation() {
+		WeChatImageDownloader.BaseRow original = new WeChatImageDownloader.BaseRow(10, 42, 1000,
+				"synthetic-chat", "/preview", "", "", 0, 10, 0);
+		assertFalse(new WeChatImageDownloader.BaseRow(10, 43, 1000, "synthetic-chat", "/preview", "", "", 10, 10, 0).isComplete(original));
+		assertFalse(new WeChatImageDownloader.BaseRow(10, 42, 1001, "synthetic-chat", "/preview", "", "", 10, 10, 0).isComplete(original));
+		assertFalse(new WeChatImageDownloader.BaseRow(10, 42, 1000, "other-synthetic-chat", "/preview", "", "", 10, 10, 0).isComplete(original));
+		assertTrue(new WeChatImageDownloader.BaseRow(10, 42, 1000, "synthetic-chat", "/preview", "", "", 10, 10, 0).isComplete(original));
+	}
 	@Test public void sourceReadReturnsExactlyTheExpectedBytes() throws Exception {
 		assertArrayEquals(new byte[]{1, 2, 3}, readSource(new byte[]{1, 2, 3}, 3));
 	}

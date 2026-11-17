@@ -31,6 +31,12 @@ public final class ImagePreviewPolicy {
 		return Math.min(started + waitMillis, eventObserved + ImageEventIndex.TTL_MS - IDENTITY_FALLBACK_MARGIN_MS);
 	}
 
+	static boolean shouldRequestNormalImage(int width, int height, int sourceQuality,
+			int targetWidth, int targetHeight) {
+		// A large thumbnail can still be heavily compressed; dimensions do not prove normal-image quality.
+		return sourceQuality < QUALITY_HD || !coversTarget(width, height, targetWidth, targetHeight);
+	}
+
 	static boolean shouldWaitForQuality(int width, int height, int sourceQuality,
 			int targetWidth, int targetHeight, long elapsedMs, boolean largeDownloadComplete, long waitMillis) {
 		if (largeDownloadComplete && sourceQuality >= QUALITY_HD) return false;

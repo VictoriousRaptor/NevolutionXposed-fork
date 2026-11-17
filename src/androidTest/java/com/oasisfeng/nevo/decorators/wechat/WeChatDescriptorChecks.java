@@ -22,6 +22,11 @@ final class WeChatDescriptorChecks {
         Context wechat = context.createPackageContext("com.tencent.mm",
                 Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY);
         WeChatDescriptorChecks v = new WeChatDescriptorChecks(wechat.getClassLoader());
+        WeChatVoiceAdapter.Profile voice = WeChatVoiceAdapter.profile(info.versionName, info.versionCode);
+        if (voice != null) {
+            new WeChatVoiceAdapter.Resolved(voice, wechat.getClassLoader());
+            v.checks++; // Complete voice profile validation; does not publish an event or read a database.
+        }
         if (WeChatAvatar.supported(info.versionName, info.versionCode)) {
             WeChatAvatar.resolve(v.type("com.tencent.mm.modelavatar.g"), android.graphics.Bitmap.class);
             v.checks++;

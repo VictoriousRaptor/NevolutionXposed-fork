@@ -48,4 +48,6 @@
 	<string name="channel_group_message">新群组消息通知</string>
 	<string name="channel_misc">其它通知</string>
 
+    <string name="decorator_wechat_voice_transcribe_title">语音自动转文字</string>
+    <string name="decorator_wechat_voice_transcribe_description">自动将新收到的语音转为文字，使用微信原生服务，可能联网。修改后重启微信进程生效。</string>
 </resources>
