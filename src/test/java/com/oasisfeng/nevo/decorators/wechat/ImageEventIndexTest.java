@@ -5,6 +5,16 @@ import java.util.Arrays;
 import static org.junit.Assert.*;
 
 public class ImageEventIndexTest {
+	@Test public void retainsMessageForMidImageOnlyAcrossMatchingEvents() {
+		ImageEventIndex index = new ImageEventIndex();
+		Object message = new Object();
+		index.putIdentity("chat", 1, 42, 100, 10, message);
+		index.put("chat", 1, 100, java.util.Collections.singletonList("/thumb"), 11);
+		org.junit.Assert.assertSame(message, index.get("chat:1", 12).message.get());
+		index.put("chat", 1, 43, 100, java.util.Collections.singletonList("/thumb"), 13);
+		assertNull(index.get("chat:1", 14).message);
+	}
+
 	@Test public void verifiedMessageSurvivesRereadOldIdentities() {
 		ImageEventIndex index = new ImageEventIndex();
 		index.put("a", 10, 9010, 20000, Arrays.asList("/same-image"), 300);

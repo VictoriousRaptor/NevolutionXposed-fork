@@ -20,6 +20,36 @@ final class WeChatImageEvents {
 	final ImageEventIndex index = new ImageEventIndex();
 	private volatile boolean available;
 	private Method realPath;
+	private interface MidImagePath { String resolve(ImageEventIndex.Entry event) throws ReflectiveOperationException; }
+	private MidImagePath midImagePath;
+
+	String midImagePath(ImageEventIndex.Entry event) {
+		if (midImagePath == null || event.message == null) return null;
+		try { return midImagePath.resolve(event); }
+		catch (ReflectiveOperationException | RuntimeException failure) {
+			log("mid_path_failed", "type=" + failure.getClass().getSimpleName());
+			return null;
+		}
+	}
+
+	private static MidImagePath resolveMidImage(ClassLoader loader, Resolved resolved) throws ReflectiveOperationException {
+		Class<?> descriptor = Class.forName("nw5.x", false, loader);
+		Class<?> kind = Class.forName("nw5.e0", false, loader);
+		if (!kind.isEnum()) throw new IllegalStateException("Invalid image kind");
+		Object mid = staticMethod(kind, "valueOf", kind, String.class).invoke(null, "MID_IMAGE");
+		Method create = staticMethod(descriptor, "a", descriptor, resolved.pathMethod.getParameterTypes()[0], kind);
+		Method path = staticMethod(Class.forName("nw5.y", false, loader), "g", String.class,
+				descriptor, Boolean.class, boolean.class, int.class, Object.class);
+		return event -> {
+			Object message = event.message.get();
+			if (message == null || !create.getParameterTypes()[0].isInstance(message)
+					|| resolved.msgSvrId.getLong(message) != event.msgSvrId
+					|| !event.talker.equals(resolved.talker.invoke(message))
+					|| !event.key.equals(event.talker + ':' + resolved.id.invoke(message))) return null;
+			Object media = create.invoke(null, message, mid);
+			return media == null ? null : (String) path.invoke(null, media, null, false, 3, null);
+		};
+	}
 
 	static void log(String stage, String details) {
 		if (BuildConfig.DEBUG) Log.i("WeChatDecorator", "NX_IMAGE stage=" + stage + " " + details);
@@ -39,12 +69,18 @@ final class WeChatImageEvents {
 			}
 			stage = "signature";
 			Resolved resolved = resolve(profile, name -> Class.forName(name, false, loader));
+			if ("8.0.79".equals(info.versionName) && info.versionCode == 3183) {
+				try { midImagePath = resolveMidImage(loader, resolved); }
+				catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+					log("mid_path_unavailable", "type=" + failure.getClass().getSimpleName());
+				}
+			}
             stage = "hooks";
             if (!installResolved(resolved, XposedBridge::hookMethod)) {
                 log("events_unavailable", "stage=hooks type=" + lastHookFailureType);
                 return;
             }
-			log("events_ready", "profile=" + profile.label + " match=" + choice.kind.name().toLowerCase() + " revision=image-events-11 scans=0 base="
+			log("events_ready", "profile=" + profile.label + " match=" + choice.kind.name().toLowerCase() + " revision=image-events-12 midPath=" + (midImagePath != null) + " scans=0 base="
 					+ resolved.base.getDeclaringClass().getSimpleName() + "." + resolved.base.getName());
 		} catch (Throwable failure) {
 			XposedBridge.rethrowFrameworkError(failure);
@@ -94,7 +130,7 @@ final class WeChatImageEvents {
 							if (BuildConfig.DEBUG) log("path_field", "field=" + key + " present=" + (value instanceof String)
 									+ " empty=" + (value instanceof String && ((String) value).isEmpty()));
 							if (value instanceof String) paths.add(new ImageEventIndex.Path((String) value,
-									key.indexOf("hd_thumb") >= 0 ? ImagePreviewPolicy.QUALITY_HD : ImagePreviewPolicy.QUALITY_THUMBNAIL));
+									key.indexOf("hd_thumb") >= 0 ? ImagePreviewPolicy.QUALITY_HD_THUMBNAIL : ImagePreviewPolicy.QUALITY_THUMBNAIL));
 						}
 						// simplemsginfo createTime is copied from message.getCreateTime(), in milliseconds.
 						long createdMillis = ((Number) longAt.invoke(data, offset + 2)).longValue();
@@ -116,7 +152,7 @@ final class WeChatImageEvents {
 						if (value <= 0 || ((Number) type.invoke(data)).intValue() != 3
 								|| ((Number) sender.invoke(data)).intValue() != 0) return;
 						index.putIdentity((String) talker.invoke(data), ((Number) id.invoke(data)).longValue(),
-								value, ((Number) created.invoke(data)).longValue(), SystemClock.elapsedRealtime());
+								value, ((Number) created.invoke(data)).longValue(), SystemClock.elapsedRealtime(), midImagePath != null ? data : null);
 						log("identity", "serverId=true");
 					} catch (Exception failure) { log("identity_error", "type=" + failure.getClass().getSimpleName()); }
 				}

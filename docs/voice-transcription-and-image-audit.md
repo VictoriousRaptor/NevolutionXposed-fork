@@ -69,3 +69,5 @@
 - 等待期间未收到可验证的新语音／图片事件：转写 requested/completed、图片 large_submitted/large_wxgf/decoded 均未命中。真实私聊／群聊转写、中图实际下载、特殊图片解码及通知视觉结果仍未验收；3200 亦未实机验证。接口就绪不代替真实功能验收。
 
 本地原始证据位于 `.debug-artifacts/voice-transcription-20261115/device-switch/`，重点为 `framework-resumed.txt`、`descriptors-resumed.txt`（修复前失败）、`descriptors-enum-fixed.txt`、`runtime-resumed.txt`、`features-live.txt`、`final-cleanup.json`。原脚本失败结果保留，最终清理状态以独立 `final-cleanup.json` 为准。
+
+2026-11-19 复核上游 `3ffd549` 后发现，早期“足尺寸 HD”判断同时涵盖高清缩略图。现已独立标记此类候选，3183 另在消息身份核验后尝试从 MID_IMAGE 描述符取图。管理器参数、超时及诊断差异见适配手册同日章节。

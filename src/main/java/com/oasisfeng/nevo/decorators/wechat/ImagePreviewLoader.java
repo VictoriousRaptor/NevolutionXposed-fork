@@ -314,9 +314,18 @@ final class ImagePreviewLoader {
 			if (owner != null && owner != request.token) { finish(request, "message_already_assigned"); return; }
 			ImagePreviewPolicy.Size target = targetSize(context);
 			Set<String> resolvedPaths = new HashSet<>();
-			Scan scan = scanCandidates(request, event.paths, target, resolvedPaths, null);
+			Scan scan = new Scan(null);
+			if (largePreviewEnabled && event.msgSvrId > 0) {
+				String midPath = events.midImagePath(event);
+				if (midPath != null && !midPath.isEmpty())
+					scan = scanCandidates(request, java.util.Collections.singletonList(
+							new ImageEventIndex.Path(midPath, ImagePreviewPolicy.QUALITY_HD)), target, resolvedPaths, null);
+			}
+			boolean readableMidImage = scan.best != null;
+			if (readableMidImage) log("mid_image_ready", "request=" + request.token);
+			else scan = scanCandidates(request, event.paths, target, resolvedPaths, null);
 			boolean largeCandidateConsidered = false;
-			if (largePreviewEnabled && event.msgSvrId > 0
+			if (!readableMidImage && largePreviewEnabled && event.msgSvrId > 0
 					&& (scan.best == null || ImagePreviewPolicy.shouldRequestNormalImage(scan.best.width,
 							scan.best.height, scan.best.quality, target.width, target.height))) {
 				long now = SystemClock.elapsedRealtime();
@@ -366,7 +375,9 @@ final class ImagePreviewLoader {
 			}
 			if (best == null) { retryOrFinish(context, manager, tag, id, request, "file_not_ready"); return; }
 			long elapsed = SystemClock.elapsedRealtime() - request.started;
-			boolean waitForQuality = ImagePreviewPolicy.shouldWaitForQuality(best.width, best.height, best.quality,
+			int waitQuality = !largePreviewEnabled && best.quality == ImagePreviewPolicy.QUALITY_HD_THUMBNAIL
+					? ImagePreviewPolicy.QUALITY_HD : best.quality;
+			boolean waitForQuality = !readableMidImage && ImagePreviewPolicy.shouldWaitForQuality(best.width, best.height, waitQuality,
 					target.width, target.height, elapsed, request.largeDownloadComplete, request.deadline - request.started);
 			if (waitForQuality && retry(context, manager, tag, id, request, "waiting_for_quality")) return;
 			Bitmap bitmap = decode(best);

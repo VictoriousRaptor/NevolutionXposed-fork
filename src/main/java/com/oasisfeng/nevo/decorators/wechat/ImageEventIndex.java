@@ -1,5 +1,6 @@
 package com.oasisfeng.nevo.decorators.wechat;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -44,19 +45,25 @@ final class ImageEventIndex {
 		if (bounded.size() > 4) bounded = new ArrayList<>(bounded.subList(0, 4));
 		if (bounded.isEmpty()) return;
 		long stableMsgSvrId = msgSvrId > 0 ? msgSvrId : previous == null ? 0 : previous.msgSvrId;
-		entries.put(key, new Entry(key, talker, stableMsgSvrId, created, bounded, now));
+		entries.put(key, new Entry(key, talker, stableMsgSvrId, created, bounded, now,
+				previous != null && previous.msgSvrId == stableMsgSvrId ? previous.message : null));
 		while (entries.size() > CAPACITY) entries.remove(entries.keySet().iterator().next());
 	}
 
 	/** Stores message identity before the image pipeline publishes any path. */
 	synchronized void putIdentity(String talker, long messageId, long msgSvrId, long created, long now) {
+		putIdentity(talker, messageId, msgSvrId, created, now, null);
+	}
+
+	synchronized void putIdentity(String talker, long messageId, long msgSvrId, long created, long now, Object message) {
 		prune(now);
 		if (talker == null || talker.isEmpty() || messageId <= 0 || msgSvrId <= 0) return;
 		String key = talker + ':' + messageId;
 		Entry previous = entries.remove(key);
 		List<Path> paths = previous == null ? Collections.emptyList() : previous.paths;
 		long stableCreated = previous != null && previous.created > 0 ? previous.created : created;
-		entries.put(key, new Entry(key, talker, msgSvrId, stableCreated, paths, now));
+		entries.put(key, new Entry(key, talker, msgSvrId, stableCreated, paths, now,
+				message == null ? null : new WeakReference<>(message)));
 		while (entries.size() > CAPACITY) entries.remove(entries.keySet().iterator().next());
 	}
 
@@ -129,7 +136,9 @@ final class ImageEventIndex {
 		final String key, talker;
 		final long msgSvrId, created, observed;
 		final List<Path> paths;
-		Entry(String key, String talker, long msgSvrId, long created, List<Path> paths, long observed) {
+		final WeakReference<Object> message;
+		Entry(String key, String talker, long msgSvrId, long created, List<Path> paths, long observed, WeakReference<Object> message) {
+			this.message = message;
 			this.key = key; this.talker = talker; this.msgSvrId = msgSvrId; this.created = created;
 			this.paths = paths; this.observed = observed;
 		}

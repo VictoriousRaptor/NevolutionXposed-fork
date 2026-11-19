@@ -12,7 +12,8 @@ public final class ImagePreviewPolicy {
 	static final int MAX_DISPLAY_PIXELS = 1024 * 1024;
 	static final int QUALITY_UNKNOWN = 0;
 	static final int QUALITY_THUMBNAIL = 1;
-	static final int QUALITY_HD = 2;
+	static final int QUALITY_HD_THUMBNAIL = 2;
+	static final int QUALITY_HD = 3;
 
 	private ImagePreviewPolicy() {}
 

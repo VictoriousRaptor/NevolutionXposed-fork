@@ -410,3 +410,7 @@ provider 持久化，并在每个新进程重验；缓存不可用时仍执行�
 3183 实机完整描述符检查发现 `NoSuchFieldException: AUDIO`：反编译恢复的枚举常量标签不能当成运行时字段名。3183/3200 分别改为验证 `nw5.e0.valueOf(String): nw5.e0`／`pv5.e0.valueOf(String): pv5.e0` 的完整 public static 签名，在音频就绪检查阶段传入 AUDIO 获取枚举值。离线描述符构造仍不初始化枚举；常量解析失败按原异常回退，不放宽版本或接口门禁。此项以实机失败作为回归证据，额外测试 typed valueOf 返回类型和常量解析。
 
 2026-11-16 实机验证补记：3183 完整语音及图片等描述符修正后共 42 项通过，framework runner 109/109 通过；语音 adapter_ready 和图片 large_ready exact 已在微信进程确认。真实新语音／图片未触发，仍不能声称转写、下载、特殊解码或通知视觉验收通过；3200 未实机测试。测试结束已安装同证书非 Debug Release 3.5.0/18，回读 APK 哈希一致，测试包及两个 runner 入口均不存在。详细证据与安装等待／旧版恢复失败处理见 voice-transcription-and-image-audit.md。
+
+### 2026-11-19 3183 中图描述符
+
+APKMirror base SHA-256 为 `90096f785f1227f5456f3d099ea9855822d5601754565de5dc45ab5c1df7e3f0`。在 `.debug-artifacts/wechat-same-name-profile-probing/apkmirror-8079/3183-sources/sources/nw5/` 的 x.java、e0.java、y.java 核对静态方法 `nw5.e0.valueOf(String): nw5.e0`、`nw5.x.a(com.tencent.mm.storage.e9,nw5.e0): nw5.x`、`nw5.y.g(nw5.x,java.lang.Boolean,boolean,int,java.lang.Object): java.lang.String`。传入 MID_IMAGE 和 (descriptor,null,false,3,null)。y.g 根据消息资源描述符检查 VFS，并可委托图片存储服务解析路径。该路径独立于直接把 ImgInfo2 文本列交给 VFS 的既有尝试。只在版本名与代码同时匹配 8.0.79/3183 时解析本组接口。启用、失败行为与诊断见适配手册同日章节，通知上的真实清晰度待验。

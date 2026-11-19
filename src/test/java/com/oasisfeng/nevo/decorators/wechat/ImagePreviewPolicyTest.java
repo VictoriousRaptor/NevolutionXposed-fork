@@ -15,6 +15,15 @@ public class ImagePreviewPolicyTest {
 				ImagePreviewPolicy.QUALITY_UNKNOWN, 1080, 608));
 	}
 
+	@Test public void displaySizedHdThumbnailStillRequestsAndWaitsForNormalImage() {
+		assertTrue(ImagePreviewPolicy.shouldRequestNormalImage(1280, 720,
+				ImagePreviewPolicy.QUALITY_HD_THUMBNAIL, 1080, 608));
+		assertTrue(ImagePreviewPolicy.shouldWaitForQuality(1280, 720, ImagePreviewPolicy.QUALITY_HD_THUMBNAIL,
+				1080, 608, 100, true, 1500));
+		assertTrue(ImagePreviewPolicy.isBetter(1280, 720, ImagePreviewPolicy.QUALITY_HD,
+				1280, 720, ImagePreviewPolicy.QUALITY_HD_THUMBNAIL, 1080, 608));
+	}
+
 	@Test public void normalImageRequestRetainsExistingHdAndMissingCandidatePolicy() {
 		assertFalse(ImagePreviewPolicy.shouldRequestNormalImage(1920, 1080,
 				ImagePreviewPolicy.QUALITY_HD, 1080, 608));
