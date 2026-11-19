@@ -469,7 +469,7 @@ ART 内联处理：安装 hook 前通过 libxposed API 102 的 `deoptimize(Execu
 
 2026-10-24 历史变更：当时 SQL 不读 `msglocalid`，消息对与下载首参均使用基础图片行 `id`。2026-10-26 已按用户要求恢复此前分离逻辑，下述 2026-10-23 参数分工再次适用于当前代码；本轮设置、诊断与验证边界见本文顶部更新。
 
-2026-10-23 普通大图下载身份修复：固定 SQL 增加读取 `ImgInfo2.msglocalid`，与图片行 `id` 分开保存。下载接口 `b(long, MsgIdTalker, int, Object, int, <版本回调接口>, int, boolean): int` 的首参仍为选中基础行的图片 `id`，`com.tencent.mm.plugin.msg.MsgIdTalker(long, String)` 则使用 `msglocalid` 和该行的 `msgTalker`；不使用服务端 ID 或 `reserved1` 代替消息本地 ID。缺少列时查询失败并回退，`msglocalid <= 0` 时不提交下载，但仍可读取该基础行已有的本地图片。仍只在微信主进程、图片总开关及大图开关启用后请求；四组版本名与版本码必须同时匹配，完整运行时方法/返回类型校验及 hook 时机保持原有规则，回复、应用内回复和撤回门禁各自独立。
+2026-10-23 普通大图下载身份修复：固定 SQL 增加读取 `ImgInfo2.msglocalid`，与图片行 `id` 分开保存。下载接口 `b(long, MsgIdTalker, int, Object, int, <版本回调接口>, int, boolean): int` 的首参仍为选中基础行的图片 `id`，`com.tencent.mm.plugin.msg.MsgIdTalker(long, String)` 则使用 `msglocalid` 和该行的 `msgTalker`；不使用服务端 ID 或 `reserved1` 代替消息本地 ID。缺少列时查询失败并回退。当时 `msglocalid <= 0` 会跳过下载，2026-11-20 起按本文末节核对图片事件。仍只在微信主进程、图片总开关及大图开关启用后请求；四组版本名与版本码必须同时匹配，完整运行时方法/返回类型校验及 hook 时机保持原有规则，回复、应用内回复和撤回门禁各自独立。
 
 本次离线补查使用既有 8.0.72/3085 与 8.0.79/3182 源码；8.0.79 的参数用途和完整证据见 [findings](wechat-8.0.79-findings.md)。共用下载器的修复也作用于两组 8.0.77 画像，本次未重新取得其 APK 核对新增列，未声明新版设备兼容性通过。沿用 Debug `NX_IMAGE stage=large_ready`、`large_query_failed`、`large_submitted`、`large_submit_failed` 诊断，不输出图片/消息真实 ID；无效消息本地 ID 的请求直接返回 false，不新增专用日志。回归须覆盖图片 ID、消息本地 ID、服务端 ID、`reserved1` 各不相等时的参数分离，消息 ID 无效时的本地预览与超时回退，以及普通大图完成、取消和迟到结果；构建与主机测试不代表真实下载通过。
 
@@ -949,3 +949,10 @@ service base 与 service/implementation、download interface 与 implementation 
 仅微信主进程、版本名 8.0.79 且版本码 3183、图片事件签名通过时，尝试解析中图接口。既有服务端 ID 的 AFTER 回调为有界事件索引保留消息弱引用。清晰预览开启且选中事件有服务端 ID 时，解码线程复核消息类型兼容、会话、本地与服务端 ID，再从消息对象构建 MID_IMAGE 描述符并取得路径。运行时校验静态方法参数与返回类型及资源枚举。中图通过现有 VFS、文件大小与可解码性检查后直接使用。签名不符、引用回收、身份不符、路径不可读时继续既有基础行与缩略图流程。Debug 可看 `events_ready midPath`、`mid_path_unavailable`、`mid_path_failed`、`mid_image_ready`、`large_submitted` 和 `decoded`。
 
 回归需覆盖高清缩略图足尺寸仍请求、普通图与缩略图同尺寸时的选择、事件合并时消息引用归属、中图已落盘、下载延迟超时，以及通知被后续消息替换。前述流程基于离线源码和主机测试；真实收图与视觉效果待手测。
+
+### 2026-11-20 普通图下载缺少消息本地 ID
+
+在微信 8.0.79/3183 的一次真实收图中，能查询到 ImgInfo2 基础行，但 `large_skipped reason=missing_local_id` 后仅发布了 120×120 的缩略图。新实现使用已选中且带正数服务端 ID 的收图事件，要求基础行会话、服务端 ID 和事件相同。基础行有正数本地 ID 时还须与事件一致；为零或负值时才借用事件的本地 ID 构造 MsgIdTalker。下载首参仍使用基础图片行 ID。复用任务须匹配有效本地 ID，轮询须匹配基础图片行 ID、会话、服务端 ID，原缺失的本地 ID 可继续缺失或补为同一值。身份冲突时保留现有回退。
+
+这项规则用于已有图片事件及普通图下载画像，沿用版本选择、完整签名校验、微信主进程和清晰预览开关。Debug 的 `image-large-5` 中，`large_submitted` 的 `localIdSource=event` 表示使用事件 ID 完成提交；`large_skipped reason=event_identity_conflict` 表示归属不符。返回负值记录 `large_rejected`，复用记录 `large_reused`。回归需要分别核对提交结果、中图是否就绪、最终解码质量与发布。上一轮现场记录仅确认了旧版跳过提交。
+微信 8.0.79/3183 的一次 Debug 真机复测中，基础行缺少本地 ID，普通图下载使用事件本地 ID 提交，返回 0；随后读到 512×512 中图，按该尺寸解码并发布了通知。

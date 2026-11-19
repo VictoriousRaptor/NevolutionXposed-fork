@@ -3,6 +3,9 @@ package com.oasisfeng.nevo.decorators.wechat;
 import android.database.Cursor;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -19,14 +22,18 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 28)
 public class WeChatImageDownloaderTest {
 	@Test public void completedRowMustRetainBothMessageIdsAndConversation() {
 		WeChatImageDownloader.BaseRow original = new WeChatImageDownloader.BaseRow(10, 42, 1000,
 				"synthetic-chat", "/preview", "", "", 0, 10, 0);
-		assertFalse(new WeChatImageDownloader.BaseRow(10, 43, 1000, "synthetic-chat", "/preview", "", "", 10, 10, 0).isComplete(original));
-		assertFalse(new WeChatImageDownloader.BaseRow(10, 42, 1001, "synthetic-chat", "/preview", "", "", 10, 10, 0).isComplete(original));
-		assertFalse(new WeChatImageDownloader.BaseRow(10, 42, 1000, "other-synthetic-chat", "/preview", "", "", 10, 10, 0).isComplete(original));
-		assertTrue(new WeChatImageDownloader.BaseRow(10, 42, 1000, "synthetic-chat", "/preview", "", "", 10, 10, 0).isComplete(original));
+		WeChatImageDownloader.Task task = new WeChatImageDownloader.Task(original, 42);
+		assertFalse(task.matches(row(10, 1001, "synthetic-chat", "/preview", "", 0)));
+		assertFalse(task.matches(row(11, 1000, "synthetic-chat", "/preview", "", 0)));
+		assertFalse(task.matches(row(10, 1000, "other-synthetic-chat", "/preview", "", 0)));
+		assertFalse(task.matches(new WeChatImageDownloader.BaseRow(10, 43, 1000, "synthetic-chat", "/preview", "", "", 10, 10, 0)));
+		assertTrue(task.matches(row(10, 1000, "synthetic-chat", "/preview", "", 0)));
 	}
 	@Test public void sourceReadReturnsExactlyTheExpectedBytes() throws Exception {
 		assertArrayEquals(new byte[]{1, 2, 3}, readSource(new byte[]{1, 2, 3}, 3));
@@ -73,14 +80,13 @@ public class WeChatImageDownloaderTest {
 				row(10, 1000, "other", "/a", "", 0)), "chat"));
 	}
 
-	@Test public void completionRequiresTheSameBaseRowAndAllBytes() {
-		WeChatImageDownloader.BaseRow base = row(10, 1000, "chat", "/base", "", 0);
+	@Test public void completionRequiresAllBytes() {
 		WeChatImageDownloader.BaseRow partial = new WeChatImageDownloader.BaseRow(
 				10, 42, 1000, "chat", "/base", "", "", 9, 10, 0);
 		WeChatImageDownloader.BaseRow complete = new WeChatImageDownloader.BaseRow(
 				10, 42, 1000, "chat", "/base", "", "", 10, 10, 0);
-		assertFalse(partial.isComplete(base));
-		assertFalse(complete.isComplete(row(11, 1000, "chat", "/wrong", "", 0)));
+		assertFalse(partial.isComplete());
+		assertTrue(complete.isComplete());
 	}
 
 	@Test public void databaseMessageIdIsUsedOnlyForTheMessagePair() throws Exception {
@@ -103,31 +109,58 @@ public class WeChatImageDownloaderTest {
 		Method readRow = WeChatImageDownloader.class.getDeclaredMethod("readRow", Cursor.class);
 		readRow.setAccessible(true);
 		WeChatImageDownloader.BaseRow base = (WeChatImageDownloader.BaseRow) readRow.invoke(downloader, cursor);
+		FakeDownloadService service = connectFakeService(downloader);
+		assertTrue(downloader.request(base, event(42, 1000, "chat"), 1, Long.MAX_VALUE, ignored -> {}));
+		downloader.cancel(1);
+		assertEquals(10L, service.imageId);
+		assertEquals(42L, service.message.id);
+		assertEquals("chat", service.message.talker);
+	}
+
+	@Test public void matchingEventSuppliesMissingRowLocalIdForSubmitAndPoll() throws Exception {
+		WeChatImageDownloader downloader = new WeChatImageDownloader();
+		FakeDownloadService service = connectFakeService(downloader);
+		ImageEventIndex.Entry event = event(42, 1000, "chat");
+		for (long missingId : new long[]{0, -1}) {
+			WeChatImageDownloader.BaseRow base = new WeChatImageDownloader.BaseRow(
+					10, missingId, 1000, "chat", "/base", "", "", 10, 10, 0);
+			assertTrue(downloader.request(base, event, 1, Long.MAX_VALUE, ignored -> {}));
+			try {
+				assertEquals(10L, service.imageId);
+				assertEquals(42L, service.message.id);
+				assertFalse(downloader.request(base, event(43, 1000, "chat"), 2, Long.MAX_VALUE, ignored -> {}));
+				WeChatImageDownloader.Task task = new WeChatImageDownloader.Task(base, event.msgLocalId);
+				assertTrue(task.matches(base));
+				assertTrue(task.matches(row(10, 1000, "chat", "/base", "", 0)));
+				assertFalse(task.matches(new WeChatImageDownloader.BaseRow(
+						10, 43, 1000, "chat", "/base", "", "", 10, 10, 0)));
+			} finally { downloader.cancel(1); }
+		}
+	}
+
+	@Test public void conflictingEventCannotAuthorizeDownload() {
+		WeChatImageDownloader.BaseRow base = row(10, 1000, "chat", "", "", 0);
+		assertFalse(base.matchesEvent(event(42, 1001, "chat")));
+		assertFalse(base.matchesEvent(event(42, 1000, "other")));
+		assertFalse(base.matchesEvent(event(43, 1000, "chat")));
+	}
+
+	private static ImageEventIndex.Entry event(long localId, long serverId, String talker) {
+		ImageEventIndex index = new ImageEventIndex();
+		index.putIdentity(talker, localId, serverId, 100, 1);
+		return index.select(talker, serverId, 100, 1, 1);
+	}
+
+	private static FakeDownloadService connectFakeService(WeChatImageDownloader downloader) throws Exception {
 		FakeDownloadService service = new FakeDownloadService();
+		set(downloader, "available", true);
 		set(downloader, "downloadService", service);
 		set(downloader, "downloadServiceClass", FakeDownloadService.class);
 		set(downloader, "callbackClass", FakeCallback.class);
 		set(downloader, "msgIdTalkerConstructor", FakeMsgIdTalker.class.getConstructor(long.class, String.class));
 		set(downloader, "downloadMethod", FakeDownloadService.class.getMethod("b", long.class, FakeMsgIdTalker.class,
 				int.class, Object.class, int.class, FakeCallback.class, int.class, boolean.class));
-		Method submit = WeChatImageDownloader.class.getDeclaredMethod("submit", WeChatImageDownloader.BaseRow.class);
-		submit.setAccessible(true);
-		assertEquals(7, submit.invoke(downloader, base));
-		assertEquals(10L, service.imageId);
-		assertEquals(42L, service.message.id);
-		assertEquals("chat", service.message.talker);
-	}
-
-	@Test public void missingMessageLocalIdSkipsDownloadButKeepsTheBaseRow() throws Exception {
-		WeChatImageDownloader downloader = new WeChatImageDownloader();
-		set(downloader, "available", true);
-		for (long localId : new long[]{0, -1}) {
-			WeChatImageDownloader.BaseRow base = new WeChatImageDownloader.BaseRow(
-					10, localId, 1000, "chat", "/base", "", "", 10, 10, 0);
-			assertSame(base, WeChatImageDownloader.selectBaseRow(Collections.singletonList(base), "chat"));
-			assertTrue(base.isComplete(base));
-			assertFalse(downloader.request(base, 1, Long.MAX_VALUE, ignored -> {}));
-		}
+		return service;
 	}
 
 	private static void set(WeChatImageDownloader downloader, String name, Object value) throws Exception {

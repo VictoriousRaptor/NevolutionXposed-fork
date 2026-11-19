@@ -94,7 +94,7 @@ final class WeChatImageDownloader {
 			databaseField = resolved.databaseField;
 
 			available = true;
-			log("large_ready", "profile=" + profile.label + " match=" + choice.kind.name().toLowerCase() + " revision=image-large-3 base_row_only=true");
+			log("large_ready", "profile=" + profile.label + " match=" + choice.kind.name().toLowerCase() + " revision=image-large-5 base_row_only=true");
 		} catch (Throwable failure) {
 			available = false;
 			log("large_unavailable", "stage=" + stage + " type=" + failure.getClass().getSimpleName());
@@ -180,38 +180,52 @@ final class WeChatImageDownloader {
 	 * Starts one WeChat task per msgSvrId and polls it outside the image decode worker.
 	 * Returning false means the caller must keep its normal timeout behavior.
 	 */
-	boolean request(BaseRow base, long requestToken, long deadline, ReadyCallback callback) {
-		if (!available || base == null || base.msgLocalId <= 0 || requestToken == 0 || callback == null
-				|| deadline <= SystemClock.elapsedRealtime()) return false;
+	boolean request(BaseRow base, ImageEventIndex.Entry event, long requestToken, long deadline, ReadyCallback callback) {
+		if (!available) return skipped(requestToken, "unavailable");
+		if (base == null) return skipped(requestToken, "missing_row");
+		if (!base.matchesEvent(event)) return skipped(requestToken, "event_identity_conflict");
+		if (requestToken == 0) return skipped(requestToken, "missing_token");
+		if (callback == null) return skipped(requestToken, "missing_callback");
+		if (deadline <= SystemClock.elapsedRealtime()) return skipped(requestToken, "deadline");
 		Task task;
 		boolean created = false;
 		synchronized (tasks) {
 			task = tasks.get(base.msgSvrId);
-			if (task != null && !task.base.sameMessage(base)) return false;
+			if (task != null && (!task.matches(base) || task.msgLocalId != event.msgLocalId)) return skipped(requestToken, "identity_conflict");
 			if (task == null) {
-				if (tasks.size() >= MAX_TASKS) return false;
-				task = new Task(base);
+				if (tasks.size() >= MAX_TASKS) return skipped(requestToken, "capacity");
+				task = new Task(base, event.msgLocalId);
 				tasks.put(base.msgSvrId, task);
 				created = true;
 			}
 			task.waiters.put(requestToken, new Waiter(deadline, callback));
 		}
-		if (!created) return true;
+		if (!created) {
+			log("large_reused", "request=" + requestToken);
+			return true;
+		}
 		try {
-			int submitResult = submit(task.base);
+			int submitResult = submit(task.base, task.msgLocalId);
 			if (submitResult < 0) {
+				log("large_rejected", "request=" + requestToken + " return=" + submitResult);
 				synchronized (tasks) { tasks.remove(base.msgSvrId, task); }
 				return false;
 			}
 			Task scheduled = task;
 			task.future = worker.schedule(() -> poll(scheduled), 50, TimeUnit.MILLISECONDS);
-			log("large_submitted", "request=" + requestToken + " return=" + submitResult);
+			log("large_submitted", "request=" + requestToken + " return=" + submitResult
+					+ " localIdSource=" + (base.msgLocalId > 0 ? "row" : "event"));
 			return true;
 		} catch (Throwable failure) {
 			synchronized (tasks) { tasks.remove(base.msgSvrId, task); }
 			log("large_submit_failed", "request=" + requestToken + " type=" + failure.getClass().getSimpleName());
 			return false;
 		}
+	}
+
+	private static boolean skipped(long requestToken, String reason) {
+		if (BuildConfig.DEBUG) log("large_skipped", "request=" + requestToken + " reason=" + reason);
+		return false;
 	}
 
 	void cancel(long requestToken) {
@@ -229,11 +243,11 @@ final class WeChatImageDownloader {
 		}
 	}
 
-	private int submit(BaseRow base) throws Exception {
+	private int submit(BaseRow base, long msgLocalId) throws Exception {
 		Object service = downloadService();
 		if (service == null || !downloadServiceClass.isInstance(service))
 			throw new IllegalStateException("Image download service unavailable");
-		Object msgIdTalker = msgIdTalkerConstructor.newInstance(base.msgLocalId, base.talker);
+		Object msgIdTalker = msgIdTalkerConstructor.newInstance(msgLocalId, base.talker);
 		Object listener = Proxy.newProxyInstance(callbackClass.getClassLoader(), new Class<?>[]{callbackClass},
 				new IgnoredCallback());
 		Object result = downloadMethod.invoke(service, base.id, msgIdTalker, 0, null, 0, listener, -1, false);
@@ -279,7 +293,7 @@ final class WeChatImageDownloader {
 		}
 
 		BaseRow current = queryBaseRow(task.base.msgSvrId, task.base.talker);
-		boolean complete = current != null && current.id == task.base.id && current.isComplete(task.base);
+		boolean complete = current != null && task.matches(current) && current.isComplete();
 		synchronized (tasks) {
 			if (tasks.get(task.base.msgSvrId) != task) return;
 			if (complete) {
@@ -425,15 +439,14 @@ final class WeChatImageDownloader {
 			this.reserved1 = reserved1;
 		}
 
-		boolean isComplete(BaseRow original) {
-			return sameMessage(original) && totalLen > 0 && offset >= totalLen
+		boolean isComplete() {
+			return totalLen > 0 && offset >= totalLen
 					&& (!bigImgPath.isEmpty() || !hevcPath.isEmpty() || !midImgPath.isEmpty());
 		}
 
-		boolean sameMessage(BaseRow other) {
-			// A pre-existing complete image can lack a local ID; request() still refuses to download it.
-			return other != null && id > 0 && id == other.id && msgLocalId == other.msgLocalId
-					&& msgSvrId > 0 && msgSvrId == other.msgSvrId && !talker.isEmpty() && talker.equals(other.talker);
+		boolean matchesEvent(ImageEventIndex.Entry event) {
+			return event != null && msgSvrId > 0 && msgSvrId == event.msgSvrId && talker.equals(event.talker)
+					&& (msgLocalId <= 0 || msgLocalId == event.msgLocalId);
 		}
 
 		List<ImageEventIndex.Path> paths() {
@@ -455,14 +468,23 @@ final class WeChatImageDownloader {
 		Waiter(long deadline, ReadyCallback callback) { this.deadline = deadline; this.callback = callback; }
 	}
 
-	private static final class Task {
+	static final class Task {
 		final BaseRow base;
+		final long msgLocalId;
 		final long started = SystemClock.elapsedRealtime();
 		final Map<Long, Waiter> waiters = new HashMap<>();
 		volatile ScheduledFuture<?> future;
 		volatile boolean ready;
 		volatile BaseRow completedRow;
-		Task(BaseRow base) { this.base = base; }
+		Task(BaseRow base, long msgLocalId) {
+			this.base = base;
+			this.msgLocalId = msgLocalId;
+		}
+
+		boolean matches(BaseRow current) {
+			return base.id == current.id && base.msgSvrId == current.msgSvrId && base.talker.equals(current.talker)
+					&& (current.msgLocalId == msgLocalId || (base.msgLocalId <= 0 && current.msgLocalId <= 0));
+		}
 	}
 
 	private static final class IgnoredCallback implements InvocationHandler {

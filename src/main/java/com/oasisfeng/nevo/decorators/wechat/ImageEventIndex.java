@@ -45,7 +45,7 @@ final class ImageEventIndex {
 		if (bounded.size() > 4) bounded = new ArrayList<>(bounded.subList(0, 4));
 		if (bounded.isEmpty()) return;
 		long stableMsgSvrId = msgSvrId > 0 ? msgSvrId : previous == null ? 0 : previous.msgSvrId;
-		entries.put(key, new Entry(key, talker, stableMsgSvrId, created, bounded, now,
+		entries.put(key, new Entry(key, talker, messageId, stableMsgSvrId, created, bounded, now,
 				previous != null && previous.msgSvrId == stableMsgSvrId ? previous.message : null));
 		while (entries.size() > CAPACITY) entries.remove(entries.keySet().iterator().next());
 	}
@@ -62,7 +62,7 @@ final class ImageEventIndex {
 		Entry previous = entries.remove(key);
 		List<Path> paths = previous == null ? Collections.emptyList() : previous.paths;
 		long stableCreated = previous != null && previous.created > 0 ? previous.created : created;
-		entries.put(key, new Entry(key, talker, msgSvrId, stableCreated, paths, now,
+		entries.put(key, new Entry(key, talker, messageId, msgSvrId, stableCreated, paths, now,
 				message == null ? null : new WeakReference<>(message)));
 		while (entries.size() > CAPACITY) entries.remove(entries.keySet().iterator().next());
 	}
@@ -134,11 +134,12 @@ final class ImageEventIndex {
 
 	static final class Entry {
 		final String key, talker;
-		final long msgSvrId, created, observed;
+		final long msgLocalId, msgSvrId, created, observed;
 		final List<Path> paths;
 		final WeakReference<Object> message;
-		Entry(String key, String talker, long msgSvrId, long created, List<Path> paths, long observed, WeakReference<Object> message) {
+		Entry(String key, String talker, long msgLocalId, long msgSvrId, long created, List<Path> paths, long observed, WeakReference<Object> message) {
 			this.message = message;
+			this.msgLocalId = msgLocalId;
 			this.key = key; this.talker = talker; this.msgSvrId = msgSvrId; this.created = created;
 			this.paths = paths; this.observed = observed;
 		}

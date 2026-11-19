@@ -338,7 +338,7 @@ final class ImagePreviewLoader {
 								+ " originalRowFollowed=false");
 					}
 					request.largeRow = row;
-					request.largePaths = request.largeRow != null && request.largeRow.isComplete(request.largeRow)
+					request.largePaths = row != null && row.matchesEvent(event) && row.isComplete()
 							? request.largeRow.paths() : null;
 				}
 				List<ImageEventIndex.Path> largePaths = request.largePaths;
@@ -351,7 +351,7 @@ final class ImagePreviewLoader {
 								scan.best.height, scan.best.quality, target.width, target.height))) {
 					WeChatImageDownloader.BaseRow row = request.largeRow;
 					request.largeSubmitAttempted = true;
-					largePreview.request(row, request.token,
+					largePreview.request(row, event, request.token,
 							request.deadline, completedRow -> {
 								if (completedRow != null) {
 									request.largeDownloadComplete = true;
