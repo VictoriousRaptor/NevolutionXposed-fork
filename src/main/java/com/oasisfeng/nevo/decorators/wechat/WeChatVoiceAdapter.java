@@ -16,6 +16,8 @@ import java.util.function.Consumer;
 
 /** Exact-build native voice adapter. Observing identity never starts transcription. */
 final class WeChatVoiceAdapter {
+    private static final int VOICE_STATUS_RECEIVED = 99;
+
     record Profile(String account, String voice, String payload, String cacheGet,
                    String serverGet, String senderGet, String fileGet, String registry, String media,
                    String mediaContract, String resource) {}
@@ -94,6 +96,11 @@ final class WeChatVoiceAdapter {
 
     static boolean empty(String text) { return text == null || text.isEmpty(); }
 
+    static boolean audioReceived(int totalBytes, int receivedBytes, int status) {
+        // Audio delivered in the sync payload can reach the received status without updating FileNowSize.
+        return status == VOICE_STATUS_RECEIVED || (totalBytes > 0 && receivedBytes >= totalBytes);
+    }
+
     final class Capture implements VoiceTranscriptionQueue.Backend {
         final Resolved r;
         final VoiceTranscriptionQueue.Identity id;
@@ -126,8 +133,8 @@ final class WeChatVoiceAdapter {
             if (!valid()) return false;
             Object info = r.voiceInfoGet.invoke(r.voiceInfo.invoke(null), file);
             if (info == null || r.infoLocal.getLong(info) != id.localId() || r.infoServer.getLong(info) != id.serverId()
-                    || !file.equals(r.infoFile.get(info)) || !id.talker().equals(r.infoTalker.get(info))
-                    || r.infoTotal.getInt(info) <= 0 || r.infoSize.getInt(info) < r.infoTotal.getInt(info)) return false;
+                    || !file.equals(r.infoFile.get(info)) || !id.talker().equals(r.infoTalker.get(info))) return false;
+            if (!audioReceived(r.infoTotal.getInt(info), r.infoSize.getInt(info), r.infoStatus.getInt(info))) return false;
             Object descriptor = r.descriptor.invoke(null, message, r.audio.invoke(null, "AUDIO"));
             Object service = r.service.invoke(null, r.contract);
             if (!r.path.getDeclaringClass().isInstance(service)) return false;
@@ -162,7 +169,7 @@ final class WeChatVoiceAdapter {
                 descriptor, service, path, exists, size, publish, voiceInfo, voiceInfoGet;
         final Field server, cachedId, cachedText, input, output, inputFile, inputId,
                 inputTalker, operation, scene, conversationType, callback, outputText, finished,
-                infoLocal, infoServer, infoFile, infoTalker, infoTotal, infoSize;
+                infoLocal, infoServer, infoFile, infoTalker, infoTotal, infoSize, infoStatus;
         final Method audio;
         Resolved(Profile p, ClassLoader loader) throws ReflectiveOperationException {
             message = Class.forName("com.tencent.mm.storage.e9", false, loader);
@@ -188,6 +195,7 @@ final class WeChatVoiceAdapter {
             infoFile = field(info, "b", String.class); infoTalker = field(info, "x", String.class);
             infoLocal = field(info, "m", long.class); infoServer = field(info, "e", long.class);
             infoTotal = field(info, "h", int.class); infoSize = field(info, "g", int.class);
+            infoStatus = field(info, "i", int.class);
             Class<?> resource = Class.forName(p.resource + ".e0", false, loader);
             if (!resource.isEnum()) throw new NoSuchMethodException("Resource enum");
             // Enum constant names survive obfuscation, but their public field names need not.

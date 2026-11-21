@@ -10,6 +10,13 @@ public class WeChatVoiceAdapterTest {
         assertEquals("m1", WeChatVoiceAdapter.profile("8.0.79", 3183).cacheGet());
         assertEquals("P1", WeChatVoiceAdapter.profile("8.0.79", 3200).cacheGet());
     }
+    @Test public void syncedVoiceCanBeCompleteWithoutDownloadByteCounts() {
+        assertTrue(WeChatVoiceAdapter.audioReceived(128, 0, 99));
+        assertTrue(WeChatVoiceAdapter.audioReceived(0, 0, 99));
+        assertFalse(WeChatVoiceAdapter.audioReceived(128, 0, 6));
+        assertFalse(WeChatVoiceAdapter.audioReceived(0, 0, 5));
+        assertTrue(WeChatVoiceAdapter.audioReceived(128, 128, 6));
+    }
     public static class Signature {
         public static String staticText() { return ""; }
         public int wrongReturn() { return 0; }

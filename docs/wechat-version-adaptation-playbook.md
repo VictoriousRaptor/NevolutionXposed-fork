@@ -912,6 +912,8 @@ service base 与 service/implementation、download interface 与 implementation 
 
 完整微信方法、字段、输入／输出类型及两版 APK 来源见 `wechat-8.0.79-findings.md` 同日章节；行为与图片覆盖审计见 `voice-transcription-and-image-audit.md`。所有画像方法校验精确参数／返回值、static 属性及非 abstract，字段校验完整类型与非 static；原生事件要求直接继承 IEvent。任一解析／安装失败只关闭语音，未知版本不探测；回复、图片、撤回及已读 observer 各自门禁不变，不能由语音画像推断其适配状态。
 
+音频就绪要求 voiceinfo 的文件名、两种消息 ID 和会话都匹配。语音画像统一解析 public 实例字段 `i: int`（Status，3183 为 `f81.c1`，3200 为 `f71.c1`），接收状态 99 与正总长下的字节数达标均可证明接收完成。接收完成后仍须通过原生路径和 VFS 文件检查。回归场景包括同步载荷已完整落盘但计数为零、普通下载尚未完成、文件缺失或不足 8 字节。就绪等待耗尽仍记录 `audio_unavailable`。
+
 诊断为 `WeChat.Voice` 的 adapter_ready／adapter_unavailable 及 Debug 队列阶段，不包含正文、账号、会话或附件路径。回归重点：生命周期清理后的旧回调不得影响新任务、A 转写期间收到 B、发送后结束旧轮、取消／撤回／换账号、相同内容不同 ID、超时后下一任务、API 26／28 消息及附件往返、Markdown 原样保留。新增 Debug 完整语音描述符检查尚未在实体设备执行；本轮离线核对、主机测试与构建不表示真实语音或图片验收。
 
 ### 2026-11-15：尺寸足够的缩略图仍请求中图

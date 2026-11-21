@@ -401,7 +401,9 @@ provider 持久化，并在每个新进程重验；缓存不可用时仍执行�
 
 证据层级：本节为 APK 哈希与离线源码核对；完整语音描述符已接入 Debug 设备检查入口，但尚未执行。本轮未安装、未观察运行时 hook，未做真实语音转写或图片收发验收。主机测试、签名构建与后续结果见 `voice-transcription-and-image-audit.md`。
 
-音频就绪额外校验：3183 `public static f81.m1 f81.v0.Bj()` → `public f81.c1 f81.m1.m1(String)`；3200 `public static f71.m1 f71.v0.Bj()` → `public f71.c1 f71.m1.P1(String)`。两版 c1 的 public 实例字段 `b: String`=FileName、`e: long`=MsgId（服务端）、`m: long`=MsgLocalId、`x: String`=MsgTalker、`g: int`=FileNowSize、`h: int`=TotalLen，由同目录 m1 的 SELECT 列顺序及 c1.a(Cursor)／b() 映射核实。身份必须一致，TotalLen>0 且 FileNowSize>=TotalLen，再核对 VFS 文件至少 8 字节，避免只凭已有文件头请求尚未下载完整的音频。
+音频就绪额外校验：3183 `public static f81.m1 f81.v0.Bj()` → `public f81.c1 f81.m1.m1(String)`；3200 `public static f71.m1 f71.v0.Bj()` → `public f71.c1 f71.m1.P1(String)`。两版 c1 的 public 实例字段 `b: String`=FileName、`e: long`=MsgId（服务端）、`m: long`=MsgLocalId、`x: String`=MsgTalker、`g: int`=FileNowSize、`h: int`=TotalLen，由同目录 m1 的 SELECT 列顺序及 c1.a(Cursor)／b() 映射核实。身份必须一致，接收已完成才核对 VFS 文件至少 8 字节。字节数就绪条件为 TotalLen>0 且 FileNowSize>=TotalLen。
+
+同步载荷补充：上述 3183 base APK 的 `f81/f1.java` 接收分支调用 `public static boolean f81.d1.y(nw5.x, String, String, byte[])`，该方法确认完整载荷写入后返回 true。同步写入成功时，新建 `f81.c1` 的 public 实例字段 `i: int`（Status）设为 99 后入库，`g`（FileNowSize）可保留初始化的 0。普通接收进度由 `public static int f81.d1.v(String, int, com.tencent.mm.modelbase.p0)` 更新字节数，完成时同样置 99。上述 3200 APK 的 `f71/f1.java` 同样在同步写入成功后将 `f71.c1.i: int` 设为 99，`f71/c1.java` 核对了原始字段名与 Status 映射。适配器统一校验 `i: int` 的反射签名，接受状态 99 或已达标的接收字节数。此处为两版接收分支的离线核对，合并的 `audio_unavailable` 日志不提供单条语音的 Status 或文件存在性。
 
 2026-11-15 开关简化：3183/3200 的语音画像、签名及 AFTER 时机不变；安装新增进程初始化时的语音开关快照门禁。修改设置后重启微信生效，与图片设置一致；删除即时偏好监听和开关专用世代，保留适配器实例／账号／消息身份和通知轮次检查。
 
