@@ -25,8 +25,8 @@ does not enable publishing from master.
 After the build job passes, master pushes and manual master runs build and verify a signed release APK
 and publish it with SHA256SUMS.txt. Tags use v<versionName>-build.<run number> so multiple
 master updates at the same app version have distinct releases. Reruns preserve
-an already published release. For reference, v3.2.0 used Android versionCode 13; the current app
-version is 3.5.0 with versionCode 18. Version 3.4.0 used versionCode 17.
+an already published release. For reference, v3.2.0 used Android versionCode 13; 3.5.0 used versionCode 18, and the current app
+version is 3.5.1 with versionCode 19. Version 3.4.0 used versionCode 17.
 Bump versionCode for the next app version. CI run numbers do not alter Android versionCode.
 
 Version 3.5.0 ends notification rounds at reply submission or a supported native

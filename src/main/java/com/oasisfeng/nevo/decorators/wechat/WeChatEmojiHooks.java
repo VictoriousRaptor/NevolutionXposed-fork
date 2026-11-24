@@ -25,7 +25,7 @@ public final class WeChatEmojiHooks {
     private WeChatEmojiHooks() {}
 
     static boolean supports(String versionName, long versionCode) {
-        return "8.0.79".equals(versionName)
+        return ("8.0.80".equals(versionName) && versionCode == 3200) || "8.0.79".equals(versionName)
                 && (versionCode == 3182 || versionCode == 3183 || versionCode == 3200);
     }
 
@@ -36,12 +36,16 @@ public final class WeChatEmojiHooks {
     private static final WeChatProfileSelector.Candidate<String> PROFILE_3200 =
             new WeChatProfileSelector.Candidate<>("emoji-8.0.79/3200", "8.0.79", 3200, "8.0.79/3200");
 
+    private static final WeChatProfileSelector.Candidate<String> PROFILE_80 =
+            new WeChatProfileSelector.Candidate<>("emoji-8.0.80/3200", "8.0.80", 3200, "8.0.80/3200");
+
     /** The candidate is accepted only after both methods have been checked in full. */
     static boolean selectCandidate(WeChatProfileSelector.BuildId build, WeChatProfileSelector selector,
                                    WeChatProfileSelector.Cache cache, Class<?> emoji, Class<?> notifications,
                                    Class<?> message) {
-        // The three APKs share this complete descriptor. Probe it once for a later unknown code.
-        WeChatProfileSelector.Candidate<String> candidate = build.versionCode == 3183 ? PROFILE_3183
+        // Probe the descriptor for this version name once, including for an unknown code.
+        WeChatProfileSelector.Candidate<String> candidate = "8.0.80".equals(build.versionName) ? PROFILE_80
+                : build.versionCode == 3183 ? PROFILE_3183
                 : build.versionCode == 3200 ? PROFILE_3200 : PROFILE_3182;
         return selector.select("emoji", build, Collections.singletonList(candidate), profile -> {
             resolve(emoji, notifications, message);
@@ -67,13 +71,14 @@ public final class WeChatEmojiHooks {
         try {
             PackageInfo info = context.getPackageManager().getPackageInfo(WeChatDecorator.WECHAT_PACKAGE, 0);
             WeChatProfileSelector.BuildId build = WeChatProfileSelector.BuildId.fromPackageInfo(info);
-            if (!"8.0.79".equals(build.versionName)) {
+            if (!"8.0.79".equals(build.versionName) && !"8.0.80".equals(build.versionName)) {
                 Log.i(TAG, "source=emoji_hook_unavailable reason=unsupported_version");
                 return;
             }
             Class<?> emoji = Class.forName("com.tencent.mm.smiley.g", false, loader);
             Class<?> notifications = Class.forName("com.tencent.mm.booter.notification.m0", false, loader);
-            Class<?> message = Class.forName("com.tencent.mm.storage.e9", false, loader);
+            Class<?> message = Class.forName("8.0.80".equals(build.versionName)
+                    ? "com.tencent.mm.storage.f9" : "com.tencent.mm.storage.e9", false, loader);
             if (!selectCandidate(build, selector, cache, emoji, notifications, message)) {
                 Log.i(TAG, "source=emoji_hook_unavailable reason=signature_no_match version="
                         + build.versionName + "/" + build.versionCode);

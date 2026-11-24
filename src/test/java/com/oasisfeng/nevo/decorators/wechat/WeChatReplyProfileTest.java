@@ -32,6 +32,7 @@ public class WeChatReplyProfileTest {
 	@Test public void mapsKnownVersionsToTheirProfiles() {
 		assertEquals("wechat-8.0.79/3182", WeChatReplyProfile.forPackage("8.0.79", 3182L).label);
 		assertEquals("wechat-8.0.79/3183", WeChatReplyProfile.forPackage("8.0.79", 3183L).label);
+		assertEquals("wechat-8.0.80/3200", WeChatReplyProfile.forPackage("8.0.80", 3200L).label);
 		assertEquals("wechat-8.0.79/3200", WeChatReplyProfile.forPackage("8.0.79", 3200L).label);
 		assertEquals("wechat-8.0.78", WeChatReplyProfile.forPackage("8.0.78", 3180L).label);
 		assertEquals("wechat-8.0.77", WeChatReplyProfile.forPackage("8.0.77", 3160L).label);

@@ -1,5 +1,9 @@
 # 通知内置表情映射与 Unicode 占位符调查
 
+## 微信 8.0.80 / 3200
+
+新版通知构建方法接收 storage.f9，直接调用 smiley.g.d(String)。完整描述符和验证范围见 [8.0.80 核对记录](wechat-8.0.80-findings.md)。
+
 ## 2026-10-28 同名新代码实验性门禁
 
 既有 8.0.79/3182 继续按版本名**且**版本码精确匹配；8.0.79/3183 等未列出代码只尝试 3182 的 Emoji 候选，不跨版本名借用。先完整检查 `com.tencent.mm.smiley.g.d(String): String` 和 `com.tencent.mm.booter.notification.m0.a(com.tencent.mm.storage.e9,long,boolean,boolean,String,int,String,String,Intent,boolean): void` 均为实例、非 abstract 方法，再对已核对的直接调用者取消优化；仅成功时装两处 hook，安装中途失败撤销句柄并保持惰性。回调每次读取微信通知增强与 `WeChatDecorator.preserve_emoji`，因此进程运行中打开/关闭仍生效。诊断 `emoji_hook_ready` 追加实际版本与 `exact`/`experimental`，失败记录原因/异常类型，不记录通知正文。

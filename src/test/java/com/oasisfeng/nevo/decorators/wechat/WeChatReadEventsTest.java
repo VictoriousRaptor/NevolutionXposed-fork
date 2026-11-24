@@ -12,9 +12,11 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class WeChatReadEventsTest {
-    @Test public void requiresExactNameAndOneOfTheTwoVerifiedCodes() {
+    @Test public void requiresExactNameAndCode() {
         assertTrue(WeChatReadEvents.supports("8.0.79", 3182));
         assertTrue(WeChatReadEvents.supports("8.0.79", 3183));
+        assertTrue(WeChatReadEvents.supports("8.0.80", 3200));
+        assertFalse(WeChatReadEvents.supports("8.0.80", 3183));
         assertFalse(WeChatReadEvents.supports("8.0.79", 3200));
         assertFalse(WeChatReadEvents.supports("8.0.79", 0));
         assertFalse(WeChatReadEvents.supports("8.0.78", 3183));
@@ -23,7 +25,7 @@ public class WeChatReadEventsTest {
     }
 
     @Test public void resolvesOnlyTheDeclaredPublicBooleanStringMethod() throws Exception {
-        Method method = WeChatReadEvents.resolve(name -> {
+        Method method = WeChatReadEvents.resolve("8.0.79", name -> {
             assertEquals("com.tencent.mm.storage.l4", name);
             return ConversationStorage.class;
         });
@@ -46,7 +48,7 @@ public class WeChatReadEventsTest {
 
     @Test public void missingClassCannotResolveAReadHook() {
         try {
-            WeChatReadEvents.resolve(name -> { throw new ClassNotFoundException("synthetic"); });
+            WeChatReadEvents.resolve("8.0.79", name -> { throw new ClassNotFoundException("synthetic"); });
             fail("Missing classes must not produce a hook target");
         } catch (ClassNotFoundException expected) {
             // The installer turns signature/class failures into an unavailable capability.
@@ -263,7 +265,7 @@ public class WeChatReadEventsTest {
     }
 
     private static Method target() throws Exception {
-        return WeChatReadEvents.resolve(name -> ConversationStorage.class);
+        return WeChatReadEvents.resolve("8.0.79", name -> ConversationStorage.class);
     }
 
     private static MethodHookParam call(String talker) {
@@ -275,7 +277,7 @@ public class WeChatReadEventsTest {
 
     private static void assertInvalid(Class<?> type) {
         try {
-            WeChatReadEvents.resolve(name -> type);
+            WeChatReadEvents.resolve("8.0.79", name -> type);
             fail("Accepted an unverified read descriptor: " + type.getSimpleName());
         } catch (ReflectiveOperationException | IllegalStateException expected) {
             // No fallback to a similar, inherited, or inaccessible method.

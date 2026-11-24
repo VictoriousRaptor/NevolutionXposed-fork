@@ -32,13 +32,13 @@ final class WeChatImageEvents {
 		}
 	}
 
-	private static MidImagePath resolveMidImage(ClassLoader loader, Resolved resolved) throws ReflectiveOperationException {
-		Class<?> descriptor = Class.forName("nw5.x", false, loader);
-		Class<?> kind = Class.forName("nw5.e0", false, loader);
+	private static MidImagePath resolveMidImage(ClassLoader loader, Resolved resolved, String resourcePackage) throws ReflectiveOperationException {
+		Class<?> descriptor = Class.forName(resourcePackage + ".x", false, loader);
+		Class<?> kind = Class.forName(resourcePackage + ".e0", false, loader);
 		if (!kind.isEnum()) throw new IllegalStateException("Invalid image kind");
 		Object mid = staticMethod(kind, "valueOf", kind, String.class).invoke(null, "MID_IMAGE");
 		Method create = staticMethod(descriptor, "a", descriptor, resolved.pathMethod.getParameterTypes()[0], kind);
-		Method path = staticMethod(Class.forName("nw5.y", false, loader), "g", String.class,
+		Method path = staticMethod(Class.forName(resourcePackage + ".y", false, loader), "g", String.class,
 				descriptor, Boolean.class, boolean.class, int.class, Object.class);
 		return event -> {
 			Object message = event.message.get();
@@ -69,8 +69,11 @@ final class WeChatImageEvents {
 			}
 			stage = "signature";
 			Resolved resolved = resolve(profile, name -> Class.forName(name, false, loader));
-			if ("8.0.79".equals(info.versionName) && info.versionCode == 3183) {
-				try { midImagePath = resolveMidImage(loader, resolved); }
+			String resourcePackage = null;
+			if ("8.0.79".equals(info.versionName) && info.versionCode == 3183) resourcePackage = "nw5";
+			if ("8.0.80".equals(info.versionName) && info.versionCode == 3200) resourcePackage = "pw5";
+			if (resourcePackage != null) {
+				try { midImagePath = resolveMidImage(loader, resolved, resourcePackage); }
 				catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
 					log("mid_path_unavailable", "type=" + failure.getClass().getSimpleName());
 				}

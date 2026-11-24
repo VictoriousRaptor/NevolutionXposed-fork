@@ -20,14 +20,23 @@ final class WeChatVoiceAdapter {
 
     record Profile(String account, String voice, String payload, String cacheGet,
                    String serverGet, String senderGet, String fileGet, String registry, String media,
-                   String mediaContract, String resource) {}
+                   String mediaContract, String resource, Layout layout) {}
+
+    record Layout(String message, String talker, String cacheStore, String record, String cacheFactory,
+                  String voiceStore, String voiceInfo, String voiceFactory, String path) {}
+
+    private static final Layout WX79 = new Layout("e9", "N0", "kb", "jb", "zj", "m1", "c1", "Bj", "bk");
+    private static final Layout WX80 = new Layout("f9", "P0", "lb", "kb", "Ij", "n1", "d1", "Kj", "kk");
 
     static Profile profile(String name, long code) {
+        if ("8.0.80".equals(name) && code == 3200)
+            return new Profile("c61.y1", "w81.w0", "in", "r1", "I0", "D0", "C0",
+                    "kj5", "pd0.b", "jq3.u0", "pw5", WX80);
         if (!"8.0.79".equals(name)) return null;
         if (code == 3183) return new Profile("l51.z1", "f81.v0", "en", "m1", "I0", "C0", "A0",
-                "kj5", "ed0.b", "kp3.u0", "nw5");
+                "kj5", "ed0.b", "kp3.u0", "nw5", WX79);
         if (code == 3200) return new Profile("l41.y1", "f71.v0", "fm", "P1", "H0", "z0", "u0",
-                "ni5", "ec0.b", "no3.u0", "pv5");
+                "ni5", "ec0.b", "no3.u0", "pv5", WX79);
         return null;
     }
 
@@ -172,25 +181,26 @@ final class WeChatVoiceAdapter {
                 infoLocal, infoServer, infoFile, infoTalker, infoTotal, infoSize, infoStatus;
         final Method audio;
         Resolved(Profile p, ClassLoader loader) throws ReflectiveOperationException {
-            message = Class.forName("com.tencent.mm.storage.e9", false, loader);
+            String storage = "com.tencent.mm.storage.";
+            message = Class.forName(storage + p.layout.message, false, loader);
             serverGetter = method(message, p.serverGet, long.class, false);
             local = method(message, "getMsgId", long.class, false);
-            talker = method(message, "N0", String.class, false);
+            talker = method(message, p.layout.talker, String.class, false);
             type = method(message, "getType", int.class, false);
             sender = method(message, p.senderGet, int.class, false);
             server = field(message, "field_msgSvrId", long.class);
             file = method(message, p.fileGet, String.class, false);
             account = method(Class.forName(p.account, false, loader), "u", String.class, true);
-            Class<?> store = Class.forName("com.tencent.mm.storage.kb", false, loader);
-            Class<?> record = Class.forName("com.tencent.mm.storage.jb", false, loader);
-            cache = method(Class.forName(p.voice, false, loader), "zj", store, true);
+            Class<?> store = Class.forName(storage + p.layout.cacheStore, false, loader);
+            Class<?> record = Class.forName(storage + p.layout.record, false, loader);
+            cache = method(Class.forName(p.voice, false, loader), p.layout.cacheFactory, store, true);
             cacheGet = method(store, p.cacheGet, record, false, String.class);
             cachedId = field(record, "field_msgId", long.class);
             cachedText = field(record, "field_content", String.class);
             String voicePackage = p.voice.substring(0, p.voice.lastIndexOf('.'));
-            Class<?> voiceStore = Class.forName(voicePackage + ".m1", false, loader);
-            Class<?> info = Class.forName(voicePackage + ".c1", false, loader);
-            voiceInfo = method(Class.forName(p.voice, false, loader), "Bj", voiceStore, true);
+            Class<?> voiceStore = Class.forName(voicePackage + "." + p.layout.voiceStore, false, loader);
+            Class<?> info = Class.forName(voicePackage + "." + p.layout.voiceInfo, false, loader);
+            voiceInfo = method(Class.forName(p.voice, false, loader), p.layout.voiceFactory, voiceStore, true);
             voiceInfoGet = method(voiceStore, p.cacheGet, info, false, String.class);
             infoFile = field(info, "b", String.class); infoTalker = field(info, "x", String.class);
             infoLocal = field(info, "m", long.class); infoServer = field(info, "e", long.class);
@@ -207,7 +217,7 @@ final class WeChatVoiceAdapter {
             if (!contract.isAssignableFrom(media)) throw new NoSuchMethodException("Media contract");
             service = method(Class.forName(p.registry + ".n0", false, loader), "c",
                     Class.forName(p.registry + ".m", false, loader), true, Class.class);
-            path = method(media, "bk", String.class, false, descriptorType, String.class, boolean.class);
+            path = method(media, p.layout.path, String.class, false, descriptorType, String.class, boolean.class);
             Class<?> vfs = Class.forName("com.tencent.mm.vfs.z6", false, loader);
             exists = method(vfs, "j", boolean.class, true, String.class);
             size = method(vfs, "k", long.class, true, String.class);

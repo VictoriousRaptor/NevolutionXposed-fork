@@ -21,17 +21,17 @@ final class WeChatReadEvents {
     interface NameResolver { Class<?> find(String name) throws ClassNotFoundException; }
     interface Hooker { Runnable hook(Method method, XC_MethodHook callback) throws Throwable; }
 
-    private static final String STORAGE = "com.tencent.mm.storage.l4";
+
     private static final class HookState { volatile boolean ready; }
     private volatile HookState installed;
     private volatile String lastHookFailureType;
 
     static boolean supports(String versionName, long versionCode) {
-        return "8.0.79".equals(versionName) && (versionCode == 3182 || versionCode == 3183);
+        return ("8.0.80".equals(versionName) && versionCode == 3200) || "8.0.79".equals(versionName) && (versionCode == 3182 || versionCode == 3183);
     }
 
-    static Method resolve(NameResolver resolver) throws ClassNotFoundException, NoSuchMethodException {
-        Class<?> owner = resolver.find(STORAGE);
+    static Method resolve(String versionName, NameResolver resolver) throws ClassNotFoundException, NoSuchMethodException {
+        Class<?> owner = resolver.find("8.0.80".equals(versionName) ? "com.tencent.mm.storage.m4" : "com.tencent.mm.storage.l4");
         Method method = owner.getDeclaredMethod("b0", String.class);
         validate(method);
         method.setAccessible(true);
@@ -49,7 +49,7 @@ final class WeChatReadEvents {
                 return;
             }
             stage = "signature";
-            Method method = resolve(name -> Class.forName(name, false, loader));
+            Method method = resolve(info.versionName, name -> Class.forName(name, false, loader));
             stage = "hook";
             if (!installResolved(method, listener, (target, callback) -> {
                 XposedInterface.HookHandle handle = XposedBridge.hookMethod(target, callback);
@@ -58,7 +58,7 @@ final class WeChatReadEvents {
                 log("read_hook_unavailable", "reason=hook type=" + lastHookFailureType);
                 return;
             }
-            log("read_hook_ready", "version=8.0.79 code=" + code + " match=exact");
+            log("read_hook_ready", "version=" + info.versionName + " code=" + code + " match=exact");
         } catch (Throwable failure) {
             XposedBridge.rethrowFrameworkError(failure);
             log("read_hook_unavailable", "reason=" + stage + " type=" + failure.getClass().getSimpleName());

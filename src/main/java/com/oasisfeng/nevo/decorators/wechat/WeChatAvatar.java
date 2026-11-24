@@ -11,7 +11,7 @@ final class WeChatAvatar {
     private Method lookup;
 
     static boolean supported(String name, long code) {
-        return "8.0.79".equals(name) && (code == 3182 || code == 3183);
+        return ("8.0.80".equals(name) && code == 3200) || "8.0.79".equals(name) && (code == 3182 || code == 3183);
     }
 
     static Method resolve(Class<?> owner, Class<?> bitmap) throws ReflectiveOperationException {

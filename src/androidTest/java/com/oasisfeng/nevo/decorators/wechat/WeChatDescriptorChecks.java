@@ -72,8 +72,8 @@ final class WeChatDescriptorChecks {
                 byte[].class, byte[].class, int.class, int.class);
 
         if (WeChatReadEvents.supports(info.versionName, info.versionCode)) {
-            Method read = WeChatReadEvents.resolve(v::type);
-            if (read.getDeclaringClass() != v.type("com.tencent.mm.storage.l4")
+            Method read = WeChatReadEvents.resolve(info.versionName, v::type);
+            if (read.getDeclaringClass() != v.type("8.0.80".equals(info.versionName) ? "com.tencent.mm.storage.m4" : "com.tencent.mm.storage.l4")
                     || !"b0".equals(read.getName()) || read.getReturnType() != boolean.class
                     || !java.util.Arrays.equals(read.getParameterTypes(), new Class<?>[]{String.class}))
                 throw new AssertionError("Independent read descriptor did not resolve");

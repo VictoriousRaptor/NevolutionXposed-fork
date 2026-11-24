@@ -6,7 +6,8 @@ import static org.junit.Assert.*;
 public class WeChatVoiceAdapterTest {
     @Test public void profilesRequireBothNameAndCodeAndKeepDifferentCacheSignatures() {
         assertNull(WeChatVoiceAdapter.profile("8.0.79", 3182));
-        assertNull(WeChatVoiceAdapter.profile("8.0.80", 3200));
+        assertNull(WeChatVoiceAdapter.profile("8.0.80", 3183));
+        assertEquals("r1", WeChatVoiceAdapter.profile("8.0.80", 3200).cacheGet());
         assertEquals("m1", WeChatVoiceAdapter.profile("8.0.79", 3183).cacheGet());
         assertEquals("P1", WeChatVoiceAdapter.profile("8.0.79", 3200).cacheGet());
     }

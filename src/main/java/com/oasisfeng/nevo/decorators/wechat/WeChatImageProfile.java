@@ -20,6 +20,13 @@ final class WeChatImageProfile {
     }
 
     static WeChatImageProfile forVersion(String name, long code) {
+        if ("8.0.80".equals(name) && code == 3200)
+            return new WeChatImageProfile("8.0.80/3200",
+                    new String[]{"gh5.z", "ks3.g", "dc0.l", "jh5.b", "y61.e", "rb0.d",
+                            "m71.k0", "z4", "com.tencent.mm.vfs.z6", "f"},
+                    new String[]{"com.tencent.mm.storage.f9", "P0", "D0", "I0"},
+                    new String[]{"fr0.j1", "fr0.b0", "lh5.k0", "x", "f", "kj5.n0", "kj5.m",
+                            "pb0.y", "ob0.e", "Kj", "pb0.x", "m71.j", "pb0.w"});
         if ("8.0.79".equals(name) && code == 3182)
             return new WeChatImageProfile("8.0.79/3182",
                     new String[]{"gh5.z", "lr3.f", "sb0.l", "jh5.b", "h61.e", "gb0.d",
@@ -65,7 +72,7 @@ final class WeChatImageProfile {
         return null;
     }
     static final java.util.List<WeChatProfileSelector.Candidate<WeChatImageProfile>> CANDIDATES =
-            java.util.Arrays.asList(candidate("8.0.79",3182), candidate("8.0.79",3183),
+            java.util.Arrays.asList(candidate("8.0.80",3200), candidate("8.0.79",3182), candidate("8.0.79",3183),
                     candidate("8.0.79",3200), candidate("8.0.72",3085),
                     candidate("8.0.77",3160), candidate("8.0.77",3141));
     private static WeChatProfileSelector.Candidate<WeChatImageProfile> candidate(String name, long code) {

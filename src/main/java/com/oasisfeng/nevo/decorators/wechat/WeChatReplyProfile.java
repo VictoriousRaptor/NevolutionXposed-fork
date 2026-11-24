@@ -57,6 +57,9 @@ public final class WeChatReplyProfile {
 	private static final WeChatReplyProfile RELEASE_8_0_79_3183 = new WeChatReplyProfile(
 			"wechat-8.0.79/3183", new String[] { RECEIVER_CLASS }, new String[] { "z2.s1" },
 			new String[] { "lt1.a" }, new String[] { "c", "d", "b" });
+	private static final WeChatReplyProfile RELEASE_8_0_80_3200 = new WeChatReplyProfile(
+			"wechat-8.0.80/3200", new String[] { RECEIVER_CLASS }, new String[] { "a3.s1" },
+			new String[] { "bu1.a" }, new String[] { "c", "d", "b" });
 	private static final WeChatReplyProfile RELEASE_8_0_79_3200 = new WeChatReplyProfile(
 			"wechat-8.0.79/3200", new String[] { RECEIVER_CLASS }, new String[] { "z2.s1" },
 			new String[] { "os1.a" }, new String[] { "c", "d", "b" });
@@ -103,6 +106,7 @@ public final class WeChatReplyProfile {
 	/** Only APK-verified profiles participate in same-name experimental matching. */
 	public static List<WeChatProfileSelector.Candidate<WeChatReplyProfile>> candidates() {
 		return Arrays.asList(
+				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_80_3200.label, "8.0.80", 3200L, RELEASE_8_0_80_3200),
 				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_79_3182.label, "8.0.79", 3182L, RELEASE_8_0_79_3182),
 				new WeChatProfileSelector.Candidate<>(RELEASE_8_0_79_3183.label, "8.0.79", 3183L,
 						RELEASE_8_0_79_3183, RELEASE_8_0_79_3182.label),
@@ -129,6 +133,7 @@ public final class WeChatReplyProfile {
 	}
 
 	public static WeChatReplyProfile forPackage(String versionName, long versionCode) {
+		if ("8.0.80".equals(versionName)) return versionCode == 3200L ? RELEASE_8_0_80_3200 : LEGACY;
 		if ("8.0.79".equals(versionName) && versionCode == 3182L) return RELEASE_8_0_79_3182;
 		if ("8.0.79".equals(versionName) && versionCode == 3183L) return RELEASE_8_0_79_3183;
 		if ("8.0.79".equals(versionName) && versionCode == 3200L) return RELEASE_8_0_79_3200;
