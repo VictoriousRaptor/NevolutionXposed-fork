@@ -46,7 +46,6 @@ import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.S;
 
 import com.oasisfeng.nevo.xposed.BuildConfig;
-import com.oasisfeng.nevo.xposed.R;
 
 import static com.oasisfeng.nevo.sdk.NevoDecoratorService.LocalDecorator.setActions;
 
@@ -111,7 +110,7 @@ class MessagingBuilder {
 			// A normalized snapshot already carries our proxy or its verified synthetic action.
 			if (n.extras.getBoolean(NotificationMessages.STORED)) return;
 			final Action fromActions = replyFromActions(id, n.actions);
-			reply = fromActions != null ? fromActions : buildSyntheticReplyAction(conversation, id, n);
+			reply = fromActions != null ? fromActions : buildSyntheticReplyAction(conversation, id, n, isSyntheticReplyAvailable());
 		}
 		if (reply != null) replaceReplyAction(n, reply);
 		logReply("reply_action", "notificationId=" + id + " ready=" + (reply != null)
@@ -157,10 +156,10 @@ class MessagingBuilder {
 	/** Keep the native target even when CarExtender omits its RemoteInput descriptor. */
 	private Action buildNativeReplyAction(int id, PendingIntent target, @Nullable RemoteInput source) {
 		RemoteInput.Builder input = new RemoteInput.Builder(source == null ? DEFAULT_AUTO_REPLY_RESULT_KEY : source.getResultKey())
-				.setAllowFreeFormInput(true).setLabel(actionReply);
+				.setAllowFreeFormInput(true).setLabel(REPLY_LABEL);
 		if (source != null) input.addExtras(source.getExtras());
 		RemoteInput replyInput = input.build();
-		Action.Builder action = new Action.Builder(null, actionReply, proxyDirectReply(id, target, replyInput, null))
+		Action.Builder action = new Action.Builder(null, REPLY_LABEL, proxyDirectReply(id, target, replyInput, null))
 				.addRemoteInput(replyInput).setAllowGeneratedReplies(true);
 		if (SDK_INT >= P) action.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
 		return action.build();
@@ -292,24 +291,8 @@ class MessagingBuilder {
 
 	MessagingBuilder(final Context context, final Controller controller) {
 		mContext = context;
-		// Try to load resources from module APK
-		Context moduleContext = null;
-		try {
-			moduleContext = context.createPackageContext(BuildConfig.APPLICATION_ID, Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY);
-		} catch (final Exception e) {
-			Log.w(TAG, "Failed to create module context: " + e.getMessage());
-		}
-		final Context pkgCtx = moduleContext != null ? moduleContext : context;
-		if (BuildConfig.DEBUG) Log.d(TAG, "pkgCtx=" + pkgCtx + " moduleContext=" + moduleContext);
-		actionReply = moduleString(moduleContext, R.string.action_reply, "回复");
 		mController = controller;
-		String selfName = "我";
-		if (moduleContext != null) {
-			try { selfName = moduleContext.getString(R.string.self_display_name); }
-			catch (android.content.res.Resources.NotFoundException ignored) {}
-		}
-		if (selfName == null || selfName.isEmpty()) selfName = "我";
-		mUserSelf = buildPersonFromProfile(selfName);
+		mUserSelf = new Person.Builder().setName("我").setIcon(loadSelfIcon()).build();
 
 		{
 			final IntentFilter filter = new IntentFilter(ACTION_REPLY); filter.addAction(ACTION_MENTION); filter.addDataScheme(SCHEME_ID);
@@ -320,20 +303,6 @@ class MessagingBuilder {
 			ContextCompat.registerReceiver(context, mSyntheticReplyReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
 		}
 
-	}
-
-	private static String moduleString(@Nullable Context context, int resource, String fallback) {
-		if (context == null) return fallback;
-		try {
-			String value = context.getString(resource);
-			return value.isEmpty() ? fallback : value;
-		} catch (android.content.res.Resources.NotFoundException ignored) {
-			return fallback;
-		}
-	}
-
-	private static Person buildPersonFromProfile(final String selfDisplayName) {
-		return new Person.Builder().setName(selfDisplayName).setIcon(loadSelfIcon()).build();
 	}
 
 	// M5: 头像缓存（进程内只解析一次；像素可复用，无需定时刷新）
@@ -454,9 +423,10 @@ class MessagingBuilder {
 		}
 	}
 
-	@Nullable private Action buildSyntheticReplyAction(final Conversation conversation, final int id, final Notification n) {
+	@Nullable Action buildSyntheticReplyAction(final Conversation conversation, final int id, final Notification n,
+			final boolean receiverVerified) {
 		if (!WeChatMessage.canUseSyntheticReply(n.tickerText, n.contentIntent != null && !TextUtils.isEmpty(conversation.key),
-				isSyntheticReplyAvailable())) {
+				receiverVerified)) {
 			logReply("action_synthetic_skipped", "notificationId=" + id + " reason=unverified_dispatch_target");
 			return null;
 		}
@@ -469,8 +439,8 @@ class MessagingBuilder {
 		final PendingIntent replyPendingIntent = PendingIntent.getBroadcast(mContext, id, replyIntent, pendingIntentFlags());
 		final RemoteInput.Builder remoteInputBuilder = new RemoteInput.Builder("synthetic_reply_result_key")
 				.setAllowFreeFormInput(true);
-		remoteInputBuilder.setLabel(actionReply);
-		final Action.Builder replyActionBuilder = new Action.Builder(null, actionReply, replyPendingIntent)
+		remoteInputBuilder.setLabel(REPLY_LABEL);
+		final Action.Builder replyActionBuilder = new Action.Builder(null, REPLY_LABEL, replyPendingIntent)
 				.addRemoteInput(remoteInputBuilder.build())
 				.setAllowGeneratedReplies(true);
 		if (SDK_INT >= P) replyActionBuilder.setSemanticAction(Action.SEMANTIC_ACTION_REPLY);
@@ -556,7 +526,7 @@ class MessagingBuilder {
 	}
 
 	private final Context mContext;
-	private final String actionReply;
+	private static final String REPLY_LABEL = "回复";
 	private final Controller mController;
 	private final Person mUserSelf;
 	private static final String TAG = WeChatDecorator.TAG;

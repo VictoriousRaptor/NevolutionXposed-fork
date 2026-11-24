@@ -27,12 +27,7 @@
 	<string name="decorator_wechat_image_wait_title">Image file wait time (milliseconds)</string>
 	<string name="decorator_wechat_image_wait_summary">Wait up to %1$d ms; range 100–30000, default 1500. Publish sooner when ready; on timeout keep the best image or original notification. Restart WeChat after changing.</string>
 	<string name="decorator_wechat_image_wait_range">Enter an integer from %1$d to %2$d (milliseconds)</string>
-	<string name="self_display_name">我</string>
-	<string name="action_reply">Reply</string>
 
-	<string name="channel_message">New Message</string>
-	<string name="channel_group_message">New Group Message</string>
-	<string name="channel_misc">Other Notification</string>
 
     <string name="decorator_wechat_voice_transcribe_title">Automatically transcribe voice messages</string>
     <string name="decorator_wechat_voice_transcribe_description">Automatically transcribe new voice messages using WeChat’s native service. May use the network. Restart the WeChat process after changing this setting.</string>

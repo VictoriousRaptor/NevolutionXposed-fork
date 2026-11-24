@@ -28,9 +28,9 @@ public abstract class NevoDecoratorService {
 
 	private static final String TAG = "NevoDecoratorService";
 
-	// Application/package contexts are process-scoped and never point to an Activity.
+	// The application context is process-scoped.
 	@SuppressLint("StaticFieldLeak")
-	private static volatile Context appContext, packageContext;
+	private static volatile Context appContext;
 
 	public static Context getAppContext() {
 		return appContext;
@@ -39,19 +39,6 @@ public abstract class NevoDecoratorService {
 	public static void setAppContext(Context context) {
 		Context application = context == null ? null : context.getApplicationContext();
 		appContext = application != null ? application : context;
-		packageContext = null;
-	}
-
-	protected static Context getPackageContext() {
-		if (packageContext == null)
-			packageContext = getPackageContext(BuildConfig.APPLICATION_ID);
-		return packageContext;
-	}
-
-	protected static Context getPackageContext(String packageName) {
-		try {
-			return getAppContext().createPackageContext(packageName, Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY);
-		} catch (PackageManager.NameNotFoundException ig) { return null; }
 	}
 
 	protected static PackageManager getPackageManager() {

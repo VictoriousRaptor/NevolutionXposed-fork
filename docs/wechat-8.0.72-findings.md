@@ -170,12 +170,12 @@ NX_REPLY stage=profile_ready version=8.0.72/3085 profile=wechat-8.0.72
   helper=z2.s1 gates=dn1.a[f, h, c] usable=true
 ```
 
-One unrelated warning appears at WeChat startup:
+This historical build logged a warning at WeChat startup:
 `WeChatDecorator: Failed to create module context: Application package
 com.oasisfeng.nevo.xposed not found`, followed by a NullPointerException in
 `NevoDecoratorService.getString()` from `WeChatDecorator$Local.onCreate`. It
 concerns the decorator's own module context, not the reply dispatch, and the
-decorator still reports `disabled false`. Watch it if the reply test regresses.
+decorator still reports `disabled false`. The module string lookup was removed after 3.5.1.
 
 ## Second blocker: the synthetic path never had `key_username`
 

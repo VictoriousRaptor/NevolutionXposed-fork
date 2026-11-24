@@ -41,12 +41,7 @@
 	<string name="decorator_wechat_image_wait_title">图片文件等待时间（毫秒）</string>
 	<string name="decorator_wechat_image_wait_summary">最多等待 %1$d 毫秒；范围 100–30000，默认 1500。图片提前就绪即显示，超时保留最佳可用图片或原通知。修改后需重启微信进程。</string>
 	<string name="decorator_wechat_image_wait_range">请输入 %1$d–%2$d 之间的整数（毫秒）</string>
-	<string name="self_display_name">我</string>
-	<string name="action_reply">回复</string>
 
-	<string name="channel_message">新消息通知</string>
-	<string name="channel_group_message">新群组消息通知</string>
-	<string name="channel_misc">其它通知</string>
 
     <string name="decorator_wechat_voice_transcribe_title">语音自动转文字</string>
     <string name="decorator_wechat_voice_transcribe_description">自动将新收到的语音转为文字，使用微信原生服务，可能联网。修改后重启微信进程生效。</string>

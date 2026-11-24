@@ -53,7 +53,6 @@ import com.oasisfeng.nevo.sdk.Decorating;
 import com.oasisfeng.nevo.sdk.HookSupport;
 import com.oasisfeng.nevo.sdk.NevoDecoratorService;
 import com.oasisfeng.nevo.xposed.BuildConfig;
-import com.oasisfeng.nevo.xposed.R;
 
 /**
  * Bring state-of-art notification experience to WeChat.
@@ -157,7 +156,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 		private boolean mActive;
 		private ReplyTarget postingReplyCompletion;
 		private boolean cancelAllObserved;
-		private String channelGroupMessage, channelMessage, channelMisc;
 		private boolean mRoundResetReceiverRegistered;
 		/** Resolved once per process; the installed WeChat build never changes while it runs. */
 		private Boolean mWeChatTargetingO;
@@ -196,9 +194,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 						new IntentFilter(WeChatNotificationRemoval.ACTION_RESET_ROUND), ContextCompat.RECEIVER_EXPORTED);
 				mRoundResetReceiverRegistered = true;
 			}
-			channelGroupMessage = moduleString(R.string.channel_group_message, "群聊消息");
-			channelMessage = moduleString(R.string.channel_message, "新消息");
-			channelMisc = moduleString(R.string.channel_misc, "其他通知");
 			imageLog("decorator_ready", "disabled=" + isDisabled() + " image_preview=" + mImagePreviewEnabled
 					+ " image_large=" + mImagePreviewLargeEnabled + " image_wait_ms=" + ImagePreviewPolicy.waitMillis(imageWait));
 		}
@@ -554,13 +549,6 @@ public class WeChatDecorator extends NevoDecoratorService {
 			}
 		}
 
-		private String moduleString(int resource, String fallback) {
-			Context context = getPackageContext();
-			if (context == null) return fallback;
-			try { return context.getString(resource); }
-			catch (android.content.res.Resources.NotFoundException ignored) { return fallback; }
-		}
-
 		private static boolean rejectsSnapshot(Conversation current, Notification notification) {
 			Bundle extras = notification.extras;
 			return extras.getBoolean(NotificationMessages.STORED) && (!current.round.retains(
@@ -785,13 +773,13 @@ public class WeChatDecorator extends NevoDecoratorService {
 				if (channel != null) return Decorating.Processed;
 				switch (channel_id) {
 					case CHANNEL_GROUP_CONVERSATION:
-					channel = makeChannel(CHANNEL_GROUP_CONVERSATION, channelGroupMessage, false);
+					channel = makeChannel(CHANNEL_GROUP_CONVERSATION, "新群组消息通知", false);
 					break;
 					case CHANNEL_MESSAGE:
-					channel = migrate(nm, OLD_CHANNEL_MESSAGE,	CHANNEL_MESSAGE,	channelMessage, false);
+					channel = migrate(nm, OLD_CHANNEL_MESSAGE,	CHANNEL_MESSAGE,	"新消息通知", false);
 					break;
 					case CHANNEL_MISC:
-					channel = migrate(nm, OLD_CHANNEL_MISC,		CHANNEL_MISC,		channelMisc, true);
+					channel = migrate(nm, OLD_CHANNEL_MISC,		CHANNEL_MISC,		"其它通知", true);
 					break;
 				}
 				if (BuildConfig.DEBUG) Log.d(TAG, channel_id + " " + channel);
@@ -825,9 +813,9 @@ public class WeChatDecorator extends NevoDecoratorService {
 		}
 
 		private NotificationChannel migrate(NotificationManager nm, final String old_id, final String new_id, final String new_name, final boolean silent) {
-			final NotificationChannel channel_message = nm.getNotificationChannel(old_id);
+			final NotificationChannel oldChannel = nm.getNotificationChannel(old_id);
 			nm.deleteNotificationChannel(old_id);
-			if (channel_message != null) return cloneChannel(channel_message, new_id, new_name);
+			if (oldChannel != null) return cloneChannel(oldChannel, new_id, new_name);
 			else return makeChannel(new_id, new_name, silent);
 		}
 

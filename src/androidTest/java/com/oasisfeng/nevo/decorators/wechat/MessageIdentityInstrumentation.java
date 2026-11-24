@@ -79,7 +79,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 "controllerCapturedTargetPreservesNewer", "controllerWithoutActiveNotification", "dismissUsesNativeRead",
                 "nativeReplyReadBeforeFailure", "syntheticReplyReadBeforeFailure", "nativeReplyDoesNotReuseReadTarget", "replyCompletionPresentation", "replyCompletionPublicationGuard",
                 "classifiesRawFirstMessages", "classificationSurvivesNextMessage", "lateTalkerIsIsolated",
-                "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyInputsUseLocalizedReplyLabel",
+                "legacyGroupGuessIsRepaired", "nativeGroupEvidence", "replyActionsAndInputsUseFixedReplyLabel",
                 "replyActionSurvivesArchiveRemoval", "recallSequence", "recallWithoutIdentity", "recallSameTextAndTime",
                 "recallLegacySelfAndRoundMetadata", "recallReusedNotificationId", "emptyRecallStaysSuppressed",
                 "replyEligibility", "nativeReplyForwarding", "replyAlertsAfterIncoming",
@@ -134,7 +134,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 () -> ConversationRoundInstrumentation.replyCompletionPublicationGuard(getTargetContext()),
                 this::classifiesRawFirstMessages, this::classificationSurvivesNextMessage, this::lateTalkerIsIsolated,
                 this::legacyGroupGuessIsRepaired, this::nativeGroupEvidence,
-                this::replyInputsUseLocalizedReplyLabel,
+                this::replyActionsAndInputsUseFixedReplyLabel,
                 () -> com.oasisfeng.nevo.sdk.NotificationArchiveInstrumentation.replyActionSurvivesRemovalAndRebuild(getTargetContext()),
                 () -> Plan123Instrumentation.recallSequence(getTargetContext()),
                 () -> Plan123Instrumentation.recallWithoutIdentity(getTargetContext()),
@@ -756,11 +756,9 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
         check(classified(manager, noFlag).isGroupChat(), "missing flag treated as explicit direct");
     }
 
-    private void replyInputsUseLocalizedReplyLabel() {
+    private void replyActionsAndInputsUseFixedReplyLabel() {
         Context context = getTargetContext();
-        int replyResource = context.getResources().getIdentifier("action_reply", "string", context.getPackageName());
-        check(replyResource != 0, "action_reply resource not found");
-        String expected = context.getString(replyResource);
+        String expected = "回复";
         MessagingBuilder builder = new MessagingBuilder(context, new MessagingBuilder.Controller() {});
         try {
             PendingIntent reply = PendingIntent.getBroadcast(context, 501,
@@ -786,6 +784,14 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
             check(builder.buildConversation(actionPeer, 2, fromActions, Collections.emptyList()) != null,
                     "actions reply was not built");
             checkReplyLabel(fromActions, expected);
+
+            Notification synthetic = notification("hello", 100);
+            synthetic.tickerText = "Alice: hello";
+            synthetic.contentIntent = reply;
+            Notification.Action syntheticAction = builder.buildSyntheticReplyAction(actionPeer, 5, synthetic, true);
+            check(syntheticAction != null, "synthetic reply action was not built");
+            synthetic.actions = new Notification.Action[]{ syntheticAction };
+            checkReplyLabel(synthetic, expected);
 
             Notification.CarExtender.UnreadConversation fallbackConversation =
                     new Notification.CarExtender.Builder("Alice")
@@ -821,6 +827,7 @@ public final class MessageIdentityInstrumentation extends Instrumentation {
                 for (RemoteInput input : inputs) {
                     if (!input.getAllowFreeFormInput()) continue;
                     found = true;
+                    check(expected.contentEquals(action.title), "reply action title was " + action.title);
                     check(input.getLabel() != null && expected.contentEquals(input.getLabel()),
                             "reply label was " + input.getLabel() + ", expected " + expected);
                 }
